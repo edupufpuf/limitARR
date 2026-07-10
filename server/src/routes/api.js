@@ -1,0 +1,355 @@
+import { Router } from 'express';
+import { db } from '../db.js';
+import { requireAuth } from '../middleware/auth.js';
+import { needsSetup, setPassword, checkPassword } from '../auth.js';
+import { getUsers, getMovieLibraries } from '../services/tautulli.js';
+import { listPendingMovieRequests, getSeerrUsers } from '../services/seerr.js';
+import { getSettingsForDisplay, updateSettings } from '../settings.js';
+import { resetQuota, importSeerrHistory, refreshQuotaCache } from '../quota.js';
+import { matchByEmailOrUsername } from '../userMatch.js';
+import {
+  getBotTokenForDisplay,
+  setBotToken,
+  sendMessage,
+  getInboxMessages,
+  getNotifyTarget,
+  setNotifyTarget,
+} from '../services/telegram.js';
+
+export const router = Router();
+
+// Express 4 no captura rechazos de promesas en handlers async: uno sin try/catch
+// (p.ej. Seerr/Tautulli devolviendo un error) tumba el proceso entero (Node 20
+// termina el proceso ante un unhandledRejection). Este wrapper lo reenvía al
+// error handler de index.js en vez de dejarlo escapar.
+const ah = (fn) => (req, res, next) => fn(req, res, next).catch(next);
+
+// --- Auth ---
+
+router.post('/auth/setup', (req, res) => {
+  if (!needsSetup()) return res.status(409).json({ error: 'already_configured' });
+  const { password } = req.body || {};
+  if (!password || password.length < 8) {
+    return res.status(400).json({ error: 'password_too_short' });
+  }
+  setPassword(password);
+  req.session.authed = true;
+  res.json({ ok: true });
+});
+
+router.post('/auth/login', (req, res) => {
+  if (needsSetup()) return res.status(409).json({ error: 'needs_setup' });
+  const { password } = req.body || {};
+  if (!checkPassword(password)) {
+    return res.status(401).json({ error: 'invalid_password' });
+  }
+  req.session.authed = true;
+  res.json({ ok: true });
+});
+
+router.post('/auth/logout', (req, res) => {
+  req.session = null;
+  res.json({ ok: true });
+});
+
+router.get('/auth/me', (req, res) => {
+  res.json({ authed: Boolean(req.session?.authed), needsSetup: needsSetup() });
+});
+
+router.use(requireAuth);
+
+router.post('/auth/change-password', (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+  if (!checkPassword(currentPassword)) {
+    return res.status(401).json({ error: 'invalid_current_password' });
+  }
+  if (!newPassword || newPassword.length < 8) {
+    return res.status(400).json({ error: 'password_too_short' });
+  }
+  setPassword(newPassword);
+  res.json({ ok: true });
+});
+
+// --- Settings (Seerr/Tautulli connection) ---
+
+router.get('/settings', (req, res) => {
+  res.json(getSettingsForDisplay());
+});
+
+router.put('/settings', (req, res) => {
+  const { seerr_url, seerr_api_key, tautulli_url, tautulli_api_key } = req.body || {};
+  updateSettings({ seerr_url, seerr_api_key, tautulli_url, tautulli_api_key });
+  res.json(getSettingsForDisplay());
+});
+
+router.post('/settings/test', async (req, res) => {
+  const result = {};
+  try {
+    await getUsers();
+    result.tautulli = { ok: true };
+  } catch (err) {
+    result.tautulli = { ok: false, error: err.message };
+  }
+  try {
+    await listPendingMovieRequests();
+    result.seerr = { ok: true };
+  } catch (err) {
+    result.seerr = { ok: false, error: err.message };
+  }
+  res.json(result);
+});
+
+// --- Libraries ---
+
+router.get('/libraries', (req, res) => {
+  res.json(db.prepare('SELECT * FROM libraries ORDER BY name').all());
+});
+
+// Pull movie libraries from Tautulli and insert any not yet configured, with sane defaults.
+router.post('/libraries/sync', ah(async (req, res) => {
+  const discovered = await getMovieLibraries();
+  const existingIds = new Set(db.prepare('SELECT id FROM libraries').all().map((r) => r.id));
+
+  const insert = db.prepare(`
+    INSERT INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (?, ?, 'movie', ?, 1, 4)
+  `);
+
+  let inserted = 0;
+  for (const lib of discovered) {
+    if (existingIds.has(lib.id)) continue;
+    const kind = /4k/i.test(lib.name) ? '4k' : 'standard';
+    insert.run(lib.id, lib.name, kind);
+    inserted += 1;
+  }
+  res.json({ discovered: discovered.length, inserted });
+}));
+
+router.put('/libraries/:id', (req, res) => {
+  const { kind, enabled, defaultLimit } = req.body || {};
+  const result = db
+    .prepare('UPDATE libraries SET kind = ?, enabled = ?, default_limit = ? WHERE id = ?')
+    .run(kind, enabled ? 1 : 0, defaultLimit, req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: 'not_found' });
+  res.json({ ok: true });
+});
+
+// --- Users (passthrough from Tautulli, for admin dropdowns) ---
+
+router.get('/users', ah(async (req, res) => {
+  res.json(await getUsers());
+}));
+
+// --- Overrides ---
+
+router.get('/overrides', (req, res) => {
+  res.json(db.prepare('SELECT * FROM overrides').all());
+});
+
+router.put('/overrides/:userId/:libraryId', ah(async (req, res) => {
+  const { userId, libraryId } = req.params;
+  const { limitOverride, note } = req.body || {};
+  db.prepare(`
+    INSERT INTO overrides (user_id, library_id, limit_override, note, updated_at)
+    VALUES (?, ?, ?, ?, datetime('now'))
+    ON CONFLICT (user_id, library_id) DO UPDATE SET
+      limit_override = excluded.limit_override,
+      note = excluded.note,
+      updated_at = excluded.updated_at
+  `).run(userId, libraryId, limitOverride, note || null);
+  await refreshQuotaCache(userId, libraryId);
+  res.json({ ok: true });
+}));
+
+router.delete('/overrides/:userId/:libraryId', ah(async (req, res) => {
+  const { userId, libraryId } = req.params;
+  db.prepare('DELETE FROM overrides WHERE user_id = ? AND library_id = ?').run(userId, libraryId);
+  await refreshQuotaCache(userId, libraryId);
+  res.json({ ok: true });
+}));
+
+// Fija el mismo límite a todos los usuarios de Tautulli para una biblioteca de golpe.
+router.post('/overrides/bulk', ah(async (req, res) => {
+  const { libraryId, limitOverride, note } = req.body || {};
+  if (!libraryId || limitOverride === undefined) {
+    return res.status(400).json({ error: 'libraryId_and_limitOverride_required' });
+  }
+
+  const users = await getUsers();
+  const upsert = db.prepare(`
+    INSERT INTO overrides (user_id, library_id, limit_override, note, updated_at)
+    VALUES (?, ?, ?, ?, datetime('now'))
+    ON CONFLICT (user_id, library_id) DO UPDATE SET
+      limit_override = excluded.limit_override,
+      note = excluded.note,
+      updated_at = excluded.updated_at
+  `);
+  for (const user of users) {
+    upsert.run(user.id, libraryId, limitOverride, note || null);
+    await refreshQuotaCache(user.id, libraryId);
+  }
+  res.json({ ok: true, applied: users.length });
+}));
+
+// --- Quota ---
+
+// Agrupado por usuario, con avatar de Seerr, para las tarjetas del panel.
+router.get('/quota', ah(async (req, res) => {
+  const rows = db.prepare('SELECT * FROM quota_cache').all();
+  const [tautulliUsers, seerrUsers] = await Promise.all([getUsers(), getSeerrUsers()]);
+  const tautulliUserMap = new Map(tautulliUsers.map((u) => [u.id, u]));
+  const libraries = db.prepare('SELECT id, name FROM libraries').all();
+  const libraryMap = new Map(libraries.map((l) => [l.id, l.name]));
+
+  function findAvatar(tautulliUser) {
+    if (!tautulliUser) return null;
+    return matchByEmailOrUsername(seerrUsers, tautulliUser)?.avatar ?? null;
+  }
+
+  const byUser = new Map();
+  for (const row of rows) {
+    if (!byUser.has(row.user_id)) {
+      const tautulliUser = tautulliUserMap.get(row.user_id);
+      byUser.set(row.user_id, {
+        userId: row.user_id,
+        username: tautulliUser?.username ?? `user#${row.user_id}`,
+        avatar: findAvatar(tautulliUser),
+        libraries: [],
+      });
+    }
+    byUser.get(row.user_id).libraries.push({
+      libraryId: row.library_id,
+      libraryName: libraryMap.get(row.library_id) ?? `#${row.library_id}`,
+      balance: row.balance,
+      limitApplied: row.limit_applied,
+      outstanding: row.outstanding,
+      computedAt: row.computed_at,
+    });
+  }
+  res.json([...byUser.values()]);
+}));
+
+// Rellena decisions_log con solicitudes aprobadas en Seerr que limitARR no vio
+// (de antes de instalarlo, o aprobadas a mano en Seerr). Idempotente.
+router.post('/quota/import-seerr-history', ah(async (req, res) => {
+  const imported = await importSeerrHistory();
+  res.json({ ok: true, imported });
+}));
+
+// Force-compute quota for every user x enabled library, so the panel shows
+// something even before anyone has made a request through Seerr.
+router.post('/quota/recalculate', ah(async (req, res) => {
+  const users = await getUsers();
+  const libraries = db.prepare('SELECT * FROM libraries WHERE enabled = 1').all();
+
+  for (const user of users) {
+    for (const library of libraries) {
+      await refreshQuotaCache(user.id, library.id);
+    }
+  }
+  res.json({ ok: true, users: users.length, libraries: libraries.length });
+}));
+
+// Marca como "resueltas" las pendientes actuales de un usuario+biblioteca (no
+// cuentan más contra su cupo), y refresca la caché al momento para el panel.
+router.post('/quota/reset/:userId/:libraryId', ah(async (req, res) => {
+  const { userId, libraryId } = req.params;
+  resetQuota(userId, libraryId);
+  const result = await refreshQuotaCache(userId, libraryId);
+  res.json({ ok: true, ...result });
+}));
+
+// --- Decisions log ---
+
+router.get('/decisions', (req, res) => {
+  const rows = db
+    .prepare('SELECT * FROM decisions_log ORDER BY created_at DESC LIMIT 200')
+    .all();
+  res.json(rows);
+});
+
+// --- Telegram notifications ---
+
+router.get('/notifications/settings', (req, res) => {
+  res.json({ ...getBotTokenForDisplay(), ...getNotifyTarget() });
+});
+
+router.put('/notifications/settings', (req, res) => {
+  const { botToken, mode, groupChatId, groupTopicId } = req.body || {};
+  if (typeof botToken === 'string' && botToken.trim() !== '') setBotToken(botToken);
+  if (mode || groupChatId !== undefined || groupTopicId !== undefined) {
+    setNotifyTarget({ mode, groupChatId, groupTopicId });
+  }
+  res.json({ ...getBotTokenForDisplay(), ...getNotifyTarget() });
+});
+
+router.get('/notifications/links', ah(async (req, res) => {
+  const rows = db.prepare('SELECT * FROM telegram_links').all();
+  const users = await getUsers();
+  const userMap = new Map(users.map((u) => [u.id, u]));
+  res.json(
+    rows.map((r) => ({ ...r, username: userMap.get(r.user_id)?.username ?? `user#${r.user_id}` }))
+  );
+}));
+
+router.put('/notifications/links/:userId', (req, res) => {
+  const { chatId, label } = req.body || {};
+  if (!chatId) return res.status(400).json({ error: 'chatId_required' });
+  db.prepare(`
+    INSERT INTO telegram_links (user_id, chat_id, label, linked_at)
+    VALUES (?, ?, ?, datetime('now'))
+    ON CONFLICT (user_id) DO UPDATE SET
+      chat_id = excluded.chat_id,
+      label = excluded.label,
+      linked_at = excluded.linked_at
+  `).run(req.params.userId, String(chatId), label || null);
+  res.json({ ok: true });
+});
+
+router.delete('/notifications/links/:userId', (req, res) => {
+  db.prepare('DELETE FROM telegram_links WHERE user_id = ?').run(req.params.userId);
+  res.json({ ok: true });
+});
+
+// Lee los últimos mensajes que le han llegado al bot (capturados en background
+// por el poller), excluyendo chat_ids ya vinculados, para que el admin pueda
+// elegir quién es quién sin llamar a Telegram en vivo desde el panel.
+router.get('/notifications/discover', (req, res) => {
+  const linkedChatIds = new Set(
+    db.prepare('SELECT chat_id FROM telegram_links').all().map((r) => r.chat_id)
+  );
+  const messages = getInboxMessages()
+    .filter((m) => !linkedChatIds.has(m.chat_id))
+    .map((m) => ({
+      chatId: m.chat_id,
+      chatType: m.chat_type,
+      chatTitle: m.chat_title,
+      messageThreadId: m.message_thread_id,
+      username: m.username,
+      firstName: m.first_name,
+      text: m.text,
+    }));
+  res.json(messages);
+});
+
+router.post('/notifications/test/:userId', async (req, res) => {
+  const link = db.prepare('SELECT chat_id FROM telegram_links WHERE user_id = ?').get(req.params.userId);
+  if (!link) return res.status(404).json({ error: 'not_linked' });
+  try {
+    await sendMessage(link.chat_id, '✅ limitARR: notificaciones conectadas correctamente.');
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+router.post('/notifications/test-group', async (req, res) => {
+  const { groupChatId, groupTopicId } = getNotifyTarget();
+  if (!groupChatId) return res.status(404).json({ error: 'group_not_configured' });
+  try {
+    await sendMessage(groupChatId, '✅ limitARR: notificaciones de grupo conectadas correctamente.', { messageThreadId: groupTopicId });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});

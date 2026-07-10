@@ -1,0 +1,20 @@
+# Añadir este bloque a /home/edupufpuf/docker/docker-compose.yml (mismo nivel que seerr/tautulli).
+# Reutiliza SEERR_API_KEY y TAUTULLI_API_KEY ya movidas al .env de ese host.
+# Añade ADMIN_PASSWORD y SESSION_SECRET al mismo .env antes de levantarlo.
+
+  limitarr:
+    build: ./limitarr   # o imagen publicada si se sube a un registry
+    container_name: limitarr
+    environment:
+      - SEERR_URL=http://seerr:5055
+      - SEERR_API_KEY=${OVERSEERR_API_KEY}
+      - TAUTULLI_URL=http://tautulli:8181
+      - TAUTULLI_API_KEY=${TAUTULLI_API_KEY}
+      - ADMIN_PASSWORD=${LIMITARR_ADMIN_PASSWORD}
+      - SESSION_SECRET=${LIMITARR_SESSION_SECRET}
+      - TZ=Europe/Madrid
+    volumes:
+      - ./limitarr-data:/data
+    ports:
+      - 5150:5150
+    restart: unless-stopped
