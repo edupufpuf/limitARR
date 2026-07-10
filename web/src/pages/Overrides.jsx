@@ -148,32 +148,34 @@ export default function Overrides() {
         </button>
       </form>
 
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-gray-400 border-b border-bg-700">
-            <th className="py-2 pr-4">Usuario</th>
-            <th className="py-2 pr-4">Biblioteca</th>
-            <th className="py-2 pr-4">Límite</th>
-            <th className="py-2 pr-4">Nota</th>
-            <th className="py-2 pr-4"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {overrides.map((o) => (
-            <tr key={`${o.user_id}-${o.library_id}`} className="border-b border-bg-800">
-              <td className="py-2 pr-4">{userName(o.user_id)}</td>
-              <td className="py-2 pr-4">{libName(o.library_id)}</td>
-              <td className="py-2 pr-4">{o.limit_override}</td>
-              <td className="py-2 pr-4 text-gray-400">{o.note}</td>
-              <td className="py-2 pr-4">
-                <button onClick={() => remove(o.user_id, o.library_id)} className="text-accent-400 text-xs">
-                  eliminar
-                </button>
-              </td>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-gray-400 border-b border-bg-700">
+              <th className="py-2 pr-4">Usuario</th>
+              <th className="py-2 pr-4">Biblioteca</th>
+              <th className="py-2 pr-4">Límite</th>
+              <th className="py-2 pr-4">Nota</th>
+              <th className="py-2 pr-4"></th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {overrides.map((o) => (
+              <tr key={`${o.user_id}-${o.library_id}`} className="border-b border-bg-800">
+                <td className="py-2 pr-4 whitespace-nowrap">{userName(o.user_id)}</td>
+                <td className="py-2 pr-4 whitespace-nowrap">{libName(o.library_id)}</td>
+                <td className="py-2 pr-4">{o.limit_override}</td>
+                <td className="py-2 pr-4 text-gray-400">{o.note}</td>
+                <td className="py-2 pr-4">
+                  <button onClick={() => remove(o.user_id, o.library_id)} className="text-accent-400 text-xs">
+                    eliminar
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

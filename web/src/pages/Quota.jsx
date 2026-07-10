@@ -110,9 +110,9 @@ export default function Quota() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <h2 className="text-xl font-semibold">Cupo por usuario</h2>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           {importResult && <span className="text-xs text-gray-500">{importResult}</span>}
           <button
             onClick={importHistory}

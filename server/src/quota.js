@@ -7,7 +7,18 @@ import { matchByEmailOrUsername } from './userMatch.js';
 // Tautulli's own "watched" threshold; below this a play doesn't free up quota.
 const WATCHED_THRESHOLD = 85;
 
-const normalize = (title) => (title || '').trim().toLowerCase();
+// El único enlace entre "aprobada en Seerr" y "vista en Tautulli" es el título en
+// texto, así que hay que ser tolerante con acentos, mayúsculas, puntuación y
+// espacios — sin esto, "Río" vs "Rio" o "Amélie" vs "Amelie" no encontraban match.
+export function normalize(title) {
+  return (title || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // quita acentos/diacriticos (tras NFD)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ') // puntuación/símbolos -> espacio
+    .trim()
+    .replace(/\s+/g, ' ');
+}
 
 const getOverride = db.prepare('SELECT * FROM overrides WHERE user_id = ? AND library_id = ?');
 const getLibrary = db.prepare('SELECT * FROM libraries WHERE id = ?');
@@ -46,23 +57,12 @@ function toSqliteDateTime(isoString) {
   return isoString.replace('T', ' ').replace(/\.\d{3}Z$/, '');
 }
 
-// balance = limit - (peliculas aprobadas para este usuario en esta biblioteca que aun no ha visto).
-// Se recalcula siempre en vivo a partir del historial de Tautulli y del propio log de decisiones,
-// así que nunca se desincroniza: no hay contador mutable que decrementar/incrementar a mano.
-// Nunca se muestra negativo: por debajo de 0 se queda en 0 (el bloqueo ya lo gestiona balance < 1).
-export async function getBalance(userId, libraryId) {
-  const library = getLibrary.get(libraryId);
-  const override = getOverride.get(userId, libraryId);
-  const limit = override ? override.limit_override : library.default_limit;
-  const resetAt = getResetAt.get(userId, libraryId)?.reset_at ?? '0000-01-01';
-
-  const history = await getUserMovieHistory(userId, libraryId);
-  const watchedTitles = new Set(
-    history.filter((h) => h.percent >= WATCHED_THRESHOLD).map((h) => normalize(h.title))
-  );
-
-  const approved = getApprovedTitles.all(userId, libraryId, resetAt);
-  const pending = approved.filter((r) => !watchedTitles.has(normalize(r.media_title)));
+// Parte pura del cálculo (sin DB ni red), para poder testearla sin mockear
+// Tautulli/Seerr: dado el límite ya resuelto, las filas aprobadas y el set de
+// títulos vistos, decide cuántas están pendientes y cuál es el saldo. Nunca
+// negativo: por debajo de 0 se queda en 0 (el bloqueo ya lo gestiona balance < 1).
+export function computeBalance(limit, approvedRows, watchedTitles) {
+  const pending = approvedRows.filter((r) => !watchedTitles.has(normalize(r.media_title)));
   const outstanding = pending.length;
 
   const seenTitles = new Set();
@@ -80,6 +80,24 @@ export async function getBalance(userId, libraryId) {
     balance: Math.max(0, limit - outstanding),
     pendingItems,
   };
+}
+
+// balance = limit - (peliculas aprobadas para este usuario en esta biblioteca que aun no ha visto).
+// Se recalcula siempre en vivo a partir del historial de Tautulli y del propio log de decisiones,
+// así que nunca se desincroniza: no hay contador mutable que decrementar/incrementar a mano.
+export async function getBalance(userId, libraryId) {
+  const library = getLibrary.get(libraryId);
+  const override = getOverride.get(userId, libraryId);
+  const limit = override ? override.limit_override : library.default_limit;
+  const resetAt = getResetAt.get(userId, libraryId)?.reset_at ?? '0000-01-01';
+
+  const history = await getUserMovieHistory(userId, libraryId);
+  const watchedTitles = new Set(
+    history.filter((h) => h.percent >= WATCHED_THRESHOLD).map((h) => normalize(h.title))
+  );
+
+  const approved = getApprovedTitles.all(userId, libraryId, resetAt);
+  return computeBalance(limit, approved, watchedTitles);
 }
 
 // "Resetea" el cupo de un usuario+biblioteca: las aprobaciones anteriores a ahora

@@ -18,6 +18,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webDist = path.join(__dirname, '../../web/dist');
 
 const app = express();
+app.set('trust proxy', 1); // para que req.ip refleje al cliente real detrás de cloudflared/nginx
 app.use(cors({ origin: false }));
 app.use(express.json());
 app.use(
@@ -27,6 +28,10 @@ app.use(
     maxAge: 7 * 24 * 60 * 60 * 1000,
     httpOnly: true,
     sameSite: 'lax',
+    // Por defecto en false porque el compose expone también HTTP directo en LAN
+    // (puerto 5150) además del túnel HTTPS — activarlo a ciegas rompería el login
+    // por ahí. Ponlo a "true" por env solo si TODO el acceso pasa por HTTPS.
+    secure: process.env.COOKIE_SECURE === 'true',
   })
 );
 

@@ -3,6 +3,7 @@ import { getRawSetting, setRawSetting } from './settings.js';
 
 const PASSWORD_HASH_KEY = 'admin_password_hash';
 const SESSION_SECRET_KEY = 'session_secret';
+const WEBHOOK_SECRET_KEY = 'webhook_secret';
 
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -50,6 +51,18 @@ export function getSessionSecret() {
   if (!secret) {
     secret = crypto.randomBytes(32).toString('hex');
     setRawSetting(SESSION_SECRET_KEY, secret);
+  }
+  return secret;
+}
+
+// Token en la propia URL del webhook público de Seerr, para que no cualquiera
+// pueda pegar http://limitarr:5150/api/webhook/seerr/<lo-que-sea> y forzar
+// ciclos de sondeo. No es una sesión, solo evita que sea totalmente adivinable.
+export function getWebhookSecret() {
+  let secret = getRawSetting(WEBHOOK_SECRET_KEY);
+  if (!secret) {
+    secret = crypto.randomBytes(16).toString('hex');
+    setRawSetting(WEBHOOK_SECRET_KEY, secret);
   }
   return secret;
 }

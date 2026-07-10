@@ -26,7 +26,7 @@ function LibraryCard({ lib, onSaved }) {
         </label>
       </div>
 
-      <div className="flex items-center gap-6 mb-4">
+      <div className="flex flex-wrap items-center gap-4 sm:gap-6 mb-4">
         <div>
           <label className="text-xs text-gray-400 mr-2">Tipo</label>
           <select
@@ -80,7 +80,7 @@ export default function Libraries() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <h2 className="text-xl font-semibold">Bibliotecas de películas</h2>
         <button
           onClick={sync}

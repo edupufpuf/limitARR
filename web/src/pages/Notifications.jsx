@@ -126,7 +126,7 @@ export default function Notifications() {
           </div>
 
           {mode === 'group' && (
-            <div className="flex items-end gap-3">
+            <div className="flex flex-wrap items-end gap-3">
               <div>
                 <label className="block text-xs text-gray-400 mb-1">Chat ID del grupo</label>
                 <input
@@ -176,13 +176,13 @@ export default function Notifications() {
       {discovered.length > 0 && (
         <div className="bg-bg-800 border border-bg-700 rounded-lg p-4 mb-6 space-y-3">
           {discovered.map((d) => (
-            <div key={`${d.chatId}-${d.messageThreadId}`} className="flex items-center gap-3 text-sm">
-              <span className="text-gray-400 w-44 truncate">
+            <div key={`${d.chatId}-${d.messageThreadId}`} className="flex flex-wrap items-center gap-3 text-sm">
+              <span className="text-gray-400 w-full sm:w-44 truncate">
                 {d.chatType === 'private'
                   ? d.username ? `@${d.username}` : d.firstName ?? d.chatId
                   : `${d.chatTitle ?? 'grupo'}${d.messageThreadId ? ` · topic ${d.messageThreadId}` : ''}`}
               </span>
-              <span className="text-gray-500 flex-1 truncate">"{d.text}"</span>
+              <span className="text-gray-500 flex-1 truncate min-w-0">"{d.text}"</span>
               {d.chatType === 'private' ? (
                 <>
                   <select
@@ -218,39 +218,43 @@ export default function Notifications() {
       )}
 
       <h3 className="font-semibold mb-3">Usuarios vinculados (DM)</h3>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-gray-400 border-b border-bg-700">
-            <th className="py-2 pr-4">Usuario</th>
-            <th className="py-2 pr-4">Chat</th>
-            <th className="py-2 pr-4"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {links.map((l) => (
-            <tr key={l.user_id} className="border-b border-bg-800">
-              <td className="py-2 pr-4">{userName(l.user_id)}</td>
-              <td className="py-2 pr-4 text-gray-400">{l.label ?? l.chat_id}</td>
-              <td className="py-2 pr-4 flex items-center gap-3">
-                <button onClick={() => test(l.user_id)} className="text-accent-400 text-xs">
-                  probar
-                </button>
-                <button onClick={() => unlink(l.user_id)} className="text-gray-500 text-xs">
-                  desvincular
-                </button>
-                {testResult[l.user_id] && <span className="text-xs text-gray-500">{testResult[l.user_id]}</span>}
-              </td>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-gray-400 border-b border-bg-700">
+              <th className="py-2 pr-4">Usuario</th>
+              <th className="py-2 pr-4">Chat</th>
+              <th className="py-2 pr-4"></th>
             </tr>
-          ))}
-          {links.length === 0 && (
-            <tr>
-              <td colSpan={3} className="py-6 text-center text-gray-500">
-                Ningún usuario vinculado todavía.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {links.map((l) => (
+              <tr key={l.user_id} className="border-b border-bg-800">
+                <td className="py-2 pr-4 whitespace-nowrap">{userName(l.user_id)}</td>
+                <td className="py-2 pr-4 text-gray-400">{l.label ?? l.chat_id}</td>
+                <td className="py-2 pr-4 whitespace-nowrap">
+                  <div className="flex items-center gap-3">
+                    <button onClick={() => test(l.user_id)} className="text-accent-400 text-xs">
+                      probar
+                    </button>
+                    <button onClick={() => unlink(l.user_id)} className="text-gray-500 text-xs">
+                      desvincular
+                    </button>
+                    {testResult[l.user_id] && <span className="text-xs text-gray-500">{testResult[l.user_id]}</span>}
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {links.length === 0 && (
+              <tr>
+                <td colSpan={3} className="py-6 text-center text-gray-500">
+                  Ningún usuario vinculado todavía.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

@@ -26,11 +26,16 @@ export default function Settings() {
   const [pwSaving, setPwSaving] = useState(false);
   const [pwMessage, setPwMessage] = useState(null);
 
+  const [webhookUrl, setWebhookUrl] = useState('');
+  const [configuringWebhook, setConfiguringWebhook] = useState(false);
+  const [webhookMessage, setWebhookMessage] = useState(null);
+
   function load() {
     api.settings().then((s) => {
       setSettings(s);
       setForm((f) => ({ ...f, seerr_url: s.seerr_url ?? '', tautulli_url: s.tautulli_url ?? '' }));
     });
+    api.webhookInfo().then((r) => setWebhookUrl(r.url));
   }
 
   useEffect(load, []);
@@ -73,6 +78,19 @@ export default function Settings() {
       setPwMessage({ ok: false, text: 'Contraseña actual incorrecta' });
     } finally {
       setPwSaving(false);
+    }
+  }
+
+  async function configureWebhook() {
+    setConfiguringWebhook(true);
+    setWebhookMessage(null);
+    try {
+      await api.configureWebhook();
+      setWebhookMessage({ ok: true, text: 'Configurado en Seerr' });
+    } catch (err) {
+      setWebhookMessage({ ok: false, text: `Error: ${err.message}` });
+    } finally {
+      setConfiguringWebhook(false);
     }
   }
 
@@ -128,7 +146,7 @@ export default function Settings() {
           />
         </fieldset>
 
-        <div className="flex items-center gap-3 pt-2">
+        <div className="flex flex-wrap items-center gap-3 pt-2">
           <button
             type="submit"
             disabled={saving}
@@ -153,6 +171,44 @@ export default function Settings() {
           </div>
         )}
       </form>
+
+      <h3 className="text-sm font-semibold text-accent-400 mt-8 mb-2">Reacción instantánea</h3>
+      <div className="bg-bg-800 border border-bg-700 rounded-lg p-5">
+        <p className="text-xs text-gray-500 mb-3">
+          Sin esto, limitARR tarda hasta un minuto en enterarse de una solicitud
+          nueva (sondeo periódico). Con el webhook de Seerr activado, reacciona
+          al momento. El sondeo se mantiene igual como red de seguridad.
+        </p>
+        <p className="text-xs text-gray-600 mb-3 break-all font-mono">{webhookUrl}</p>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={configureWebhook}
+            disabled={configuringWebhook}
+            className="bg-bg-700 hover:bg-bg-600 border border-bg-600 rounded px-4 py-1.5 text-sm disabled:opacity-50"
+          >
+            {configuringWebhook ? 'Configurando…' : 'Configurar automáticamente en Seerr'}
+          </button>
+          {webhookMessage && (
+            <span className={`text-xs ${webhookMessage.ok ? 'text-green-400' : 'text-accent-400'}`}>{webhookMessage.text}</span>
+          )}
+        </div>
+      </div>
+
+      <h3 className="text-sm font-semibold text-accent-400 mt-8 mb-2">Copia de seguridad</h3>
+      <div className="bg-bg-800 border border-bg-700 rounded-lg p-5">
+        <p className="text-xs text-gray-500 mb-3">
+          Descarga un volcado consistente de la base de datos (cupo, overrides,
+          registro de decisiones, vínculos de Telegram). Es manual — descárgalo
+          de vez en cuando o antes de tocar algo delicado.
+        </p>
+        <a
+          href="/api/backup"
+          className="inline-block bg-bg-700 hover:bg-bg-600 border border-bg-600 rounded px-4 py-1.5 text-sm"
+        >
+          Descargar backup
+        </a>
+      </div>
 
       <h3 className="text-sm font-semibold text-accent-400 mt-8 mb-2">Contraseña de admin</h3>
       <form onSubmit={changePassword} className="bg-bg-800 border border-bg-700 rounded-lg p-5 space-y-3">
@@ -183,7 +239,7 @@ export default function Settings() {
             className="w-full bg-bg-700 border border-bg-600 rounded px-2 py-1.5"
           />
         </div>
-        <div className="flex items-center gap-3 pt-1">
+        <div className="flex flex-wrap items-center gap-3 pt-1">
           <button
             type="submit"
             disabled={pwSaving}

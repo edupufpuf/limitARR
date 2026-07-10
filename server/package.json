@@ -6,7 +6,8 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "test": "DB_PATH=:memory: node --test test/"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",

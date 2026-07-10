@@ -25,39 +25,41 @@ export default function DecisionsLog() {
   return (
     <div>
       <h2 className="text-xl font-semibold mb-4">Registro de decisiones</h2>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-gray-400 border-b border-bg-700">
-            <th className="py-2 pr-4">Fecha</th>
-            <th className="py-2 pr-4">Usuario</th>
-            <th className="py-2 pr-4">Título</th>
-            <th className="py-2 pr-4">Saldo antes</th>
-            <th className="py-2 pr-4">Límite</th>
-            <th className="py-2 pr-4">Decisión</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.id} className="border-b border-bg-800">
-              <td className="py-2 pr-4 text-gray-500">{r.created_at}</td>
-              <td className="py-2 pr-4">{r.username}</td>
-              <td className="py-2 pr-4">{r.media_title ?? '—'}</td>
-              <td className="py-2 pr-4">{r.balance_before ?? '—'}</td>
-              <td className="py-2 pr-4">{r.limit_applied ?? '—'}</td>
-              <td className={`py-2 pr-4 font-semibold ${decisionColor[r.decision] ?? ''}`}>
-                {decisionLabel[r.decision] ?? r.decision}
-              </td>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-gray-400 border-b border-bg-700">
+              <th className="py-2 pr-4">Fecha</th>
+              <th className="py-2 pr-4">Usuario</th>
+              <th className="py-2 pr-4">Título</th>
+              <th className="py-2 pr-4">Saldo antes</th>
+              <th className="py-2 pr-4">Límite</th>
+              <th className="py-2 pr-4">Decisión</th>
             </tr>
-          ))}
-          {rows.length === 0 && (
-            <tr>
-              <td colSpan={6} className="py-6 text-center text-gray-500">
-                Sin decisiones registradas todavía.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id} className="border-b border-bg-800">
+                <td className="py-2 pr-4 text-gray-500 whitespace-nowrap">{r.created_at}</td>
+                <td className="py-2 pr-4 whitespace-nowrap">{r.username}</td>
+                <td className="py-2 pr-4">{r.media_title ?? '—'}</td>
+                <td className="py-2 pr-4">{r.balance_before ?? '—'}</td>
+                <td className="py-2 pr-4">{r.limit_applied ?? '—'}</td>
+                <td className={`py-2 pr-4 font-semibold whitespace-nowrap ${decisionColor[r.decision] ?? ''}`}>
+                  {decisionLabel[r.decision] ?? r.decision}
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={6} className="py-6 text-center text-gray-500">
+                  Sin decisiones registradas todavía.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

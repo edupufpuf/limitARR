@@ -40,6 +40,8 @@ export const api = {
   settings: () => request('/settings'),
   updateSettings: (body) => request('/settings', { method: 'PUT', body: JSON.stringify(body) }),
   testSettings: () => request('/settings/test', { method: 'POST' }),
+  webhookInfo: () => request('/webhook/info'),
+  configureWebhook: () => request('/webhook/configure', { method: 'POST' }),
 
   notificationSettings: () => request('/notifications/settings'),
   updateNotificationSettings: (body) =>

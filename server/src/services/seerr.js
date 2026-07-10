@@ -68,6 +68,23 @@ export async function approveRequest(requestId) {
   await call(`/request/${requestId}/approve`, { method: 'POST' });
 }
 
+// Activa el webhook nativo de Seerr para que avise a limitARR en cuanto entra
+// una solicitud (MEDIA_PENDING = 2), en vez de depender solo del sondeo cada
+// minuto. El sondeo se deja igualmente como red de seguridad.
+export async function configureWebhook(webhookUrl) {
+  await call('/settings/notifications/webhook', {
+    method: 'POST',
+    body: JSON.stringify({
+      enabled: true,
+      types: 2,
+      options: {
+        webhookUrl,
+        jsonPayload: JSON.stringify({ notification_type: '{{notification_type}}' }),
+      },
+    }),
+  });
+}
+
 export async function getMovieTitle(tmdbId) {
   if (!tmdbId) return null;
   try {

@@ -1,12 +1,18 @@
 import { Router } from 'express';
+import path from 'node:path';
+import os from 'node:os';
+import fs from 'node:fs';
 import { db } from '../db.js';
+import { config } from '../config.js';
 import { requireAuth } from '../middleware/auth.js';
-import { needsSetup, setPassword, checkPassword } from '../auth.js';
+import { rateLimit } from '../middleware/rateLimit.js';
+import { needsSetup, setPassword, checkPassword, getWebhookSecret } from '../auth.js';
 import { getUsers, getMovieLibraries } from '../services/tautulli.js';
-import { listPendingMovieRequests, getSeerrUsers } from '../services/seerr.js';
+import { listPendingMovieRequests, getSeerrUsers, configureWebhook } from '../services/seerr.js';
 import { getSettingsForDisplay, updateSettings } from '../settings.js';
 import { resetQuota, importSeerrHistory, refreshQuotaCache } from '../quota.js';
 import { matchByEmailOrUsername } from '../userMatch.js';
+import { runPollCycle } from '../scheduler.js';
 import {
   getBotTokenForDisplay,
   setBotToken,
@@ -26,7 +32,9 @@ const ah = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
 // --- Auth ---
 
-router.post('/auth/setup', (req, res) => {
+const authRateLimit = rateLimit({ max: 5, windowMs: 15 * 60 * 1000 });
+
+router.post('/auth/setup', authRateLimit, (req, res) => {
   if (!needsSetup()) return res.status(409).json({ error: 'already_configured' });
   const { password } = req.body || {};
   if (!password || password.length < 8) {
@@ -37,7 +45,7 @@ router.post('/auth/setup', (req, res) => {
   res.json({ ok: true });
 });
 
-router.post('/auth/login', (req, res) => {
+router.post('/auth/login', authRateLimit, (req, res) => {
   if (needsSetup()) return res.status(409).json({ error: 'needs_setup' });
   const { password } = req.body || {};
   if (!checkPassword(password)) {
@@ -54,6 +62,16 @@ router.post('/auth/logout', (req, res) => {
 
 router.get('/auth/me', (req, res) => {
   res.json({ authed: Boolean(req.session?.authed), needsSetup: needsSetup() });
+});
+
+// Webhook público de Seerr (sin auth de sesión — lo llama Seerr, no un admin
+// logueado). El secreto en la URL es la única protección, ver auth.js. Dispara
+// el ciclo de sondeo al momento en vez de esperar hasta 60s; no bloquea la
+// respuesta a Seerr ni falla si el ciclo revienta.
+router.post('/webhook/seerr/:secret', (req, res) => {
+  if (req.params.secret !== getWebhookSecret()) return res.status(404).end();
+  res.status(200).end();
+  runPollCycle().catch((err) => console.error('[webhook] poll cycle failed:', err));
 });
 
 router.use(requireAuth);
@@ -98,6 +116,32 @@ router.post('/settings/test', async (req, res) => {
   }
   res.json(result);
 });
+
+// URL que hay que dar de alta en Seerr (Settings > Notifications > Webhook) para
+// que avise a limitARR al instante. Asume que el contenedor se llama "limitarr"
+// en la misma red docker que seerr — si no, hay que pegarla a mano con el
+// hostname/puerto correctos.
+router.get('/webhook/info', (req, res) => {
+  res.json({ url: `http://limitarr:${config.port}/api/webhook/seerr/${getWebhookSecret()}` });
+});
+
+router.post('/webhook/configure', ah(async (req, res) => {
+  const url = `http://limitarr:${config.port}/api/webhook/seerr/${getWebhookSecret()}`;
+  await configureWebhook(url);
+  res.json({ ok: true, url });
+}));
+
+// Backup consistente de la DB (API de backup online de SQLite, no una simple
+// copia de fichero — segura aunque haya escrituras en curso en WAL).
+router.get('/backup', ah(async (req, res) => {
+  const tmpPath = path.join(os.tmpdir(), `limitarr-backup-${Date.now()}.db`);
+  await db.backup(tmpPath);
+  const filename = `limitarr-backup-${new Date().toISOString().slice(0, 10)}.db`;
+  res.download(tmpPath, filename, (err) => {
+    fs.unlink(tmpPath, () => {});
+    if (err) console.error('[backup] download failed:', err);
+  });
+}));
 
 // --- Libraries ---
 
