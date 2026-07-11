@@ -78,6 +78,7 @@ const upsertQuotaCache = db.prepare(`
     pending_items = excluded.pending_items,
     computed_at = excluded.computed_at
 `);
+const deleteQuotaCache = db.prepare('DELETE FROM quota_cache WHERE user_id = ? AND library_id = ?');
 
 function toSqliteDateTime(isoString) {
   return isoString.replace('T', ' ').replace(/\.\d{3}Z$/, '');
@@ -217,6 +218,11 @@ export function resetQuota(userId, libraryId) {
 // cambie el resultado de getBalance (override, reset, ...) tiene que llamar esto
 // para que el panel lo refleje al momento en vez de esperar al siguiente sondeo.
 export async function refreshQuotaCache(userId, libraryId) {
+  const library = getLibrary.get(libraryId);
+  if (!library?.enabled) {
+    deleteQuotaCache.run(userId, libraryId);
+    return { limit: 0, outstanding: 0, balance: 0, pendingItems: [], disabled: true };
+  }
   const { limit, outstanding, balance, pendingItems } = await getBalance(userId, libraryId);
   upsertQuotaCache.run(userId, libraryId, limit, outstanding, balance, JSON.stringify(pendingItems));
   return { limit, outstanding, balance, pendingItems };

@@ -175,14 +175,22 @@ router.post('/libraries/sync', ah(async (req, res) => {
   res.json({ discovered: discovered.length, inserted });
 }));
 
-router.put('/libraries/:id', (req, res) => {
+router.put('/libraries/:id', ah(async (req, res) => {
   const { kind, enabled, defaultLimit } = req.body || {};
   const result = db
     .prepare('UPDATE libraries SET kind = ?, enabled = ?, default_limit = ? WHERE id = ?')
     .run(kind, enabled ? 1 : 0, defaultLimit, req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'not_found' });
+
+  if (enabled) {
+    const users = await getUsers();
+    for (const user of users) await refreshQuotaCache(user.id, req.params.id);
+  } else {
+    db.prepare('DELETE FROM quota_cache WHERE library_id = ?').run(req.params.id);
+  }
+
   res.json({ ok: true });
-});
+}));
 
 // --- Users (passthrough from Tautulli, for admin dropdowns) ---
 
@@ -352,17 +360,24 @@ router.delete('/groups/:id/overrides/:libraryId', ah(async (req, res) => {
 
 // Agrupado por usuario, con avatar de Seerr, para las tarjetas del panel.
 async function buildQuotaByUser() {
-  const rows = db.prepare('SELECT * FROM quota_cache').all();
+  const rows = db.prepare(`
+    SELECT qc.*
+    FROM quota_cache qc
+    JOIN libraries l ON l.id = qc.library_id
+    WHERE l.enabled = 1
+  `).all();
   const [tautulliUsers, seerrUsers] = await Promise.all([getUsers(), getSeerrUsers()]);
   const tautulliUserMap = new Map(tautulliUsers.map((u) => [u.id, u]));
-  const libraries = db.prepare('SELECT id, name FROM libraries').all();
+  const libraries = db.prepare('SELECT id, name FROM libraries WHERE enabled = 1').all();
   const libraryMap = new Map(libraries.map((l) => [l.id, l.name]));
   const recentRows = db.prepare(`
     SELECT user_id,
            SUM(CASE WHEN decision = 'approved' THEN 1 ELSE 0 END) AS approved7d,
            SUM(CASE WHEN decision = 'no_quota' THEN 1 ELSE 0 END) AS blocked7d
     FROM decisions_log
+    JOIN libraries l ON l.id = decisions_log.library_id
     WHERE created_at > datetime('now', '-7 days') AND user_id IS NOT NULL
+      AND l.enabled = 1
     GROUP BY user_id
   `).all();
   const recentMap = new Map(recentRows.map((r) => [r.user_id, r]));
@@ -443,14 +458,18 @@ router.get('/stats', (req, res) => {
     SELECT COUNT(DISTINCT user_id) AS users,
            COALESCE(SUM(outstanding), 0) AS outstanding,
            COUNT(DISTINCT CASE WHEN balance <= 0 THEN user_id END) AS usersBlocked
-    FROM quota_cache
+    FROM quota_cache qc
+    JOIN libraries l ON l.id = qc.library_id
+    WHERE l.enabled = 1
   `).get();
   const last7d = db.prepare(`
     SELECT
       SUM(CASE WHEN decision = 'approved' THEN 1 ELSE 0 END) AS approved7d,
       SUM(CASE WHEN decision = 'no_quota' THEN 1 ELSE 0 END) AS blocked7d
     FROM decisions_log
+    JOIN libraries l ON l.id = decisions_log.library_id
     WHERE created_at > datetime('now', '-7 days')
+      AND l.enabled = 1
   `).get();
   res.json({
     users: cache.users,
