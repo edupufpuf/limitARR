@@ -498,10 +498,10 @@ router.get('/notifications/settings', (req, res) => {
 });
 
 router.put('/notifications/settings', (req, res) => {
-  const { botToken, mode, groupChatId, groupTopicId } = req.body || {};
+  const { botToken, mode, groupChatId, groupTopicId, noQuotaMessage } = req.body || {};
   if (typeof botToken === 'string' && botToken.trim() !== '') setBotToken(botToken);
-  if (mode || groupChatId !== undefined || groupTopicId !== undefined) {
-    setNotifyTarget({ mode, groupChatId, groupTopicId });
+  if (mode || groupChatId !== undefined || groupTopicId !== undefined || noQuotaMessage !== undefined) {
+    setNotifyTarget({ mode, groupChatId, groupTopicId, noQuotaMessage });
   }
   res.json({ ...getBotTokenForDisplay(), ...getNotifyTarget() });
 });

@@ -7,6 +7,7 @@ export default function Notifications() {
   const [mode, setMode] = useState('dm');
   const [groupChatId, setGroupChatId] = useState('');
   const [groupTopicId, setGroupTopicId] = useState('');
+  const [noQuotaMessage, setNoQuotaMessage] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
   const [groupTestResult, setGroupTestResult] = useState(null);
 
@@ -27,6 +28,7 @@ export default function Notifications() {
       setMode(s.mode ?? 'dm');
       setGroupChatId(s.groupChatId ?? '');
       setGroupTopicId(s.groupTopicId ?? '');
+      setNoQuotaMessage(s.noQuotaMessage ?? '');
     });
     api.users().then(setUsers);
     loadLinks();
@@ -35,8 +37,9 @@ export default function Notifications() {
   async function saveSettings(e) {
     e.preventDefault();
     setSavingSettings(true);
-    const s = await api.updateNotificationSettings({ botToken: tokenInput, mode, groupChatId, groupTopicId });
+    const s = await api.updateNotificationSettings({ botToken: tokenInput, mode, groupChatId, groupTopicId, noQuotaMessage });
     setBotSettings(s);
+    setNoQuotaMessage(s.noQuotaMessage ?? '');
     setTokenInput('');
     setSavingSettings(false);
   }
@@ -151,6 +154,22 @@ export default function Notifications() {
               {groupTestResult && <span className="text-xs text-gray-500">{groupTestResult}</span>}
             </div>
           )}
+        </div>
+
+        <div>
+          <label className="label">Mensaje cuando alguien se pasa de cupo</label>
+          <textarea
+            value={noQuotaMessage}
+            onChange={(e) => setNoQuotaMessage(e.target.value)}
+            rows={4}
+            className="input min-h-28 resize-y"
+          />
+          <p className="text-xs text-gray-500 mt-2">
+            Variables: <span className="text-gray-400">{'{usuario}'}</span>,{' '}
+            <span className="text-gray-400">{'{biblioteca}'}</span>,{' '}
+            <span className="text-gray-400">{'{titulo}'}</span>,{' '}
+            <span className="text-gray-400">{'{tipo}'}</span>.
+          </p>
         </div>
 
         <button type="submit" disabled={savingSettings} className="btn btn-primary">

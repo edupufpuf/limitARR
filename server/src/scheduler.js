@@ -3,7 +3,7 @@ import { config } from './config.js';
 import { listPendingRequests, approveRequest, getMediaDetails } from './services/seerr.js';
 import { getUsers } from './services/tautulli.js';
 import { getBalance, reconcileVoidedRequests, refreshQuotaCache } from './quota.js';
-import { sendMessage, getNotifyTarget, pendingButton } from './services/telegram.js';
+import { sendMessage, getNotifyTarget, pendingButton, renderNoQuotaMessage } from './services/telegram.js';
 import { matchByEmailOrUsername } from './userMatch.js';
 
 const insertLog = db.prepare(`
@@ -37,20 +37,28 @@ function logIfChanged(base, decision) {
 async function notifyNoQuota(base) {
   const libraryName = getLibraryName.get(base.libraryId)?.name ?? `biblioteca #${base.libraryId}`;
   const replyMarkup = pendingButton(base.userId, base.libraryId);
+  const unit = base.mediaType === 'tv' ? 'una temporada' : 'una película';
 
   const target = getNotifyTarget();
   try {
     if (target.mode === 'group') {
       if (!target.groupChatId) return;
-      const unit = base.mediaType === 'tv' ? 'una temporada' : 'una película';
-      const text = `🔴 ${base.username} se ha pasado del cupo en ${libraryName} pidiendo "${base.mediaTitle ?? unit}".`;
+      const text = renderNoQuotaMessage(target.noQuotaMessage, {
+        username: base.username,
+        libraryName,
+        mediaTitle: base.mediaTitle,
+        unit,
+      });
       await sendMessage(target.groupChatId, text, { messageThreadId: target.groupTopicId, replyMarkup });
     } else {
       const chatId = getChatId.get(base.userId)?.chat_id;
       if (!chatId) return;
-      const text =
-        `🔴 TE HAS PASADO DEL CUPO en ${libraryName} pidiendo "${base.mediaTitle ?? 'un contenido'}".\n` +
-        `Ve algo de lo que tienes pendiente antes de solicitar más.`;
+      const text = renderNoQuotaMessage(target.noQuotaMessage, {
+        username: base.username,
+        libraryName,
+        mediaTitle: base.mediaTitle,
+        unit,
+      });
       await sendMessage(chatId, text, { replyMarkup });
     }
   } catch (err) {

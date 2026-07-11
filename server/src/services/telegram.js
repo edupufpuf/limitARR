@@ -8,6 +8,11 @@ const OFFSET_KEY = 'telegram_last_update_id';
 const MODE_KEY = 'telegram_notify_mode';         // 'dm' | 'group'
 const GROUP_CHAT_KEY = 'telegram_group_chat_id';
 const GROUP_TOPIC_KEY = 'telegram_group_topic_id'; // message_thread_id, opcional
+const NO_QUOTA_MESSAGE_KEY = 'telegram_no_quota_message';
+
+export const DEFAULT_NO_QUOTA_MESSAGE =
+  '🔴 {usuario} se ha pasado del cupo en {biblioteca} pidiendo "{titulo}".\n' +
+  'Ve algo de lo que tienes pendiente antes de solicitar más.';
 
 export function getBotToken() {
   return getRawSetting(TOKEN_KEY);
@@ -27,13 +32,37 @@ export function getNotifyTarget() {
     mode: getRawSetting(MODE_KEY) || 'dm',
     groupChatId: getRawSetting(GROUP_CHAT_KEY),
     groupTopicId: getRawSetting(GROUP_TOPIC_KEY),
+    noQuotaMessage: getNoQuotaMessage(),
   };
 }
 
-export function setNotifyTarget({ mode, groupChatId, groupTopicId }) {
+export function setNotifyTarget({ mode, groupChatId, groupTopicId, noQuotaMessage }) {
   if (mode) setRawSetting(MODE_KEY, mode);
   if (groupChatId !== undefined) setRawSetting(GROUP_CHAT_KEY, String(groupChatId ?? ''));
   if (groupTopicId !== undefined) setRawSetting(GROUP_TOPIC_KEY, String(groupTopicId ?? ''));
+  if (noQuotaMessage !== undefined) setNoQuotaMessage(noQuotaMessage);
+}
+
+export function getNoQuotaMessage() {
+  return getRawSetting(NO_QUOTA_MESSAGE_KEY) || DEFAULT_NO_QUOTA_MESSAGE;
+}
+
+export function setNoQuotaMessage(message) {
+  const value = String(message ?? '').trim();
+  setRawSetting(NO_QUOTA_MESSAGE_KEY, value || DEFAULT_NO_QUOTA_MESSAGE);
+}
+
+export function renderNoQuotaMessage(template, values) {
+  const replacements = {
+    usuario: values.username ?? '',
+    biblioteca: values.libraryName ?? '',
+    titulo: values.mediaTitle ?? values.unit ?? 'un contenido',
+    tipo: values.unit ?? 'un contenido',
+  };
+  return String(template || DEFAULT_NO_QUOTA_MESSAGE).replace(
+    /\{(usuario|biblioteca|titulo|tipo)\}/g,
+    (_, key) => replacements[key]
+  );
 }
 
 async function api(method, params = {}) {
