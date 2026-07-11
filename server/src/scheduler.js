@@ -1,25 +1,16 @@
 import { db } from './db.js';
 import { config } from './config.js';
-import { listPendingMovieRequests, approveRequest, getMovieTitle } from './services/seerr.js';
+import { listPendingMovieRequests, approveRequest, getMovieDetails } from './services/seerr.js';
 import { getUsers } from './services/tautulli.js';
-import { getBalance, reconcileVoidedRequests } from './quota.js';
+import { getBalance, reconcileVoidedRequests, refreshQuotaCache } from './quota.js';
 import { sendMessage, getNotifyTarget, pendingButton } from './services/telegram.js';
 import { matchByEmailOrUsername } from './userMatch.js';
 
 const insertLog = db.prepare(`
   INSERT INTO decisions_log
-    (request_id, user_id, username, library_id, media_title, tmdb_id, balance_before, limit_applied, decision)
+    (request_id, user_id, username, library_id, media_title, tmdb_id, poster_url, balance_before, limit_applied, decision)
   VALUES
-    (@requestId, @userId, @username, @libraryId, @mediaTitle, @tmdbId, @balanceBefore, @limitApplied, @decision)
-`);
-const upsertQuotaCache = db.prepare(`
-  INSERT INTO quota_cache (user_id, library_id, limit_applied, outstanding, balance, computed_at)
-  VALUES (@userId, @libraryId, @limitApplied, @outstanding, @balance, datetime('now'))
-  ON CONFLICT (user_id, library_id) DO UPDATE SET
-    limit_applied = excluded.limit_applied,
-    outstanding = excluded.outstanding,
-    balance = excluded.balance,
-    computed_at = excluded.computed_at
+    (@requestId, @userId, @username, @libraryId, @mediaTitle, @tmdbId, @posterUrl, @balanceBefore, @limitApplied, @decision)
 `);
 const getLibraryByKind = db.prepare(`SELECT * FROM libraries WHERE kind = ? AND enabled = 1 LIMIT 1`);
 const getLastDecision = db.prepare(`
@@ -79,6 +70,7 @@ export async function runPollCycle() {
       libraryId: library?.id ?? null,
       mediaTitle: null,
       tmdbId: request.tmdbId ?? null,
+      posterUrl: null,
       balanceBefore: null,
       limitApplied: null,
     };
@@ -92,9 +84,11 @@ export async function runPollCycle() {
       continue;
     }
 
-    base.mediaTitle = await getMovieTitle(request.tmdbId);
+    const details = await getMovieDetails(request.tmdbId);
+    base.mediaTitle = details.title;
+    base.posterUrl = details.posterUrl;
 
-    const { limit, outstanding, balance } = await getBalance(tautulliUser.id, library.id);
+    const { limit, balance } = await getBalance(tautulliUser.id, library.id);
     const decision = balance >= 1 ? 'approved' : 'no_quota';
 
     if (decision === 'approved') {
@@ -106,13 +100,10 @@ export async function runPollCycle() {
     const isNew = logIfChanged(base, decision);
     if (decision === 'no_quota' && isNew) await notifyNoQuota(base);
 
-    upsertQuotaCache.run({
-      userId: tautulliUser.id,
-      libraryId: library.id,
-      limitApplied: limit,
-      outstanding: decision === 'approved' ? outstanding + 1 : outstanding,
-      balance: decision === 'approved' ? balance - 1 : balance,
-    });
+    // Recalcula la caché de verdad (con la aprobación recién logueada incluida)
+    // en vez de ajustar el contador a mano — así pending_items queda al día y
+    // el panel enseña la película nueva sin esperar al siguiente sondeo.
+    await refreshQuotaCache(tautulliUser.id, library.id);
   }
 }
 

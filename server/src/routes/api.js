@@ -238,7 +238,7 @@ router.post('/overrides/bulk', ah(async (req, res) => {
 // --- Quota ---
 
 // Agrupado por usuario, con avatar de Seerr, para las tarjetas del panel.
-router.get('/quota', ah(async (req, res) => {
+async function buildQuotaByUser() {
   const rows = db.prepare('SELECT * FROM quota_cache').all();
   const [tautulliUsers, seerrUsers] = await Promise.all([getUsers(), getSeerrUsers()]);
   const tautulliUserMap = new Map(tautulliUsers.map((u) => [u.id, u]));
@@ -261,16 +261,25 @@ router.get('/quota', ah(async (req, res) => {
         libraries: [],
       });
     }
+    let pendingItems = [];
+    try {
+      pendingItems = JSON.parse(row.pending_items || '[]');
+    } catch { /* caché de una versión anterior sin pending_items válido */ }
     byUser.get(row.user_id).libraries.push({
       libraryId: row.library_id,
       libraryName: libraryMap.get(row.library_id) ?? `#${row.library_id}`,
       balance: row.balance,
       limitApplied: row.limit_applied,
       outstanding: row.outstanding,
+      pendingItems,
       computedAt: row.computed_at,
     });
   }
-  res.json([...byUser.values()]);
+  return [...byUser.values()];
+}
+
+router.get('/quota', ah(async (req, res) => {
+  res.json(await buildQuotaByUser());
 }));
 
 // Rellena decisions_log con solicitudes aprobadas en Seerr que limitARR no vio
@@ -303,13 +312,59 @@ router.post('/quota/reset/:userId/:libraryId', ah(async (req, res) => {
   res.json({ ok: true, ...result });
 }));
 
+// --- Stats (KPIs para la cabecera de la pestaña Cupo) ---
+
+router.get('/stats', (req, res) => {
+  const cache = db.prepare(`
+    SELECT COUNT(DISTINCT user_id) AS users,
+           COALESCE(SUM(outstanding), 0) AS outstanding,
+           COUNT(DISTINCT CASE WHEN balance <= 0 THEN user_id END) AS usersBlocked
+    FROM quota_cache
+  `).get();
+  const last7d = db.prepare(`
+    SELECT
+      SUM(CASE WHEN decision = 'approved' THEN 1 ELSE 0 END) AS approved7d,
+      SUM(CASE WHEN decision = 'no_quota' THEN 1 ELSE 0 END) AS blocked7d
+    FROM decisions_log
+    WHERE created_at > datetime('now', '-7 days')
+  `).get();
+  res.json({
+    users: cache.users,
+    outstanding: cache.outstanding,
+    usersBlocked: cache.usersBlocked,
+    approved7d: last7d.approved7d ?? 0,
+    blocked7d: last7d.blocked7d ?? 0,
+  });
+});
+
 // --- Decisions log ---
 
+// Filtrable y paginado: ?decision=approved&q=texto&limit=50&offset=0.
+// `q` busca por usuario o título; devuelve total para el "cargar más" del panel.
 router.get('/decisions', (req, res) => {
+  const { decision, q } = req.query;
+  const limit = Math.min(Number(req.query.limit) || 50, 200);
+  const offset = Math.max(Number(req.query.offset) || 0, 0);
+
+  const where = [];
+  const params = [];
+  if (decision) {
+    where.push('decision = ?');
+    params.push(decision);
+  }
+  if (q) {
+    where.push('(username LIKE ? OR media_title LIKE ?)');
+    params.push(`%${q}%`, `%${q}%`);
+  }
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  const { total } = db
+    .prepare(`SELECT COUNT(*) AS total FROM decisions_log ${whereSql}`)
+    .get(...params);
   const rows = db
-    .prepare('SELECT * FROM decisions_log ORDER BY created_at DESC LIMIT 200')
-    .all();
-  res.json(rows);
+    .prepare(`SELECT * FROM decisions_log ${whereSql} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`)
+    .all(...params, limit, offset);
+  res.json({ rows, total });
 });
 
 // --- Telegram notifications ---

@@ -32,7 +32,8 @@ cd ../web && npm install && npm run dev   # :5173, proxy a /api -> :5150
 
 > Nota: `better-sqlite3` compila nativo. Si tu Node local es muy reciente
 > (25.x) puede fallar el build por falta de binario precompilado — no
-> afecta al build de Docker, que fija Node 20.
+> afecta al build de Docker, que fija Node 20. En macOS con Homebrew:
+> `brew install node@22` y `export PATH="/opt/homebrew/opt/node@22/bin:$PATH"`.
 
 ## Despliegue
 
@@ -82,6 +83,16 @@ saldo = límite − (películas aprobadas para ese usuario en esa biblioteca que
 - Botón "resetear" por usuario+biblioteca en la pestaña Cupo: da por
   vistas las pendientes actuales sin esperar a que el usuario las vea de
   verdad (sin borrar el historial del registro).
+
+## Panel
+
+- **Cupo**: tarjetas por usuario ordenadas por peor saldo, con buscador,
+  barra de saldo por biblioteca y las carátulas (TMDB) de lo que cada uno
+  tiene pendiente de ver. Cabecera con KPIs (usuarios, películas sin ver,
+  usuarios sin saldo, aprobadas/bloqueadas en 7 días). Se refresca solo
+  cada minuto.
+- **Registro**: filtrable por decisión y por texto (usuario o título),
+  con paginación ("cargar más") y carátula junto al título.
 
 ### Auto-limpieza de cupo atascado
 

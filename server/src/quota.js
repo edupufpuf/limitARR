@@ -1,7 +1,7 @@
 import { db } from './db.js';
 import { config } from './config.js';
 import { getUserMovieHistory, getUsers as getTautulliUsers } from './services/tautulli.js';
-import { getRequestStatus, getSeerrUsers, getApprovedMovieRequestsForUser, getMovieTitle } from './services/seerr.js';
+import { getRequestStatus, getSeerrUsers, getApprovedMovieRequestsForUser, getMovieDetails } from './services/seerr.js';
 import { matchByEmailOrUsername } from './userMatch.js';
 
 // Tautulli's own "watched" threshold; below this a play doesn't free up quota.
@@ -24,7 +24,7 @@ const getOverride = db.prepare('SELECT * FROM overrides WHERE user_id = ? AND li
 const getLibrary = db.prepare('SELECT * FROM libraries WHERE id = ?');
 const getResetAt = db.prepare('SELECT reset_at FROM quota_resets WHERE user_id = ? AND library_id = ?');
 const getApprovedTitles = db.prepare(`
-  SELECT media_title, tmdb_id FROM decisions_log
+  SELECT media_title, tmdb_id, poster_url FROM decisions_log
   WHERE user_id = ? AND library_id = ? AND decision = 'approved' AND voided_at IS NULL AND created_at > ?
 `);
 const upsertReset = db.prepare(`
@@ -40,16 +40,17 @@ const getLibraryByKind = db.prepare(`SELECT * FROM libraries WHERE kind = ? AND 
 const requestAlreadyLogged = db.prepare(`SELECT 1 FROM decisions_log WHERE request_id = ?`);
 const insertImportedApproval = db.prepare(`
   INSERT INTO decisions_log
-    (request_id, user_id, username, library_id, media_title, tmdb_id, decision, created_at)
-  VALUES (@requestId, @userId, @username, @libraryId, @mediaTitle, @tmdbId, 'approved', @createdAt)
+    (request_id, user_id, username, library_id, media_title, tmdb_id, poster_url, decision, created_at)
+  VALUES (@requestId, @userId, @username, @libraryId, @mediaTitle, @tmdbId, @posterUrl, 'approved', @createdAt)
 `);
 const upsertQuotaCache = db.prepare(`
-  INSERT INTO quota_cache (user_id, library_id, limit_applied, outstanding, balance, computed_at)
-  VALUES (?, ?, ?, ?, ?, datetime('now'))
+  INSERT INTO quota_cache (user_id, library_id, limit_applied, outstanding, balance, pending_items, computed_at)
+  VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
   ON CONFLICT (user_id, library_id) DO UPDATE SET
     limit_applied = excluded.limit_applied,
     outstanding = excluded.outstanding,
     balance = excluded.balance,
+    pending_items = excluded.pending_items,
     computed_at = excluded.computed_at
 `);
 
@@ -71,7 +72,7 @@ export function computeBalance(limit, approvedRows, watchedTitles) {
     const key = normalize(r.media_title);
     if (seenTitles.has(key)) continue;
     seenTitles.add(key);
-    pendingItems.push({ title: r.media_title, tmdbId: r.tmdb_id });
+    pendingItems.push({ title: r.media_title, tmdbId: r.tmdb_id, posterUrl: r.poster_url ?? null });
   }
 
   return {
@@ -110,9 +111,9 @@ export function resetQuota(userId, libraryId) {
 // cambie el resultado de getBalance (override, reset, ...) tiene que llamar esto
 // para que el panel lo refleje al momento en vez de esperar al siguiente sondeo.
 export async function refreshQuotaCache(userId, libraryId) {
-  const { limit, outstanding, balance } = await getBalance(userId, libraryId);
-  upsertQuotaCache.run(userId, libraryId, limit, outstanding, balance);
-  return { limit, outstanding, balance };
+  const { limit, outstanding, balance, pendingItems } = await getBalance(userId, libraryId);
+  upsertQuotaCache.run(userId, libraryId, limit, outstanding, balance, JSON.stringify(pendingItems));
+  return { limit, outstanding, balance, pendingItems };
 }
 
 // Sin esto, una aprobada que nunca llega a ver la luz (cancelada por el usuario, o
@@ -156,7 +157,7 @@ export async function importSeerrHistory() {
       const library = getLibraryByKind.get(request.is4k ? '4k' : 'standard');
       if (!library) continue;
 
-      const mediaTitle = await getMovieTitle(request.tmdbId);
+      const { title: mediaTitle, posterUrl } = await getMovieDetails(request.tmdbId);
       insertImportedApproval.run({
         requestId: request.id,
         userId: tautulliUser.id,
@@ -164,6 +165,7 @@ export async function importSeerrHistory() {
         libraryId: library.id,
         mediaTitle,
         tmdbId: request.tmdbId ?? null,
+        posterUrl,
         createdAt: toSqliteDateTime(request.createdAt),
       });
       imported += 1;

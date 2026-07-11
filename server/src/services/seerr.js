@@ -85,23 +85,18 @@ export async function configureWebhook(webhookUrl) {
   });
 }
 
-export async function getMovieTitle(tmdbId) {
-  if (!tmdbId) return null;
+// Título + póster en una sola llamada (antes eran dos funciones que pedían el
+// mismo endpoint por separado). w185 basta para miniaturas del panel.
+export async function getMovieDetails(tmdbId) {
+  if (!tmdbId) return { title: null, posterUrl: null };
   try {
     const data = await call(`/movie/${tmdbId}`);
-    return data.title || null;
+    return {
+      title: data.title || null,
+      posterUrl: data.posterPath ? `https://image.tmdb.org/t/p/w185${data.posterPath}` : null,
+    };
   } catch {
-    return null;
-  }
-}
-
-export async function getMoviePosterUrl(tmdbId) {
-  if (!tmdbId) return null;
-  try {
-    const data = await call(`/movie/${tmdbId}`);
-    return data.posterPath ? `https://image.tmdb.org/t/p/w500${data.posterPath}` : null;
-  } catch {
-    return null;
+    return { title: null, posterUrl: null };
   }
 }
 

@@ -22,11 +22,11 @@ test('computeBalance: sin aprobadas, saldo completo', () => {
 });
 
 test('computeBalance: aprobada y no vista resta cupo', () => {
-  const approved = [{ media_title: 'Matrix', tmdb_id: 603 }];
+  const approved = [{ media_title: 'Matrix', tmdb_id: 603, poster_url: 'https://img/x.jpg' }];
   const r = computeBalance(1, approved, new Set());
   assert.equal(r.balance, 0);
   assert.equal(r.outstanding, 1);
-  assert.deepEqual(r.pendingItems, [{ title: 'Matrix', tmdbId: 603 }]);
+  assert.deepEqual(r.pendingItems, [{ title: 'Matrix', tmdbId: 603, posterUrl: 'https://img/x.jpg' }]);
 });
 
 test('computeBalance: aprobada y vista libera cupo', () => {

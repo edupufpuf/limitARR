@@ -88,9 +88,18 @@ db.exec(`
   );
 `);
 
-// Migración para bases de datos ya desplegadas antes de que decisions_log tuviera voided_at.
-try {
-  db.exec('ALTER TABLE decisions_log ADD COLUMN voided_at TEXT');
-} catch (err) {
-  if (!/duplicate column/i.test(err.message)) throw err;
+// Migraciones para bases de datos ya desplegadas antes de que existiera la columna.
+function addColumnIfMissing(sql) {
+  try {
+    db.exec(sql);
+  } catch (err) {
+    if (!/duplicate column/i.test(err.message)) throw err;
+  }
 }
+
+addColumnIfMissing('ALTER TABLE decisions_log ADD COLUMN voided_at TEXT');
+// Póster TMDB de la película, para mostrarla en el panel (Cupo y Registro).
+addColumnIfMissing('ALTER TABLE decisions_log ADD COLUMN poster_url TEXT');
+// JSON [{title, tmdbId, posterUrl}] con las películas que están consumiendo el
+// cupo, para que la pestaña Cupo enseñe QUÉ tiene pendiente cada usuario.
+addColumnIfMissing('ALTER TABLE quota_cache ADD COLUMN pending_items TEXT');

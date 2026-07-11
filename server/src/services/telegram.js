@@ -1,7 +1,7 @@
 import { db } from '../db.js';
 import { getRawSetting, setRawSetting, mask } from '../settings.js';
 import { getBalance } from '../quota.js';
-import { getMoviePosterUrl } from './seerr.js';
+import { getMovieDetails } from './seerr.js';
 
 const TOKEN_KEY = 'telegram_bot_token';
 const OFFSET_KEY = 'telegram_last_update_id';
@@ -100,7 +100,11 @@ async function handlePendingCallback(callbackQuery) {
   }
 
   const shown = pendingItems.slice(0, 10);
-  const posters = await Promise.all(shown.map((item) => getMoviePosterUrl(item.tmdbId)));
+  // El póster viene ya en pendingItems; solo se pregunta a Seerr para
+  // aprobaciones antiguas registradas antes de que se guardara poster_url.
+  const posters = await Promise.all(
+    shown.map((item) => item.posterUrl ?? getMovieDetails(item.tmdbId).then((d) => d.posterUrl))
+  );
 
   const withPoster = [];
   const withoutPoster = [];

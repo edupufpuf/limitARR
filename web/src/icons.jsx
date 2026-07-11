@@ -79,6 +79,15 @@ export function IconLogout({ className }) {
   );
 }
 
+export function IconSearch({ className }) {
+  return (
+    <svg {...base} className={className}>
+      <circle cx="11" cy="11" r="7" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-4.3-4.3" />
+    </svg>
+  );
+}
+
 export function IconMenu({ className }) {
   return (
     <svg {...base} className={className}>
