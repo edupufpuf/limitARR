@@ -98,7 +98,7 @@ export default function Settings() {
 
   return (
     <div className="max-w-xl">
-      <h2 className="text-2xl font-bold tracking-tight mb-1">Configuración</h2>
+      <h2 className="page-title mb-1">Configuración</h2>
       <p className="text-xs text-gray-500 mb-6">
         Conexión a Seerr y Tautulli. Deja la clave en blanco para no cambiar la ya guardada.
       </p>

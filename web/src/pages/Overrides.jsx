@@ -161,7 +161,7 @@ export default function Overrides() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold tracking-tight mb-1">Overrides</h2>
+      <h2 className="page-title mb-1">Overrides</h2>
       <p className="text-xs text-gray-500 mb-4">
         Precedencia del límite: override individual &gt; override de grupo &gt; límite de la
         biblioteca. Pon 0 para bloquear del todo.

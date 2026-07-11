@@ -95,7 +95,7 @@ export default function Notifications() {
 
   return (
     <div className="max-w-2xl">
-      <h2 className="text-2xl font-bold tracking-tight mb-1">Notificaciones (Telegram)</h2>
+      <h2 className="page-title mb-1">Notificaciones (Telegram)</h2>
       <p className="text-xs text-gray-500 mb-6">
         Avisa cuando una solicitud se queda sin cupo. Crea un bot con{' '}
         <span className="text-gray-400">@BotFather</span> en Telegram y pega el token aquí.

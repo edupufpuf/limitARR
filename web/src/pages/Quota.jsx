@@ -284,7 +284,7 @@ export default function Quota() {
     <div>
       <div className="flex flex-wrap items-end justify-between gap-3 mb-6">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">Cupo por usuario</h2>
+          <h2 className="page-title">Cupo por usuario</h2>
           <p className="text-sm text-gray-500 mt-1">
             Saldo = límite − pendientes de ver. Se refresca solo cada minuto.
           </p>

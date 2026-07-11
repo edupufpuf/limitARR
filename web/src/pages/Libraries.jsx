@@ -84,7 +84,7 @@ export default function Libraries() {
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-        <h2 className="text-2xl font-bold tracking-tight">Bibliotecas</h2>
+        <h2 className="page-title">Bibliotecas</h2>
         <button
           onClick={sync}
           disabled={syncing}

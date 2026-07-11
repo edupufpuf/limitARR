@@ -36,9 +36,9 @@ export default function Setup({ onDone }) {
     <div className="relative min-h-screen flex items-center justify-center p-4 overflow-hidden">
       <div className="absolute w-[480px] h-[480px] rounded-full bg-accent-600/15 blur-3xl pointer-events-none" />
       <form onSubmit={submit} className="relative card p-8 w-full max-w-sm">
-        <div className="flex flex-col items-center gap-3 mb-2">
-          <LogoMark className="w-12 h-12" />
-          <Wordmark className="text-2xl" />
+        <div className="flex flex-col items-center gap-4 mb-2">
+          <LogoMark className="w-20 h-20" />
+          <Wordmark className="text-5xl" />
         </div>
         <p className="text-sm text-gray-400 mb-6 text-center">
           Primer acceso — define la contraseña de admin.
