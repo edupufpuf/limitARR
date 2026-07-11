@@ -7,8 +7,8 @@
     @apply text-[16px] font-semibold;
     background-color: theme('colors.bg.950');
     background-image:
-      radial-gradient(ellipse 80% 42% at 15% -10%, rgba(168, 85, 247, 0.16), transparent),
-      radial-gradient(ellipse 55% 35% at 100% 100%, rgba(99, 102, 241, 0.16), transparent);
+      radial-gradient(ellipse 80% 42% at 15% -10%, rgba(239, 68, 68, 0.10), transparent),
+      radial-gradient(ellipse 55% 35% at 100% 100%, rgba(43, 54, 78, 0.22), transparent);
     background-attachment: fixed;
   }
 }
@@ -20,7 +20,7 @@
     @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2 text-[15px] font-bold transition-all disabled:opacity-50 disabled:pointer-events-none;
   }
   .btn-primary {
-    @apply bg-gradient-to-r from-indigo-500 via-accent-600 to-purple-600 text-white hover:shadow-glow active:scale-[.98];
+    @apply bg-gradient-to-r from-accent-700 via-accent-600 to-accent-500 text-white hover:shadow-glow active:scale-[.98];
   }
   .btn-ghost {
     @apply bg-bg-800/80 hover:bg-bg-700/80 border border-bg-600/80 text-gray-200 active:scale-[.98];

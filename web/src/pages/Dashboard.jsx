@@ -6,7 +6,7 @@ import Overrides from './Overrides.jsx';
 import DecisionsLog from './DecisionsLog.jsx';
 import Settings from './Settings.jsx';
 import Notifications from './Notifications.jsx';
-import { LogoMark, Wordmark } from '../components/Brand.jsx';
+import { Wordmark } from '../components/Brand.jsx';
 import { IconGauge, IconFilm, IconSliders, IconClock, IconBell, IconGear, IconLogout } from '../icons.jsx';
 
 const TABS = {
@@ -35,23 +35,22 @@ export default function Dashboard({ onLoggedOut }) {
   return (
     <div className="min-h-screen flex flex-col sm:flex-row bg-bg-950 text-gray-100">
       {/* Sidebar — solo desktop */}
-      <nav className="hidden sm:flex w-[320px] bg-gradient-to-b from-bg-900 via-bg-900 to-bg-950 border-r border-bg-700/55 px-7 py-8 flex-col flex-shrink-0 shadow-[18px_0_48px_-32px_rgba(0,0,0,.85)]">
-        <div className="flex items-center gap-6 mb-20">
-          <LogoMark className="w-[88px] h-[88px]" />
-          <Wordmark className="text-[58px]" />
+      <nav className="hidden sm:flex w-[300px] bg-gradient-to-b from-bg-900 via-bg-900 to-bg-950 border-r border-bg-700/55 px-7 py-8 flex-col flex-shrink-0 shadow-[18px_0_48px_-32px_rgba(0,0,0,.85)]">
+        <div className="mb-16">
+          <Wordmark className="text-[42px]" />
         </div>
-        <div className="space-y-5">
+        <div className="space-y-4">
           {Object.entries(TABS).map(([key, { label, Icon }]) => (
             <button
               key={key}
               onClick={() => setTab(key)}
-              className={`relative flex items-center gap-6 w-full text-left px-5 py-4 rounded-xl text-[26px] leading-none font-extrabold tracking-tight transition-all ${
+              className={`relative flex items-center gap-5 w-full text-left px-5 py-4 rounded-xl text-[24px] leading-none font-extrabold tracking-tight transition-all ${
                 tab === key
-                  ? 'bg-gradient-to-r from-indigo-500 via-accent-600 to-purple-600 text-white shadow-glow'
+                  ? 'bg-gradient-to-r from-accent-700 via-accent-600 to-accent-500 text-white shadow-glow'
                   : 'text-gray-100/90 hover:text-white hover:bg-bg-800/70'
               }`}
             >
-              <Icon className="w-9 h-9 flex-shrink-0" />
+              <Icon className="w-8 h-8 flex-shrink-0" />
               {label}
             </button>
           ))}
@@ -98,8 +97,7 @@ export default function Dashboard({ onLoggedOut }) {
       {/* Top bar — solo móvil */}
       <header className="sm:hidden flex items-center justify-between px-4 h-16 bg-bg-900/95 border-b border-bg-700/60 flex-shrink-0 sticky top-0 z-10 backdrop-blur">
         <div className="flex items-center gap-2">
-          <LogoMark className="w-9 h-9" />
-          <Wordmark className="text-xl" />
+          <Wordmark className="text-2xl" />
         </div>
         <span className="text-sm text-gray-400">{label}</span>
         <button onClick={logout} className="text-gray-400 p-1 -mr-1">

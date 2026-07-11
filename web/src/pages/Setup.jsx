@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api.js';
-import { LogoMark, Wordmark } from '../components/Brand.jsx';
+import { Wordmark } from '../components/Brand.jsx';
 
 export default function Setup({ onDone }) {
   const [password, setPassword] = useState('');
@@ -37,8 +37,7 @@ export default function Setup({ onDone }) {
       <div className="absolute w-[480px] h-[480px] rounded-full bg-accent-600/15 blur-3xl pointer-events-none" />
       <form onSubmit={submit} className="relative card p-8 w-full max-w-sm">
         <div className="flex flex-col items-center gap-4 mb-2">
-          <LogoMark className="w-20 h-20" />
-          <Wordmark className="text-5xl" />
+          <Wordmark className="text-[42px]" />
         </div>
         <p className="text-sm text-gray-400 mb-6 text-center">
           Primer acceso — define la contraseña de admin.

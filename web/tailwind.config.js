@@ -7,14 +7,14 @@ export default {
         sans: ['"Inter Variable"', 'Inter', 'system-ui', '-apple-system', 'sans-serif'],
       },
       colors: {
-        // Seerr-style dark UI with purple accent.
+        // Seerr-style dark UI with Limitarr red accent.
         accent: {
-          50: '#faf5ff',
-          300: '#d8b4fe',
-          400: '#c084fc',
-          500: '#a855f7',
-          600: '#8b5cf6',
-          700: '#7c3aed',
+          50: '#fef2f2',
+          300: '#fca5a5',
+          400: '#f87171',
+          500: '#ef4444',
+          600: '#dc2626',
+          700: '#b91c1c',
         },
         // Navy con algo más de saturación que el gray de Tailwind, para que las
         // superficies tengan profundidad en vez de leerse como gris plano.
@@ -28,7 +28,7 @@ export default {
       },
       boxShadow: {
         card: '0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5)',
-        glow: '0 0 0 1px rgba(168,85,247,.32), 0 14px 34px -14px rgba(139,92,246,.75)',
+        glow: '0 0 0 1px rgba(239,68,68,.25), 0 14px 34px -14px rgba(220,38,38,.70)',
       },
     },
   },

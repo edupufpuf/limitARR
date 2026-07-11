@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api.js';
-import { LogoMark, Wordmark } from '../components/Brand.jsx';
+import { Wordmark } from '../components/Brand.jsx';
 
 export default function Login({ onLoggedIn }) {
   const [password, setPassword] = useState('');
@@ -26,8 +26,7 @@ export default function Login({ onLoggedIn }) {
       <div className="absolute w-[480px] h-[480px] rounded-full bg-accent-600/15 blur-3xl pointer-events-none" />
       <form onSubmit={submit} className="relative card p-8 w-full max-w-sm">
         <div className="flex flex-col items-center gap-4 mb-8">
-          <LogoMark className="w-20 h-20" />
-          <Wordmark className="text-5xl" />
+          <Wordmark className="text-[42px]" />
         </div>
         <input
           type="password"
