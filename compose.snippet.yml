@@ -3,7 +3,7 @@
 # Añade ADMIN_PASSWORD y SESSION_SECRET al mismo .env antes de levantarlo.
 
   limitarr:
-    build: ./limitarr   # o imagen publicada si se sube a un registry
+    image: ghcr.io/edupufpuf/limitarr:latest   # o build: ./limitarr si tienes el código en local
     container_name: limitarr
     environment:
       - SEERR_URL=http://seerr:5055

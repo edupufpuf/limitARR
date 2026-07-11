@@ -40,20 +40,22 @@ cd ../web && npm install && npm run dev   # :5173, proxy a /api -> :5150
 En el host donde corre el resto del stack (`docker-compose.yml` con
 seerr/tautulli):
 
-1. Copia esta carpeta como `limitarr/` junto al `docker-compose.yml`
-   existente (o publica la imagen y referencia `image:` en vez de `build:`).
-2. Añade el bloque de `compose.snippet.yml` al `docker-compose.yml`.
-3. `docker compose up -d limitarr`.
-4. Abre el panel en `http://<host>:5150` — como no hay contraseña
+1. Añade el bloque de `compose.snippet.yml` al `docker-compose.yml`.
+   Usa la imagen publicada `ghcr.io/edupufpuf/limitarr:latest` (se
+   reconstruye sola en cada push a `main` vía GitHub Actions); si
+   prefieres construir en local, copia esta carpeta como `limitarr/`
+   junto al compose y cambia `image:` por `build: ./limitarr`.
+2. `docker compose up -d limitarr`.
+3. Abre el panel en `http://<host>:5150` — como no hay contraseña
    definida, pedirá crearla en el primer acceso.
-5. Pestaña **Configuración**: URL + API key de Seerr y Tautulli (si no
+4. Pestaña **Configuración**: URL + API key de Seerr y Tautulli (si no
    se rellenaron por env, ver abajo).
-6. Pestaña **Bibliotecas**: pulsa "Sincronizar desde Tautulli" para
+5. Pestaña **Bibliotecas**: pulsa "Sincronizar desde Tautulli" para
    descubrirlas, márcalas `standard`/`4k` y ponles el límite por defecto.
-7. Si ya había solicitudes aprobadas antes de instalarlo (o admins
+6. Si ya había solicitudes aprobadas antes de instalarlo (o admins
    aprobando a mano en Seerr), pestaña **Cupo** → "Importar historial de
    Seerr" para que cuenten desde ya.
-8. En Seerr, cambia el modo de aprobación de películas a **manual** — es
+7. En Seerr, cambia el modo de aprobación de películas a **manual** — es
    limitARR quien aprobará vía API según el cupo disponible.
 
 Todo lo de conexión (Seerr/Tautulli, contraseña de admin, secreto de
