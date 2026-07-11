@@ -85,6 +85,8 @@ saldo = límite − (películas aprobadas para ese usuario en esa biblioteca que
 - Botón "resetear" por usuario+biblioteca en la pestaña Cupo: da por
   vistas las pendientes actuales sin esperar a que el usuario las vea de
   verdad (sin borrar el historial del registro).
+- Para quitar UNA sola película del cupo (sin resetear el resto), ✕ al
+  pasar el ratón sobre su carátula en la tarjeta desplegada.
 
 ## Panel
 
@@ -92,7 +94,10 @@ saldo = límite − (películas aprobadas para ese usuario en esa biblioteca que
   barra de saldo por biblioteca y las carátulas (TMDB) de lo que cada uno
   tiene pendiente de ver. Cabecera con KPIs (usuarios, películas sin ver,
   usuarios sin saldo, aprobadas/bloqueadas en 7 días). Se refresca solo
-  cada minuto.
+  cada minuto. Si la película ya está en Plex, su carátula enlaza a su
+  página de estadísticas en Tautulli — configura la "URL pública" de
+  Tautulli en Configuración si la URL interna (hostname docker) no es
+  accesible desde el navegador.
 - **Registro**: filtrable por decisión y por texto (usuario o título),
   con paginación ("cargar más") y carátula junto al título.
 

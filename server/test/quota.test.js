@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalize, computeBalance, resolveLimit } from '../src/quota.js';
+import { normalize, computeBalance, resolveLimit, dismissPendingItem } from '../src/quota.js';
+import { db } from '../src/db.js';
 
 test('resolveLimit: individual gana a grupo, grupo gana a biblioteca', () => {
   assert.equal(resolveLimit(5, 3, 4), 5);
@@ -76,4 +77,65 @@ test('computeBalance: mismo título aprobado dos veces no duplica pendingItems',
   const r = computeBalance(2, approved, new Set());
   assert.equal(r.outstanding, 2); // sigue restando 2 del cupo
   assert.equal(r.pendingItems.length, 1); // pero solo se muestra una vez
+});
+
+// --- dismissPendingItem (usa la DB en memoria del script de test) ---
+
+const insertDecision = db.prepare(`
+  INSERT INTO decisions_log (request_id, user_id, library_id, media_title, tmdb_id, decision)
+  VALUES (?, ?, ?, ?, ?, 'approved')
+`);
+const pendingCount = db.prepare(`
+  SELECT COUNT(*) AS n FROM decisions_log
+  WHERE user_id = ? AND library_id = ? AND decision = 'approved' AND voided_at IS NULL
+`);
+
+test('dismissPendingItem: anula por tmdbId solo la película pedida', () => {
+  insertDecision.run(1, 10, 1, 'Matrix', 603);
+  insertDecision.run(2, 10, 1, 'Heat', 949);
+
+  const dismissed = dismissPendingItem(10, 1, { tmdbId: 603, title: 'Matrix' });
+  assert.equal(dismissed, 1);
+  assert.equal(pendingCount.get(10, 1).n, 1); // Heat sigue contando
+});
+
+test('dismissPendingItem: sin tmdbId matchea por título normalizado', () => {
+  insertDecision.run(3, 11, 1, 'Amélie', null);
+
+  const dismissed = dismissPendingItem(11, 1, { tmdbId: null, title: 'amelie' });
+  assert.equal(dismissed, 1);
+  assert.equal(pendingCount.get(11, 1).n, 0);
+});
+
+test('dismissPendingItem: anula filas duplicadas del mismo título de una vez', () => {
+  insertDecision.run(4, 12, 1, 'Matrix', 603);
+  insertDecision.run(5, 12, 1, 'Matrix', 603);
+
+  const dismissed = dismissPendingItem(12, 1, { tmdbId: 603, title: 'Matrix' });
+  assert.equal(dismissed, 2);
+  assert.equal(pendingCount.get(12, 1).n, 0);
+});
+
+test('dismissPendingItem: con series, anula solo la temporada pedida (mismo tmdb_id)', () => {
+  const insertSeason = db.prepare(`
+    INSERT INTO decisions_log (request_id, user_id, library_id, media_title, media_type, tmdb_id, season_number, decision)
+    VALUES (?, ?, ?, ?, 'tv', ?, ?, 'approved')
+  `);
+  insertSeason.run(20, 15, 3, 'Breaking Bad - Temporada 1', 1396, 1);
+  insertSeason.run(21, 15, 3, 'Breaking Bad - Temporada 2', 1396, 2);
+
+  const dismissed = dismissPendingItem(15, 3, { tmdbId: 1396, seasonNumber: 2, title: 'Breaking Bad - Temporada 2' });
+  assert.equal(dismissed, 1);
+  assert.equal(pendingCount.get(15, 3).n, 1); // la temporada 1 sigue contando
+});
+
+test('dismissPendingItem: no toca a otros usuarios ni otras bibliotecas', () => {
+  insertDecision.run(6, 13, 1, 'Heat', 949);
+  insertDecision.run(7, 13, 2, 'Heat', 949);
+  insertDecision.run(8, 14, 1, 'Heat', 949);
+
+  const dismissed = dismissPendingItem(13, 1, { tmdbId: 949, title: 'Heat' });
+  assert.equal(dismissed, 1);
+  assert.equal(pendingCount.get(13, 2).n, 1);
+  assert.equal(pendingCount.get(14, 1).n, 1);
 });

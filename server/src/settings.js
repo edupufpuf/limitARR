@@ -1,7 +1,10 @@
 import { db } from './db.js';
 
-const KEYS = ['seerr_url', 'seerr_api_key', 'tautulli_url', 'tautulli_api_key'];
-const URL_KEYS = new Set(['seerr_url', 'tautulli_url']);
+const KEYS = ['seerr_url', 'seerr_api_key', 'tautulli_url', 'tautulli_api_key', 'tautulli_public_url'];
+const URL_KEYS = new Set(['seerr_url', 'tautulli_url', 'tautulli_public_url']);
+// Claves opcionales: enviar cadena vacía las borra (en el resto, vacío = "no cambiar",
+// para poder guardar sin reenviar API keys ya configuradas).
+const CLEARABLE_KEYS = new Set(['tautulli_public_url']);
 
 function normalize(key, value) {
   const trimmed = value.trim();
@@ -22,6 +25,7 @@ export function seedSettingsFromEnv() {
     seerr_api_key: process.env.SEERR_API_KEY,
     tautulli_url: process.env.TAUTULLI_URL,
     tautulli_api_key: process.env.TAUTULLI_API_KEY,
+    tautulli_public_url: process.env.TAUTULLI_PUBLIC_URL,
   };
   for (const key of KEYS) {
     if (envDefaults[key] && !getStmt.get(key)) upsert.run(key, normalize(key, envDefaults[key]));
@@ -35,11 +39,19 @@ export function getSettings() {
 }
 
 // Only overwrites keys present (and non-empty) in `partial`, so callers can
-// change just the URL without having to resend an existing API key.
+// change just the URL without having to resend an existing API key. Las claves
+// CLEARABLE sí aceptan vacío: borrarlas del formulario las elimina.
+const deleteStmt = db.prepare('DELETE FROM settings WHERE key = ?');
+
 export function updateSettings(partial) {
   for (const key of KEYS) {
     const value = partial[key];
-    if (typeof value === 'string' && value.trim() !== '') upsert.run(key, normalize(key, value));
+    if (typeof value !== 'string') continue;
+    if (value.trim() === '') {
+      if (CLEARABLE_KEYS.has(key)) deleteStmt.run(key);
+      continue;
+    }
+    upsert.run(key, normalize(key, value));
   }
 }
 
@@ -67,5 +79,6 @@ export function getSettingsForDisplay() {
     tautulli_url: s.tautulli_url,
     tautulli_api_key_set: Boolean(s.tautulli_api_key),
     tautulli_api_key_masked: mask(s.tautulli_api_key),
+    tautulli_public_url: s.tautulli_public_url,
   };
 }

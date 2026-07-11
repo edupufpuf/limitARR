@@ -5,6 +5,7 @@ import {
   getUserEpisodeHistory,
   getUserMovieHistory,
   getUsers as getTautulliUsers,
+  searchMovies,
 } from './services/tautulli.js';
 import {
   getRequestStatus,
@@ -214,6 +215,26 @@ export function resetQuota(userId, libraryId) {
   upsertReset.run(userId, libraryId);
 }
 
+// rating_key de Plex por título normalizado, para enlazar cada pendiente con su
+// página de estadísticas en Tautulli. Solo se memorizan aciertos: una película
+// aún no descargada no está en Plex todavía, y cachear el fallo la dejaría sin
+// enlace para siempre aunque aparezca más tarde.
+const ratingKeyCache = new Map();
+
+async function lookupRatingKey(title) {
+  if (!title) return null;
+  const key = normalize(title);
+  if (ratingKeyCache.has(key)) return ratingKeyCache.get(key);
+  try {
+    const results = await searchMovies(title);
+    const hit = results.find((m) => normalize(m.title) === key);
+    if (hit) ratingKeyCache.set(key, hit.ratingKey);
+    return hit?.ratingKey ?? null;
+  } catch {
+    return null; // sin Tautulli no hay enlace, pero el cupo sigue funcionando
+  }
+}
+
 // La pestaña Cupo lee de quota_cache, no calcula en vivo — cualquier cosa que
 // cambie el resultado de getBalance (override, reset, ...) tiene que llamar esto
 // para que el panel lo refleje al momento en vez de esperar al siguiente sondeo.
@@ -224,8 +245,40 @@ export async function refreshQuotaCache(userId, libraryId) {
     return { limit: 0, outstanding: 0, balance: 0, pendingItems: [], disabled: true };
   }
   const { limit, outstanding, balance, pendingItems } = await getBalance(userId, libraryId);
+  for (const item of pendingItems) {
+    // Solo películas: el título de una temporada ("X - Temporada 2") no
+    // matchea con la búsqueda de Tautulli.
+    item.ratingKey = item.mediaType === 'tv' ? null : await lookupRatingKey(item.title);
+  }
   upsertQuotaCache.run(userId, libraryId, limit, outstanding, balance, JSON.stringify(pendingItems));
   return { limit, outstanding, balance, pendingItems };
+}
+
+const getPendingApprovedRows = db.prepare(`
+  SELECT id, media_title, tmdb_id, season_number FROM decisions_log
+  WHERE user_id = ? AND library_id = ? AND decision = 'approved' AND voided_at IS NULL
+`);
+
+// Quita a mano UN pendiente del cupo de un usuario (botón ✕ del panel), sin
+// resetear todo: anula (voided_at) sus filas aprobadas, igual que hace la
+// reconciliación automática con las canceladas. Matchea por tmdb_id+temporada
+// (una serie comparte tmdb_id entre temporadas) o, en su defecto, por título
+// normalizado — hay filas antiguas/importadas sin tmdb_id.
+export function dismissPendingItem(userId, libraryId, { tmdbId, seasonNumber, title }) {
+  const wanted = normalize(title);
+  let dismissed = 0;
+  for (const row of getPendingApprovedRows.all(userId, libraryId)) {
+    const matches =
+      (tmdbId != null &&
+        row.tmdb_id === Number(tmdbId) &&
+        (row.season_number ?? null) === (seasonNumber ?? null)) ||
+      (wanted !== '' && normalize(row.media_title) === wanted);
+    if (matches) {
+      markVoided.run(row.id);
+      dismissed += 1;
+    }
+  }
+  return dismissed;
 }
 
 // Sin esto, una aprobada que nunca llega a ver la luz (cancelada por el usuario, o

@@ -10,7 +10,7 @@ import { needsSetup, setPassword, checkPassword, getWebhookSecret } from '../aut
 import { getUsers, getLibraries } from '../services/tautulli.js';
 import { listPendingRequests, getSeerrUsers, configureWebhook } from '../services/seerr.js';
 import { getSettingsForDisplay, updateSettings } from '../settings.js';
-import { resetQuota, importSeerrHistory, refreshQuotaCache } from '../quota.js';
+import { resetQuota, importSeerrHistory, refreshQuotaCache, dismissPendingItem } from '../quota.js';
 import { matchByEmailOrUsername } from '../userMatch.js';
 import { runPollCycle } from '../scheduler.js';
 import { getVersionInfo } from '../services/version.js';
@@ -100,8 +100,8 @@ router.get('/settings', (req, res) => {
 });
 
 router.put('/settings', (req, res) => {
-  const { seerr_url, seerr_api_key, tautulli_url, tautulli_api_key } = req.body || {};
-  updateSettings({ seerr_url, seerr_api_key, tautulli_url, tautulli_api_key });
+  const { seerr_url, seerr_api_key, tautulli_url, tautulli_api_key, tautulli_public_url } = req.body || {};
+  updateSettings({ seerr_url, seerr_api_key, tautulli_url, tautulli_api_key, tautulli_public_url });
   res.json(getSettingsForDisplay());
 });
 
@@ -449,6 +449,20 @@ router.post('/quota/reset/:userId/:libraryId', ah(async (req, res) => {
   resetQuota(userId, libraryId);
   const result = await refreshQuotaCache(userId, libraryId);
   res.json({ ok: true, ...result });
+}));
+
+// Quita UN pendiente concreto (película o temporada) del cupo de un usuario
+// (sin resetear el resto), identificado por tmdbId+temporada o título.
+// Refresca la caché para que el panel lo refleje al momento.
+router.post('/quota/dismiss/:userId/:libraryId', ah(async (req, res) => {
+  const { userId, libraryId } = req.params;
+  const { tmdbId, seasonNumber, title } = req.body || {};
+  if (tmdbId == null && !title) {
+    return res.status(400).json({ error: 'tmdbId_or_title_required' });
+  }
+  const dismissed = dismissPendingItem(userId, libraryId, { tmdbId, seasonNumber, title });
+  const result = await refreshQuotaCache(userId, libraryId);
+  res.json({ ok: true, dismissed, ...result });
 }));
 
 // --- Stats (KPIs para la cabecera de la pestaña Cupo) ---

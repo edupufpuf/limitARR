@@ -51,7 +51,7 @@ db.exec(`
     limit_applied INTEGER,
     decision TEXT NOT NULL,           -- 'approved' | 'no_quota' | 'no_library_config' | 'unmatched_user'
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    voided_at TEXT                    -- rellenado si la solicitud se canceló en Seerr tras aprobarse
+    voided_at TEXT                    -- rellenado si la solicitud se canceló en Seerr tras aprobarse, o se quitó a mano del cupo
   );
 
   CREATE TABLE IF NOT EXISTS settings (

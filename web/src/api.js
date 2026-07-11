@@ -45,6 +45,8 @@ export const api = {
   quota: () => request('/quota'),
   recalculateQuota: () => request('/quota/recalculate', { method: 'POST' }),
   resetQuota: (userId, libraryId) => request(`/quota/reset/${userId}/${libraryId}`, { method: 'POST' }),
+  dismissPending: (userId, libraryId, body) =>
+    request(`/quota/dismiss/${userId}/${libraryId}`, { method: 'POST', body: JSON.stringify(body) }),
   importSeerrHistory: () => request('/quota/import-seerr-history', { method: 'POST' }),
   decisions: (params = {}) => request(`/decisions?${new URLSearchParams(params)}`),
   stats: () => request('/stats'),

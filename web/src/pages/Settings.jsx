@@ -17,6 +17,7 @@ export default function Settings() {
     seerr_api_key: '',
     tautulli_url: '',
     tautulli_api_key: '',
+    tautulli_public_url: '',
   });
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -33,7 +34,12 @@ export default function Settings() {
   function load() {
     api.settings().then((s) => {
       setSettings(s);
-      setForm((f) => ({ ...f, seerr_url: s.seerr_url ?? '', tautulli_url: s.tautulli_url ?? '' }));
+      setForm((f) => ({
+        ...f,
+        seerr_url: s.seerr_url ?? '',
+        tautulli_url: s.tautulli_url ?? '',
+        tautulli_public_url: s.tautulli_public_url ?? '',
+      }));
     });
     api.webhookInfo().then((r) => setWebhookUrl(r.url));
   }
@@ -142,6 +148,15 @@ export default function Settings() {
             value={form.tautulli_api_key}
             onChange={(e) => setForm({ ...form, tautulli_api_key: e.target.value })}
             placeholder={settings.tautulli_api_key_set ? '•••• dejar en blanco para no cambiar' : ''}
+            className="input mb-3"
+          />
+          <label className="label">
+            URL pública <span className="text-gray-600">(opcional — para abrir Tautulli desde el navegador)</span>
+          </label>
+          <input
+            value={form.tautulli_public_url}
+            onChange={(e) => setForm({ ...form, tautulli_public_url: e.target.value })}
+            placeholder="http://192.168.1.10:8181 — vacío = usar la URL de arriba"
             className="input"
           />
         </fieldset>

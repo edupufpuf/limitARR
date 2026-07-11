@@ -105,10 +105,18 @@ function QuotaBar({ balance, limit }) {
   );
 }
 
-// Póster grande con el título en overlay sobre gradiente, estilo Seerr.
-function PendingPoster({ item }) {
+// Póster grande con el título en overlay sobre gradiente, estilo Seerr. Si la
+// película ya existe en Plex (hay ratingKey) y hay URL de Tautulli, el póster
+// enlaza a su página de estadísticas; el ✕ (al pasar el ratón) la quita del cupo.
+function PendingPoster({ item, statsBase, onDismiss }) {
+  const href = statsBase && item.ratingKey ? `${statsBase}/info?rating_key=${item.ratingKey}` : null;
+  const Wrapper = href ? 'a' : 'div';
   return (
-    <div className="relative w-16 h-24 rounded-lg overflow-hidden shadow-card group flex-shrink-0" title={item.title ?? ''}>
+    <Wrapper
+      {...(href ? { href, target: '_blank', rel: 'noreferrer' } : {})}
+      className="relative block w-16 h-24 rounded-lg overflow-hidden shadow-card group flex-shrink-0"
+      title={item.title ?? ''}
+    >
       {item.posterUrl ? (
         <img
           src={item.posterUrl}
@@ -124,7 +132,18 @@ function PendingPoster({ item }) {
           {item.title ?? '—'}
         </span>
       </div>
-    </div>
+      <button
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onDismiss(item);
+        }}
+        className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/70 text-gray-200 hover:bg-accent-500 hover:text-white text-[11px] leading-none hidden group-hover:flex items-center justify-center"
+        title="Quitar del cupo"
+      >
+        ✕
+      </button>
+    </Wrapper>
   );
 }
 
@@ -143,7 +162,7 @@ function PosterStack({ libraries }) {
   );
 }
 
-function UserCard({ user, expanded, onToggle, onReset, resetting }) {
+function UserCard({ user, expanded, onToggle, onReset, onDismiss, resetting, statsBase }) {
   const worst = worstLib(user.libraries);
   const pending = totalOutstanding(user.libraries);
   return (
@@ -194,7 +213,12 @@ function UserCard({ user, expanded, onToggle, onReset, resetting }) {
                 {lib.pendingItems?.length > 0 && (
                   <div className="flex flex-wrap gap-2 mt-3">
                     {lib.pendingItems.map((item, i) => (
-                      <PendingPoster key={item.tmdbId ?? `${key}-${i}`} item={item} />
+                      <PendingPoster
+                        key={`${item.tmdbId ?? 'x'}-${item.seasonNumber ?? 0}-${i}`}
+                        item={item}
+                        statsBase={statsBase}
+                        onDismiss={(it) => onDismiss(user.userId, lib.libraryId, it)}
+                      />
                     ))}
                   </div>
                 )}
@@ -217,6 +241,9 @@ export default function Quota() {
   const [resetting, setResetting] = useState({});
   const [expanded, setExpanded] = useState(new Set());
   const [activeFilter, setActiveFilter] = useState('all');
+  // Base para enlazar pósters con Tautulli: la URL pública si está configurada
+  // (la interna suele ser un hostname docker que el navegador no resuelve).
+  const [statsBase, setStatsBase] = useState('');
 
   function load() {
     api.quota().then(setUsers);
@@ -225,6 +252,7 @@ export default function Quota() {
 
   useEffect(() => {
     load();
+    api.settings().then((s) => setStatsBase(s.tautulli_public_url || s.tautulli_url || ''));
     const timer = setInterval(load, REFRESH_MS);
     return () => clearInterval(timer);
   }, []);
@@ -270,6 +298,16 @@ export default function Quota() {
     await api.resetQuota(userId, libraryId);
     load();
     setResetting((r) => ({ ...r, [key]: false }));
+  }
+
+  async function dismiss(userId, libraryId, item) {
+    if (!confirm(`¿Quitar "${item.title ?? 'este pendiente'}" del cupo?`)) return;
+    await api.dismissPending(userId, libraryId, {
+      tmdbId: item.tmdbId,
+      seasonNumber: item.seasonNumber ?? null,
+      title: item.title,
+    });
+    load();
   }
 
   function toggle(userId) {
@@ -377,7 +415,9 @@ export default function Quota() {
             expanded={expanded.has(u.userId)}
             onToggle={() => toggle(u.userId)}
             onReset={reset}
+            onDismiss={dismiss}
             resetting={resetting}
+            statsBase={statsBase}
           />
         ))}
       </div>

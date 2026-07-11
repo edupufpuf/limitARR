@@ -42,6 +42,18 @@ export async function getUsers() {
   }));
 }
 
+// Búsqueda en Plex vía Tautulli, para localizar el rating_key de una película
+// y poder enlazar su página de estadísticas (/info?rating_key=X). Solo devuelve
+// resultados de tipo película; el match por título lo hace el llamante (quota.js
+// tiene el normalizador de títulos).
+export async function searchMovies(query) {
+  const data = await call('search', { query, limit: 10 });
+  return (data?.results_list?.movie || []).map((m) => ({
+    ratingKey: Number(m.rating_key),
+    title: m.title,
+  }));
+}
+
 // Watch history for a user restricted to one movie library.
 // Returns rows with a normalized 0-100 watched percentage each.
 export async function getUserMovieHistory(userId, sectionId, limit = 200) {
