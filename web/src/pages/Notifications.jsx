@@ -10,6 +10,8 @@ export default function Notifications() {
   const [noQuotaMessage, setNoQuotaMessage] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
   const [groupTestResult, setGroupTestResult] = useState(null);
+  const [pendingSummaryResult, setPendingSummaryResult] = useState(null);
+  const [sendingPendingSummary, setSendingPendingSummary] = useState(false);
 
   const [links, setLinks] = useState([]);
   const [users, setUsers] = useState([]);
@@ -86,6 +88,23 @@ export default function Notifications() {
       setGroupTestResult('enviado ✓');
     } catch (err) {
       setGroupTestResult(`error: ${err.message}`);
+    }
+  }
+
+  async function sendPendingSummary() {
+    setSendingPendingSummary(true);
+    setPendingSummaryResult('enviando…');
+    try {
+      const result = await api.sendPendingSummary();
+      if (result.mode === 'group') {
+        setPendingSummaryResult(`enviado al grupo · ${result.users} usuario(s) · ${result.messages} mensaje(s)`);
+      } else {
+        setPendingSummaryResult(`enviado por DM · ${result.sent} usuario(s) · ${result.messages} mensaje(s) · ${result.skipped} sin vincular`);
+      }
+    } catch (err) {
+      setPendingSummaryResult(`error: ${err.message}`);
+    } finally {
+      setSendingPendingSummary(false);
     }
   }
 
@@ -176,6 +195,21 @@ export default function Notifications() {
           {savingSettings ? 'Guardando…' : 'Guardar'}
         </button>
       </form>
+
+      <div className="card p-4 mb-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="font-semibold">Resumen de pendientes</h3>
+            <p className="text-xs text-gray-500 mt-1">
+              Envía solo texto con lo que queda por ver. En modo grupo manda un resumen común; en modo DM manda uno a cada usuario vinculado.
+            </p>
+          </div>
+          <button onClick={sendPendingSummary} disabled={sendingPendingSummary} className="btn btn-primary">
+            {sendingPendingSummary ? 'Enviando…' : 'Enviar resumen'}
+          </button>
+        </div>
+        {pendingSummaryResult && <p className="text-xs text-gray-500 mt-3">{pendingSummaryResult}</p>}
+      </div>
 
       <div className="flex items-center justify-between mb-3">
         <h3 className="font-semibold">Descubrir chats</h3>

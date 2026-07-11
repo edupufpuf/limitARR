@@ -65,4 +65,5 @@ export const api = {
   discoverChats: () => request('/notifications/discover'),
   testNotification: (userId) => request(`/notifications/test/${userId}`, { method: 'POST' }),
   testGroupNotification: () => request('/notifications/test-group', { method: 'POST' }),
+  sendPendingSummary: () => request('/notifications/pending-summary', { method: 'POST' }),
 };

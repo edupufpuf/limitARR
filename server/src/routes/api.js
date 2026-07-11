@@ -574,6 +574,117 @@ router.get('/notifications/discover', (req, res) => {
   res.json(messages);
 });
 
+function pendingTitle(item) {
+  if (!item?.title) return null;
+  return item.title;
+}
+
+function buildPendingSummaryRows() {
+  const rows = db.prepare(`
+    SELECT qc.user_id, qc.library_id, qc.outstanding, qc.pending_items, l.name AS library_name
+    FROM quota_cache qc
+    JOIN libraries l ON l.id = qc.library_id
+    WHERE l.enabled = 1 AND qc.outstanding > 0
+    ORDER BY qc.user_id, l.name
+  `).all();
+  const users = db.prepare('SELECT user_id, chat_id, label FROM telegram_links').all();
+  const linkMap = new Map(users.map((u) => [u.user_id, u]));
+
+  const byUser = new Map();
+  for (const row of rows) {
+    if (!byUser.has(row.user_id)) {
+      byUser.set(row.user_id, {
+        userId: row.user_id,
+        username: row.username,
+        link: linkMap.get(row.user_id) ?? null,
+        libraries: [],
+      });
+    }
+    let items = [];
+    try {
+      items = JSON.parse(row.pending_items || '[]').map(pendingTitle).filter(Boolean);
+    } catch {
+      items = [];
+    }
+    byUser.get(row.user_id).libraries.push({
+      libraryName: row.library_name,
+      outstanding: row.outstanding,
+      items,
+    });
+  }
+  return [...byUser.values()];
+}
+
+async function hydratePendingSummaryUsers(summaries) {
+  const users = await getUsers();
+  const userMap = new Map(users.map((u) => [u.id, u]));
+  return summaries.map((summary) => ({
+    ...summary,
+    username: userMap.get(summary.userId)?.username ?? summary.link?.label ?? `user#${summary.userId}`,
+  }));
+}
+
+function formatPendingSummaryForUser(summary, { personal = false } = {}) {
+  const lines = [personal ? '📋 Te queda por ver:' : `👤 ${summary.username}`];
+  for (const lib of summary.libraries) {
+    lines.push(`• ${lib.libraryName} (${lib.outstanding})`);
+    const items = lib.items.length > 0 ? lib.items : ['Sin título guardado'];
+    for (const title of items) lines.push(`  - ${title}`);
+  }
+  return lines.join('\n');
+}
+
+function chunkTelegramText(text) {
+  const chunks = [];
+  let current = '';
+  for (const block of text.split('\n\n')) {
+    const next = current ? `${current}\n\n${block}` : block;
+    if (next.length > 3600 && current) {
+      chunks.push(current);
+      current = block;
+    } else {
+      current = next;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+router.post('/notifications/pending-summary', ah(async (req, res) => {
+  const target = getNotifyTarget();
+  const summaries = await hydratePendingSummaryUsers(buildPendingSummaryRows());
+  const withPending = summaries.filter((s) => s.libraries.length > 0);
+
+  if (target.mode === 'group') {
+    if (!target.groupChatId) return res.status(404).json({ error: 'group_not_configured' });
+    const body = withPending.length > 0
+      ? `📋 Pendientes por ver\n\n${withPending.map((s) => formatPendingSummaryForUser(s)).join('\n\n')}`
+      : '📋 No hay nada pendiente de ver ahora mismo.';
+    let sent = 0;
+    for (const chunk of chunkTelegramText(body)) {
+      await sendMessage(target.groupChatId, chunk, { messageThreadId: target.groupTopicId });
+      sent += 1;
+    }
+    return res.json({ ok: true, mode: 'group', users: withPending.length, messages: sent });
+  }
+
+  let messages = 0;
+  let sent = 0;
+  let skipped = 0;
+  for (const summary of withPending) {
+    if (!summary.link?.chat_id) {
+      skipped += 1;
+      continue;
+    }
+    for (const chunk of chunkTelegramText(formatPendingSummaryForUser(summary, { personal: true }))) {
+      await sendMessage(summary.link.chat_id, chunk);
+      messages += 1;
+    }
+    sent += 1;
+  }
+  res.json({ ok: true, mode: 'dm', users: withPending.length, sent, skipped, messages });
+}));
+
 router.post('/notifications/test/:userId', async (req, res) => {
   const link = db.prepare('SELECT chat_id FROM telegram_links WHERE user_id = ?').get(req.params.userId);
   if (!link) return res.status(404).json({ error: 'not_linked' });
