@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import Quota from './Quota.jsx';
 import Libraries from './Libraries.jsx';
@@ -20,7 +20,12 @@ const TABS = {
 
 export default function Dashboard({ onLoggedOut }) {
   const [tab, setTab] = useState('quota');
+  const [version, setVersion] = useState(null);
   const { Component, label } = TABS[tab];
+
+  useEffect(() => {
+    api.version().then(setVersion).catch(() => {});
+  }, []);
 
   async function logout() {
     await api.logout();
@@ -56,6 +61,25 @@ export default function Dashboard({ onLoggedOut }) {
           <IconLogout className="w-5 h-5 flex-shrink-0" />
           Cerrar sesión
         </button>
+        {version && (
+          <div className="px-3 pt-3 mt-2 border-t border-bg-700/60 text-[11px] text-gray-600">
+            <span className="tabular-nums">
+              v{version.version} · {version.sha ?? 'dev'}
+            </span>
+            {version.updateAvailable && (
+              <a
+                href="https://github.com/edupufpuf/limitARR"
+                target="_blank"
+                rel="noreferrer"
+                title={`Nueva imagen en GHCR: ${version.latestSha}`}
+                className="flex items-center gap-1.5 mt-1 text-accent-400 hover:text-accent-300"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-accent-400 animate-pulse" />
+                Actualización disponible
+              </a>
+            )}
+          </div>
+        )}
       </nav>
 
       {/* Top bar — solo móvil */}

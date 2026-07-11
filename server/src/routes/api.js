@@ -13,6 +13,7 @@ import { getSettingsForDisplay, updateSettings } from '../settings.js';
 import { resetQuota, importSeerrHistory, refreshQuotaCache } from '../quota.js';
 import { matchByEmailOrUsername } from '../userMatch.js';
 import { runPollCycle } from '../scheduler.js';
+import { getVersionInfo } from '../services/version.js';
 import {
   getBotTokenForDisplay,
   setBotToken,
@@ -75,6 +76,10 @@ router.post('/webhook/seerr/:secret', (req, res) => {
 });
 
 router.use(requireAuth);
+
+router.get('/version', ah(async (req, res) => {
+  res.json(await getVersionInfo());
+}));
 
 router.post('/auth/change-password', (req, res) => {
   const { currentPassword, newPassword } = req.body || {};

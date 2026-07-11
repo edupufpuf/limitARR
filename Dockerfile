@@ -17,8 +17,12 @@ COPY server/src ./src
 
 # --- runtime ---
 FROM node:20-bookworm-slim AS runtime
+# SHA del commit, lo pasa el workflow; el panel lo muestra y lo compara con la
+# imagen `latest` de GHCR para avisar de actualizaciones. Vacío en builds locales.
+ARG GIT_SHA=
 ENV NODE_ENV=production \
-    DB_PATH=/data/limitarr.db
+    DB_PATH=/data/limitarr.db \
+    GIT_SHA=$GIT_SHA
 WORKDIR /app/server
 COPY --from=server-build /server/node_modules ./node_modules
 COPY --from=server-build /server/package.json ./package.json
