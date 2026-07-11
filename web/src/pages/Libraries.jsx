@@ -19,6 +19,9 @@ function LibraryCard({ lib, onSaved }) {
       <div className="flex items-center justify-between mb-3">
         <h3 className="font-semibold">
           {lib.name} <span className="text-gray-500 text-xs">#{lib.id}</span>
+          <span className="ml-2 text-gray-500 text-xs">
+            {lib.section_type === 'show' ? 'serie' : 'película'}
+          </span>
         </h3>
         <label className="flex items-center gap-1 text-sm">
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
@@ -81,7 +84,7 @@ export default function Libraries() {
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-        <h2 className="text-2xl font-bold tracking-tight">Bibliotecas de películas</h2>
+        <h2 className="text-2xl font-bold tracking-tight">Bibliotecas</h2>
         <button
           onClick={sync}
           disabled={syncing}

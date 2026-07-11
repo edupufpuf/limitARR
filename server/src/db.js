@@ -12,7 +12,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS libraries (
     id INTEGER PRIMARY KEY,           -- Tautulli section_id
     name TEXT NOT NULL,
-    section_type TEXT NOT NULL,       -- 'movie' (only type currently acted on)
+    section_type TEXT NOT NULL,       -- 'movie' | 'show'
     kind TEXT NOT NULL DEFAULT 'standard' CHECK (kind IN ('standard', '4k')),
     enabled INTEGER NOT NULL DEFAULT 1,
     default_limit INTEGER NOT NULL DEFAULT 4  -- max solicitudes sin ver simultáneas, por usuario
@@ -44,7 +44,9 @@ db.exec(`
     username TEXT,
     library_id INTEGER,
     media_title TEXT,
+    media_type TEXT NOT NULL DEFAULT 'movie',
     tmdb_id INTEGER,
+    season_number INTEGER,
     balance_before INTEGER,
     limit_applied INTEGER,
     decision TEXT NOT NULL,           -- 'approved' | 'no_quota' | 'no_library_config' | 'unmatched_user'
@@ -122,6 +124,8 @@ function addColumnIfMissing(sql) {
 addColumnIfMissing('ALTER TABLE decisions_log ADD COLUMN voided_at TEXT');
 // Póster TMDB de la película, para mostrarla en el panel (Cupo y Registro).
 addColumnIfMissing('ALTER TABLE decisions_log ADD COLUMN poster_url TEXT');
-// JSON [{title, tmdbId, posterUrl}] con las películas que están consumiendo el
-// cupo, para que la pestaña Cupo enseñe QUÉ tiene pendiente cada usuario.
+// JSON [{title, mediaType, tmdbId, seasonNumber, posterUrl}] con el contenido que
+// está consumiendo el cupo, para que la pestaña Cupo enseñe QUÉ tiene pendiente.
 addColumnIfMissing('ALTER TABLE quota_cache ADD COLUMN pending_items TEXT');
+addColumnIfMissing("ALTER TABLE decisions_log ADD COLUMN media_type TEXT NOT NULL DEFAULT 'movie'");
+addColumnIfMissing('ALTER TABLE decisions_log ADD COLUMN season_number INTEGER');

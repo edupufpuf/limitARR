@@ -37,7 +37,9 @@ test('computeBalance: aprobada y no vista resta cupo', () => {
   const r = computeBalance(1, approved, new Set());
   assert.equal(r.balance, 0);
   assert.equal(r.outstanding, 1);
-  assert.deepEqual(r.pendingItems, [{ title: 'Matrix', tmdbId: 603, posterUrl: 'https://img/x.jpg' }]);
+  assert.deepEqual(r.pendingItems, [
+    { title: 'Matrix', mediaType: 'movie', tmdbId: 603, seasonNumber: null, posterUrl: 'https://img/x.jpg' },
+  ]);
 });
 
 test('computeBalance: aprobada y vista libera cupo', () => {

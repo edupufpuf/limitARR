@@ -22,7 +22,14 @@ export async function getMovieLibraries() {
   const data = await call('get_library_names');
   return data
     .filter((lib) => lib.section_type === 'movie')
-    .map((lib) => ({ id: Number(lib.section_id), name: lib.section_name }));
+    .map((lib) => ({ id: Number(lib.section_id), name: lib.section_name, sectionType: lib.section_type }));
+}
+
+export async function getLibraries() {
+  const data = await call('get_library_names');
+  return data
+    .filter((lib) => lib.section_type === 'movie' || lib.section_type === 'show')
+    .map((lib) => ({ id: Number(lib.section_id), name: lib.section_name, sectionType: lib.section_type }));
 }
 
 export async function getUsers() {
@@ -52,4 +59,46 @@ export async function getUserMovieHistory(userId, sectionId, limit = 200) {
     }
     return { title: row.full_title || row.title, percent: Math.max(0, Math.min(100, percent)) };
   });
+}
+
+export async function getUserEpisodeHistory(userId, sectionId, limit = 1000) {
+  const data = await call('get_history', {
+    user_id: userId,
+    section_id: sectionId,
+    length: limit,
+    media_type: 'episode',
+  });
+  return (data.data || []).map((row) => {
+    let percent = Number(row.percent_complete);
+    if (!Number.isFinite(percent)) {
+      percent = Number(row.watched_status) * 100;
+    }
+    return {
+      title: row.full_title || row.title,
+      showTitle: row.grandparent_title,
+      seasonNumber: Number(row.parent_media_index),
+      episodeNumber: Number(row.media_index),
+      ratingKey: String(row.rating_key),
+      seasonRatingKey: row.parent_rating_key ? String(row.parent_rating_key) : null,
+      showRatingKey: row.grandparent_rating_key ? String(row.grandparent_rating_key) : null,
+      percent: Math.max(0, Math.min(100, percent)),
+    };
+  });
+}
+
+export async function getSeasonEpisodes(showRatingKey, seasonNumber) {
+  if (!showRatingKey || !seasonNumber) return [];
+  const seasons = await call('get_children_metadata', { rating_key: showRatingKey });
+  const season = (seasons.children_list || []).find(
+    (item) => Number(item.media_index) === Number(seasonNumber)
+  );
+  if (!season?.rating_key) return [];
+  const episodes = await call('get_children_metadata', { rating_key: season.rating_key });
+  return (episodes.children_list || [])
+    .filter((item) => item.media_type === 'episode')
+    .map((item) => ({
+      ratingKey: String(item.rating_key),
+      episodeNumber: Number(item.media_index),
+      title: item.title,
+    }));
 }

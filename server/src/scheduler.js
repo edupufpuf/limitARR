@@ -1,6 +1,6 @@
 import { db } from './db.js';
 import { config } from './config.js';
-import { listPendingMovieRequests, approveRequest, getMovieDetails } from './services/seerr.js';
+import { listPendingRequests, approveRequest, getMediaDetails } from './services/seerr.js';
 import { getUsers } from './services/tautulli.js';
 import { getBalance, reconcileVoidedRequests, refreshQuotaCache } from './quota.js';
 import { sendMessage, getNotifyTarget, pendingButton } from './services/telegram.js';
@@ -8,13 +8,19 @@ import { matchByEmailOrUsername } from './userMatch.js';
 
 const insertLog = db.prepare(`
   INSERT INTO decisions_log
-    (request_id, user_id, username, library_id, media_title, tmdb_id, poster_url, balance_before, limit_applied, decision)
+    (request_id, user_id, username, library_id, media_title, media_type, tmdb_id, season_number, poster_url, balance_before, limit_applied, decision)
   VALUES
-    (@requestId, @userId, @username, @libraryId, @mediaTitle, @tmdbId, @posterUrl, @balanceBefore, @limitApplied, @decision)
+    (@requestId, @userId, @username, @libraryId, @mediaTitle, @mediaType, @tmdbId, @seasonNumber, @posterUrl, @balanceBefore, @limitApplied, @decision)
 `);
-const getLibraryByKind = db.prepare(`SELECT * FROM libraries WHERE kind = ? AND enabled = 1 LIMIT 1`);
+const getLibraryForRequest = db.prepare(`
+  SELECT * FROM libraries WHERE section_type = ? AND kind = ? AND enabled = 1 LIMIT 1
+`);
 const getLastDecision = db.prepare(`
-  SELECT decision FROM decisions_log WHERE request_id = ? ORDER BY id DESC LIMIT 1
+  SELECT decision FROM decisions_log
+  WHERE request_id = ?
+    AND media_type = ?
+    AND COALESCE(season_number, -1) = COALESCE(?, -1)
+  ORDER BY id DESC LIMIT 1
 `);
 const getLibraryName = db.prepare('SELECT name FROM libraries WHERE id = ?');
 const getChatId = db.prepare('SELECT chat_id FROM telegram_links WHERE user_id = ?');
@@ -22,7 +28,7 @@ const getChatId = db.prepare('SELECT chat_id FROM telegram_links WHERE user_id =
 // Avoids re-logging (and re-notifying) the same still-pending request every poll
 // cycle when nothing about its situation has changed since the last time.
 function logIfChanged(base, decision) {
-  const last = getLastDecision.get(base.requestId)?.decision;
+  const last = getLastDecision.get(base.requestId, base.mediaType, base.seasonNumber ?? null)?.decision;
   if (last === decision) return false;
   insertLog.run({ ...base, decision });
   return true;
@@ -36,14 +42,15 @@ async function notifyNoQuota(base) {
   try {
     if (target.mode === 'group') {
       if (!target.groupChatId) return;
-      const text = `🔴 ${base.username} se ha pasado del cupo en ${libraryName} pidiendo "${base.mediaTitle ?? 'una película'}".`;
+      const unit = base.mediaType === 'tv' ? 'una temporada' : 'una película';
+      const text = `🔴 ${base.username} se ha pasado del cupo en ${libraryName} pidiendo "${base.mediaTitle ?? unit}".`;
       await sendMessage(target.groupChatId, text, { messageThreadId: target.groupTopicId, replyMarkup });
     } else {
       const chatId = getChatId.get(base.userId)?.chat_id;
       if (!chatId) return;
       const text =
-        `🔴 TE HAS PASADO DEL CUPO en ${libraryName} pidiendo "${base.mediaTitle ?? 'una película'}".\n` +
-        `Ve alguna película antes de solicitar más.`;
+        `🔴 TE HAS PASADO DEL CUPO en ${libraryName} pidiendo "${base.mediaTitle ?? 'un contenido'}".\n` +
+        `Ve algo de lo que tienes pendiente antes de solicitar más.`;
       await sendMessage(chatId, text, { replyMarkup });
     }
   } catch (err) {
@@ -55,13 +62,15 @@ export async function runPollCycle() {
   await reconcileVoidedRequests();
 
   const [pending, tautulliUsers] = await Promise.all([
-    listPendingMovieRequests(),
+    listPendingRequests(),
     getUsers(),
   ]);
 
   for (const request of pending) {
-    const library = getLibraryByKind.get(request.is4k ? '4k' : 'standard');
+    const sectionType = request.mediaType === 'tv' ? 'show' : 'movie';
+    const library = getLibraryForRequest.get(sectionType, request.is4k ? '4k' : 'standard');
     const tautulliUser = matchByEmailOrUsername(tautulliUsers, request.requestedBy || {});
+    const requestedSeasons = request.mediaType === 'tv' && request.seasons.length > 0 ? request.seasons : [null];
 
     const base = {
       requestId: request.id,
@@ -69,7 +78,9 @@ export async function runPollCycle() {
       username: tautulliUser?.username ?? request.requestedBy?.username ?? 'unknown',
       libraryId: library?.id ?? null,
       mediaTitle: null,
+      mediaType: request.mediaType,
       tmdbId: request.tmdbId ?? null,
+      seasonNumber: requestedSeasons[0],
       posterUrl: null,
       balanceBefore: null,
       limitApplied: null,
@@ -84,12 +95,19 @@ export async function runPollCycle() {
       continue;
     }
 
-    const details = await getMovieDetails(request.tmdbId);
-    base.mediaTitle = details.title;
-    base.posterUrl = details.posterUrl;
+    const detailsBySeason = new Map();
+    for (const seasonNumber of requestedSeasons) {
+      const details = await getMediaDetails(request.mediaType, request.tmdbId, seasonNumber);
+      detailsBySeason.set(seasonNumber ?? 'movie', details);
+    }
+
+    const firstDetails = detailsBySeason.get(requestedSeasons[0] ?? 'movie') || {};
+    base.mediaTitle = formatMediaTitle(request.mediaType, firstDetails.title, requestedSeasons[0]);
+    base.posterUrl = firstDetails.posterUrl;
 
     const { limit, balance } = await getBalance(tautulliUser.id, library.id);
-    const decision = balance >= 1 ? 'approved' : 'no_quota';
+    const requiredUnits = request.mediaType === 'tv' ? requestedSeasons.length : 1;
+    const decision = balance >= requiredUnits ? 'approved' : 'no_quota';
 
     if (decision === 'approved') {
       await approveRequest(request.id);
@@ -97,7 +115,22 @@ export async function runPollCycle() {
 
     base.balanceBefore = balance;
     base.limitApplied = limit;
-    const isNew = logIfChanged(base, decision);
+    const rowsToLog = decision === 'approved'
+      ? requestedSeasons.map((seasonNumber) => {
+          const details = detailsBySeason.get(seasonNumber ?? 'movie') || {};
+          return {
+            ...base,
+            mediaTitle: formatMediaTitle(request.mediaType, details.title, seasonNumber),
+            seasonNumber,
+            posterUrl: details.posterUrl ?? null,
+          };
+        })
+      : [base];
+
+    let isNew = false;
+    for (const row of rowsToLog) {
+      isNew = logIfChanged(row, decision) || isNew;
+    }
     if (decision === 'no_quota' && isNew) await notifyNoQuota(base);
 
     // Recalcula la caché de verdad (con la aprobación recién logueada incluida)
@@ -105,6 +138,12 @@ export async function runPollCycle() {
     // el panel enseña la película nueva sin esperar al siguiente sondeo.
     await refreshQuotaCache(tautulliUser.id, library.id);
   }
+}
+
+function formatMediaTitle(mediaType, title, seasonNumber = null) {
+  if (mediaType !== 'tv') return title;
+  if (!seasonNumber) return title;
+  return `${title ?? 'Serie'} - Temporada ${seasonNumber}`;
 }
 
 export function startScheduler() {

@@ -17,21 +17,81 @@ async function call(path, options = {}) {
   return res.json();
 }
 
-// Pending movie requests only (series support deferred).
+function mapRequest(r) {
+  const mediaType = r.type === 'tv' || r.media?.mediaType === 'tv' ? 'tv' : 'movie';
+  return {
+    id: r.id,
+    status: r.status,
+    mediaType,
+    tmdbId: r.media?.tmdbId,
+    is4k: Boolean(r.is4k),
+    seasons: mediaType === 'tv'
+      ? (r.seasons || []).map((s) => Number(s.seasonNumber)).filter((n) => Number.isFinite(n) && n > 0)
+      : [],
+    createdAt: r.createdAt,
+    requestedBy: {
+      id: r.requestedBy?.id,
+      email: r.requestedBy?.email,
+      username: r.requestedBy?.plexUsername || r.requestedBy?.jellyfinUsername || r.requestedBy?.username,
+    },
+  };
+}
+
+async function listRequestsByMediaType(filter, mediaType, seerrUserId = null) {
+  const results = [];
+  let skip = 0;
+  for (;;) {
+    const requestedBy = seerrUserId ? `&requestedBy=${seerrUserId}` : '';
+    const data = await call(
+      `/request?filter=${filter}&mediaType=${mediaType}&take=100&skip=${skip}${requestedBy}`
+    );
+    for (const r of data.results || []) {
+      const isTv = r.type === 'tv' || r.media?.mediaType === 'tv';
+      const isMovie = r.type === 'movie' || r.media?.mediaType === 'movie';
+      if ((mediaType === 'tv' && !isTv) || (mediaType === 'movie' && !isMovie)) continue;
+      results.push(mapRequest(r));
+    }
+    skip += 100;
+    if (skip >= (data.pageInfo?.results || 0)) break;
+  }
+  return results;
+}
+
+async function listHistoricalRequestsByMediaType(mediaType, seerrUserId) {
+  const results = [];
+  let skip = 0;
+  for (;;) {
+    const data = await call(
+      `/request?requestedBy=${seerrUserId}&mediaType=${mediaType}&take=100&skip=${skip}`
+    );
+    for (const r of data.results || []) {
+      const isTv = r.type === 'tv' || r.media?.mediaType === 'tv';
+      const isMovie = r.type === 'movie' || r.media?.mediaType === 'movie';
+      if ((mediaType === 'tv' && !isTv) || (mediaType === 'movie' && !isMovie)) continue;
+      // For history imports, count requests that are already approved or available.
+      // Seerr does not return status=5 available items with filter=approved.
+      if (!new Set([2, 3, 4, 5]).has(Number(r.status))) continue;
+      results.push(mapRequest(r));
+    }
+    skip += 100;
+    if (skip >= (data.pageInfo?.results || 0)) break;
+  }
+  return results;
+}
+
+export async function listPendingRequests() {
+  const [movies, shows] = await Promise.all([
+    listRequestsByMediaType('pending', 'movie'),
+    listRequestsByMediaType('pending', 'tv'),
+  ]);
+  return [...movies, ...shows].sort((a, b) => a.id - b.id);
+}
+
 export async function listPendingMovieRequests() {
   const data = await call('/request?filter=pending&take=100&sort=added&mediaType=movie');
   return (data.results || [])
     .filter((r) => r.type === 'movie' || r.media?.mediaType === 'movie')
-    .map((r) => ({
-      id: r.id,
-      tmdbId: r.media?.tmdbId,
-      is4k: Boolean(r.is4k),
-      requestedBy: {
-        id: r.requestedBy?.id,
-        email: r.requestedBy?.email,
-        username: r.requestedBy?.plexUsername || r.requestedBy?.jellyfinUsername || r.requestedBy?.username,
-      },
-    }));
+    .map(mapRequest);
 }
 
 export async function getSeerrUsers() {
@@ -48,20 +108,15 @@ export async function getSeerrUsers() {
 // proceso), sin importar si pasaron por limitARR o se aprobaron directamente en
 // Seerr / venían de antes de instalarlo. Pagina si hace falta.
 export async function getApprovedMovieRequestsForUser(seerrUserId) {
-  const results = [];
-  let skip = 0;
-  for (;;) {
-    const data = await call(
-      `/request?requestedBy=${seerrUserId}&filter=approved&mediaType=movie&take=100&skip=${skip}`
-    );
-    for (const r of data.results || []) {
-      if (r.type !== 'movie' && r.media?.mediaType !== 'movie') continue;
-      results.push({ id: r.id, tmdbId: r.media?.tmdbId, is4k: Boolean(r.is4k), createdAt: r.createdAt });
-    }
-    skip += 100;
-    if (skip >= (data.pageInfo?.results || 0)) break;
-  }
-  return results;
+  return listRequestsByMediaType('approved', 'movie', seerrUserId);
+}
+
+export async function getApprovedRequestsForUser(seerrUserId) {
+  const [movies, shows] = await Promise.all([
+    listHistoricalRequestsByMediaType('movie', seerrUserId),
+    listHistoricalRequestsByMediaType('tv', seerrUserId),
+  ]);
+  return [...movies, ...shows].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 }
 
 export async function approveRequest(requestId) {
@@ -98,6 +153,29 @@ export async function getMovieDetails(tmdbId) {
   } catch {
     return { title: null, posterUrl: null };
   }
+}
+
+export async function getShowDetails(tmdbId, seasonNumber = null) {
+  if (!tmdbId) return { title: null, posterUrl: null, showRatingKey: null };
+  try {
+    const data = await call(`/tv/${tmdbId}`);
+    const season = seasonNumber == null
+      ? null
+      : (data.seasons || []).find((s) => Number(s.seasonNumber) === Number(seasonNumber));
+    const posterPath = season?.posterPath || data.posterPath;
+    return {
+      title: data.name || null,
+      posterUrl: posterPath ? `https://image.tmdb.org/t/p/w185${posterPath}` : null,
+      showRatingKey: data.mediaInfo?.ratingKey ? String(data.mediaInfo.ratingKey) : null,
+    };
+  } catch {
+    return { title: null, posterUrl: null, showRatingKey: null };
+  }
+}
+
+export async function getMediaDetails(mediaType, tmdbId, seasonNumber = null) {
+  if (mediaType === 'tv') return getShowDetails(tmdbId, seasonNumber);
+  return getMovieDetails(tmdbId);
 }
 
 // 'gone': Seerr confirma que ya no existe (404 = borrada/cancelada por el usuario).

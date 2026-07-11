@@ -1,7 +1,17 @@
 import { db } from './db.js';
 import { config } from './config.js';
-import { getUserMovieHistory, getUsers as getTautulliUsers } from './services/tautulli.js';
-import { getRequestStatus, getSeerrUsers, getApprovedMovieRequestsForUser, getMovieDetails } from './services/seerr.js';
+import {
+  getSeasonEpisodes,
+  getUserEpisodeHistory,
+  getUserMovieHistory,
+  getUsers as getTautulliUsers,
+} from './services/tautulli.js';
+import {
+  getRequestStatus,
+  getSeerrUsers,
+  getApprovedRequestsForUser,
+  getMediaDetails,
+} from './services/seerr.js';
 import { matchByEmailOrUsername } from './userMatch.js';
 
 // Tautulli's own "watched" threshold; below this a play doesn't free up quota.
@@ -29,8 +39,11 @@ const getGroupOverride = db.prepare(`
 const getLibrary = db.prepare('SELECT * FROM libraries WHERE id = ?');
 const getResetAt = db.prepare('SELECT reset_at FROM quota_resets WHERE user_id = ? AND library_id = ?');
 const getApprovedTitles = db.prepare(`
-  SELECT media_title, tmdb_id, poster_url FROM decisions_log
+  SELECT id, media_title, media_type, tmdb_id, season_number, poster_url FROM decisions_log
   WHERE user_id = ? AND library_id = ? AND decision = 'approved' AND voided_at IS NULL AND created_at > ?
+`);
+const updateApprovalPoster = db.prepare(`
+  UPDATE decisions_log SET poster_url = ? WHERE id = ?
 `);
 const upsertReset = db.prepare(`
   INSERT INTO quota_resets (user_id, library_id, reset_at) VALUES (?, ?, datetime('now'))
@@ -41,12 +54,19 @@ const getUnvoidedApproved = db.prepare(`
   WHERE decision = 'approved' AND voided_at IS NULL AND created_at > datetime('now', '-90 days')
 `);
 const markVoided = db.prepare(`UPDATE decisions_log SET voided_at = datetime('now') WHERE id = ?`);
-const getLibraryByKind = db.prepare(`SELECT * FROM libraries WHERE kind = ? AND enabled = 1 LIMIT 1`);
-const requestAlreadyLogged = db.prepare(`SELECT 1 FROM decisions_log WHERE request_id = ?`);
+const getLibraryForRequest = db.prepare(`
+  SELECT * FROM libraries WHERE section_type = ? AND kind = ? AND enabled = 1 LIMIT 1
+`);
+const requestUnitAlreadyLogged = db.prepare(`
+  SELECT 1 FROM decisions_log
+  WHERE request_id = ?
+    AND media_type = ?
+    AND COALESCE(season_number, -1) = COALESCE(?, -1)
+`);
 const insertImportedApproval = db.prepare(`
   INSERT INTO decisions_log
-    (request_id, user_id, username, library_id, media_title, tmdb_id, poster_url, decision, created_at)
-  VALUES (@requestId, @userId, @username, @libraryId, @mediaTitle, @tmdbId, @posterUrl, 'approved', @createdAt)
+    (request_id, user_id, username, library_id, media_title, media_type, tmdb_id, season_number, poster_url, decision, created_at)
+  VALUES (@requestId, @userId, @username, @libraryId, @mediaTitle, @mediaType, @tmdbId, @seasonNumber, @posterUrl, 'approved', @createdAt)
 `);
 const upsertQuotaCache = db.prepare(`
   INSERT INTO quota_cache (user_id, library_id, limit_applied, outstanding, balance, pending_items, computed_at)
@@ -59,16 +79,16 @@ const upsertQuotaCache = db.prepare(`
     computed_at = excluded.computed_at
 `);
 
+function toSqliteDateTime(isoString) {
+  return isoString.replace('T', ' ').replace(/\.\d{3}Z$/, '');
+}
+
 // Precedencia del límite efectivo. Comparaciones con != null a propósito:
 // 0 es un valor legítimo (bloquear del todo) y no puede tratarse como "sin override".
 export function resolveLimit(userOverride, groupOverride, defaultLimit) {
   if (userOverride != null) return userOverride;
   if (groupOverride != null) return groupOverride;
   return defaultLimit;
-}
-
-function toSqliteDateTime(isoString) {
-  return isoString.replace('T', ' ').replace(/\.\d{3}Z$/, '');
 }
 
 // Parte pura del cálculo (sin DB ni red), para poder testearla sin mockear
@@ -85,13 +105,76 @@ export function computeBalance(limit, approvedRows, watchedTitles) {
     const key = normalize(r.media_title);
     if (seenTitles.has(key)) continue;
     seenTitles.add(key);
-    pendingItems.push({ title: r.media_title, tmdbId: r.tmdb_id, posterUrl: r.poster_url ?? null });
+    pendingItems.push({
+      title: r.media_title,
+      mediaType: r.media_type || 'movie',
+      tmdbId: r.tmdb_id,
+      seasonNumber: r.season_number ?? null,
+      posterUrl: r.poster_url ?? null,
+    });
   }
 
   return {
     limit,
     outstanding,
     balance: Math.max(0, limit - outstanding),
+    pendingItems,
+  };
+}
+
+async function hydrateMissingPosters(approvedRows) {
+  for (const row of approvedRows) {
+    if (row.poster_url || !row.tmdb_id) continue;
+    const { posterUrl } = await getMediaDetails(row.media_type || 'movie', row.tmdb_id, row.season_number);
+    if (!posterUrl) continue;
+    row.poster_url = posterUrl;
+    updateApprovalPoster.run(posterUrl, row.id);
+  }
+}
+
+async function computeTvBalance(limit, approvedRows, watchedEpisodes) {
+  await hydrateMissingPosters(approvedRows);
+  const watchedRatingKeys = new Set(
+    watchedEpisodes
+      .filter((h) => h.percent >= WATCHED_THRESHOLD)
+      .map((h) => h.ratingKey)
+      .filter(Boolean)
+  );
+
+  const pending = [];
+  const showDetailsCache = new Map();
+  const seasonEpisodesCache = new Map();
+
+  for (const row of approvedRows) {
+    if (!row.tmdb_id || !row.season_number) {
+      pending.push(row);
+      continue;
+    }
+    if (!showDetailsCache.has(row.tmdb_id)) {
+      showDetailsCache.set(row.tmdb_id, await getMediaDetails('tv', row.tmdb_id, row.season_number));
+    }
+    const showRatingKey = showDetailsCache.get(row.tmdb_id)?.showRatingKey;
+    const cacheKey = `${showRatingKey || 'missing'}:${row.season_number}`;
+    if (!seasonEpisodesCache.has(cacheKey)) {
+      seasonEpisodesCache.set(cacheKey, await getSeasonEpisodes(showRatingKey, row.season_number));
+    }
+    const episodes = seasonEpisodesCache.get(cacheKey);
+    const complete = episodes.length > 0 && episodes.every((episode) => watchedRatingKeys.has(episode.ratingKey));
+    if (!complete) pending.push(row);
+  }
+
+  const pendingItems = pending.map((r) => ({
+    title: r.media_title,
+    mediaType: 'tv',
+    tmdbId: r.tmdb_id,
+    seasonNumber: r.season_number ?? null,
+    posterUrl: r.poster_url ?? null,
+  }));
+
+  return {
+    limit,
+    outstanding: pending.length,
+    balance: Math.max(0, limit - pending.length),
     pendingItems,
   };
 }
@@ -110,12 +193,17 @@ export async function getBalance(userId, libraryId) {
   );
   const resetAt = getResetAt.get(userId, libraryId)?.reset_at ?? '0000-01-01';
 
+  const approved = getApprovedTitles.all(userId, libraryId, resetAt);
+  if (library.section_type === 'show') {
+    const history = await getUserEpisodeHistory(userId, libraryId);
+    return computeTvBalance(limit, approved, history);
+  }
+
   const history = await getUserMovieHistory(userId, libraryId);
   const watchedTitles = new Set(
     history.filter((h) => h.percent >= WATCHED_THRESHOLD).map((h) => normalize(h.title))
   );
-
-  const approved = getApprovedTitles.all(userId, libraryId, resetAt);
+  await hydrateMissingPosters(approved);
   return computeBalance(limit, approved, watchedTitles);
 }
 
@@ -168,26 +256,38 @@ export async function importSeerrHistory() {
     const seerrUser = matchByEmailOrUsername(seerrUsers, tautulliUser);
     if (!seerrUser) continue;
 
-    const requests = await getApprovedMovieRequestsForUser(seerrUser.id);
+    const requests = await getApprovedRequestsForUser(seerrUser.id);
     for (const request of requests) {
-      if (requestAlreadyLogged.get(request.id)) continue;
-
-      const library = getLibraryByKind.get(request.is4k ? '4k' : 'standard');
+      const sectionType = request.mediaType === 'tv' ? 'show' : 'movie';
+      const library = getLibraryForRequest.get(sectionType, request.is4k ? '4k' : 'standard');
       if (!library) continue;
 
-      const { title: mediaTitle, posterUrl } = await getMovieDetails(request.tmdbId);
-      insertImportedApproval.run({
-        requestId: request.id,
-        userId: tautulliUser.id,
-        username: tautulliUser.username,
-        libraryId: library.id,
-        mediaTitle,
-        tmdbId: request.tmdbId ?? null,
-        posterUrl,
-        createdAt: toSqliteDateTime(request.createdAt),
-      });
-      imported += 1;
+      const units = request.mediaType === 'tv' && request.seasons.length > 0 ? request.seasons : [null];
+      for (const seasonNumber of units) {
+        if (requestUnitAlreadyLogged.get(request.id, request.mediaType, seasonNumber ?? null)) continue;
+
+        const { title, posterUrl } = await getMediaDetails(request.mediaType, request.tmdbId, seasonNumber);
+        insertImportedApproval.run({
+          requestId: request.id,
+          userId: tautulliUser.id,
+          username: tautulliUser.username,
+          libraryId: library.id,
+          mediaTitle: formatMediaTitle(request.mediaType, title, seasonNumber),
+          mediaType: request.mediaType,
+          tmdbId: request.tmdbId ?? null,
+          seasonNumber,
+          posterUrl,
+          createdAt: toSqliteDateTime(request.createdAt),
+        });
+        imported += 1;
+      }
     }
   }
   return imported;
+}
+
+function formatMediaTitle(mediaType, title, seasonNumber = null) {
+  if (mediaType !== 'tv') return title;
+  if (!seasonNumber) return title;
+  return `${title ?? 'Serie'} - Temporada ${seasonNumber}`;
 }

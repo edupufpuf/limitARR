@@ -7,8 +7,8 @@ import { config } from '../config.js';
 import { requireAuth } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { needsSetup, setPassword, checkPassword, getWebhookSecret } from '../auth.js';
-import { getUsers, getMovieLibraries } from '../services/tautulli.js';
-import { listPendingMovieRequests, getSeerrUsers, configureWebhook } from '../services/seerr.js';
+import { getUsers, getLibraries } from '../services/tautulli.js';
+import { listPendingRequests, getSeerrUsers, configureWebhook } from '../services/seerr.js';
 import { getSettingsForDisplay, updateSettings } from '../settings.js';
 import { resetQuota, importSeerrHistory, refreshQuotaCache } from '../quota.js';
 import { matchByEmailOrUsername } from '../userMatch.js';
@@ -114,7 +114,7 @@ router.post('/settings/test', async (req, res) => {
     result.tautulli = { ok: false, error: err.message };
   }
   try {
-    await listPendingMovieRequests();
+    await listPendingRequests();
     result.seerr = { ok: true };
   } catch (err) {
     result.seerr = { ok: false, error: err.message };
@@ -154,21 +154,22 @@ router.get('/libraries', (req, res) => {
   res.json(db.prepare('SELECT * FROM libraries ORDER BY name').all());
 });
 
-// Pull movie libraries from Tautulli and insert any not yet configured, with sane defaults.
+// Pull movie/show libraries from Tautulli and insert any not yet configured, with sane defaults.
 router.post('/libraries/sync', ah(async (req, res) => {
-  const discovered = await getMovieLibraries();
+  const discovered = await getLibraries();
   const existingIds = new Set(db.prepare('SELECT id FROM libraries').all().map((r) => r.id));
 
   const insert = db.prepare(`
     INSERT INTO libraries (id, name, section_type, kind, enabled, default_limit)
-    VALUES (?, ?, 'movie', ?, 1, 4)
+    VALUES (?, ?, ?, ?, 1, ?)
   `);
 
   let inserted = 0;
   for (const lib of discovered) {
     if (existingIds.has(lib.id)) continue;
     const kind = /4k/i.test(lib.name) ? '4k' : 'standard';
-    insert.run(lib.id, lib.name, kind);
+    const defaultLimit = lib.sectionType === 'show' ? 2 : 4;
+    insert.run(lib.id, lib.name, lib.sectionType, kind, defaultLimit);
     inserted += 1;
   }
   res.json({ discovered: discovered.length, inserted });
