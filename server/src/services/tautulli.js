@@ -42,16 +42,26 @@ export async function getUsers() {
   }));
 }
 
-// Búsqueda en Plex vía Tautulli, para localizar el rating_key de una película
-// y poder enlazar su página de estadísticas (/info?rating_key=X). Solo devuelve
-// resultados de tipo película; el match por título lo hace el llamante (quota.js
-// tiene el normalizador de títulos).
-export async function searchMovies(query) {
+// Búsqueda en Plex vía Tautulli, para localizar el rating_key de una película,
+// serie o temporada y poder enlazar su página de estadísticas
+// (/info?rating_key=X). Devuelve también los guids (incluye "tmdb://<id>", en
+// temporadas los de la serie padre) para que el llamante pueda matchear por
+// TMDB id en vez de por título, que depende del idioma de la biblioteca.
+export async function searchMedia(query) {
   const data = await call('search', { query, limit: 10 });
-  return (data?.results_list?.movie || []).map((m) => ({
+  const resultsList = data?.results_list || {};
+  const mapItem = (m) => ({
     ratingKey: Number(m.rating_key),
     title: m.title,
-  }));
+    parentTitle: m.parent_title || null,
+    seasonNumber: m.media_index !== undefined && m.media_index !== '' ? Number(m.media_index) : null,
+    guids: [...(m.guids || []), ...(m.parent_guids || [])],
+  });
+  return {
+    movies: (resultsList.movie || []).map(mapItem),
+    shows: (resultsList.show || []).map(mapItem),
+    seasons: (resultsList.season || []).map(mapItem),
+  };
 }
 
 // Watch history for a user restricted to one movie library.

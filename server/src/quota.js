@@ -5,7 +5,7 @@ import {
   getUserEpisodeHistory,
   getUserMovieHistory,
   getUsers as getTautulliUsers,
-  searchMovies,
+  searchMedia,
 } from './services/tautulli.js';
 import {
   getRequestStatus,
@@ -215,20 +215,38 @@ export function resetQuota(userId, libraryId) {
   upsertReset.run(userId, libraryId);
 }
 
-// rating_key de Plex por título normalizado, para enlazar cada pendiente con su
-// página de estadísticas en Tautulli. Solo se memorizan aciertos: una película
-// aún no descargada no está en Plex todavía, y cachear el fallo la dejaría sin
-// enlace para siempre aunque aparezca más tarde.
+// rating_key de Plex para enlazar cada pendiente con su página de estadísticas
+// en Tautulli. Se matchea primero por TMDB id (los guids de Plex incluyen
+// "tmdb://<id>", independiente del idioma) y si no por título normalizado.
+// Para series, el pendiente se titula "X - Temporada N": se busca "X" y se
+// prefiere la temporada exacta (media_index), con la serie como fallback.
+// Solo se memorizan aciertos: un pendiente aún no descargado no está en Plex
+// todavía, y cachear el fallo lo dejaría sin enlace aunque aparezca más tarde.
 const ratingKeyCache = new Map();
 
-async function lookupRatingKey(title) {
+async function lookupRatingKey({ title, mediaType, tmdbId, seasonNumber }) {
   if (!title) return null;
-  const key = normalize(title);
-  if (ratingKeyCache.has(key)) return ratingKeyCache.get(key);
+  const isTv = mediaType === 'tv';
+  const baseTitle = isTv ? title.replace(/ - Temporada \d+$/, '') : title;
+  const wanted = normalize(baseTitle);
+  const cacheKey = `${isTv ? 'tv' : 'movie'}:${tmdbId ?? wanted}:${isTv ? seasonNumber ?? '' : ''}`;
+  if (ratingKeyCache.has(cacheKey)) return ratingKeyCache.get(cacheKey);
   try {
-    const results = await searchMovies(title);
-    const hit = results.find((m) => normalize(m.title) === key);
-    if (hit) ratingKeyCache.set(key, hit.ratingKey);
+    const { movies, shows, seasons } = await searchMedia(baseTitle);
+    const tmdbGuid = tmdbId != null ? `tmdb://${tmdbId}` : null;
+    const byTmdbOrTitle = (entry, entryTitle) =>
+      (tmdbGuid && entry.guids.includes(tmdbGuid)) || normalize(entryTitle) === wanted;
+
+    let hit = null;
+    if (isTv) {
+      hit =
+        (seasonNumber != null &&
+          seasons.find((s) => byTmdbOrTitle(s, s.parentTitle) && s.seasonNumber === seasonNumber)) ||
+        shows.find((s) => byTmdbOrTitle(s, s.title));
+    } else {
+      hit = movies.find((m) => byTmdbOrTitle(m, m.title));
+    }
+    if (hit) ratingKeyCache.set(cacheKey, hit.ratingKey);
     return hit?.ratingKey ?? null;
   } catch {
     return null; // sin Tautulli no hay enlace, pero el cupo sigue funcionando
@@ -246,9 +264,7 @@ export async function refreshQuotaCache(userId, libraryId) {
   }
   const { limit, outstanding, balance, pendingItems } = await getBalance(userId, libraryId);
   for (const item of pendingItems) {
-    // Solo películas: el título de una temporada ("X - Temporada 2") no
-    // matchea con la búsqueda de Tautulli.
-    item.ratingKey = item.mediaType === 'tv' ? null : await lookupRatingKey(item.title);
+    item.ratingKey = await lookupRatingKey(item);
   }
   upsertQuotaCache.run(userId, libraryId, limit, outstanding, balance, JSON.stringify(pendingItems));
   return { limit, outstanding, balance, pendingItems };

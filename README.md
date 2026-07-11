@@ -94,10 +94,10 @@ saldo = límite − (películas aprobadas para ese usuario en esa biblioteca que
   barra de saldo por biblioteca y las carátulas (TMDB) de lo que cada uno
   tiene pendiente de ver. Cabecera con KPIs (usuarios, películas sin ver,
   usuarios sin saldo, aprobadas/bloqueadas en 7 días). Se refresca solo
-  cada minuto. Si la película ya está en Plex, su carátula enlaza a su
-  página de estadísticas en Tautulli — configura la "URL pública" de
-  Tautulli en Configuración si la URL interna (hostname docker) no es
-  accesible desde el navegador.
+  cada minuto. Si la película (o la temporada, en series) ya está en
+  Plex, su carátula enlaza a su página de estadísticas en Tautulli —
+  configura la "URL pública" de Tautulli en Configuración si la URL
+  interna (hostname docker) no es accesible desde el navegador.
 - **Registro**: filtrable por decisión y por texto (usuario o título),
   con paginación ("cargar más") y carátula junto al título.
 
