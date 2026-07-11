@@ -33,48 +33,61 @@ export default function Dashboard({ onLoggedOut }) {
   }
 
   return (
-    <div className="min-h-screen flex flex-col sm:flex-row">
+    <div className="min-h-screen flex flex-col sm:flex-row bg-bg-950 text-gray-100">
       {/* Sidebar — solo desktop */}
-      <nav className="hidden sm:flex w-60 bg-bg-900/80 border-r border-bg-700/60 p-4 flex-col flex-shrink-0 backdrop-blur">
-        <div className="flex items-center gap-2.5 px-1 mb-8">
-          <LogoMark />
-          <Wordmark />
+      <nav className="hidden sm:flex w-[292px] bg-gradient-to-b from-bg-900 via-bg-900 to-bg-950 border-r border-bg-700/55 px-5 py-6 flex-col flex-shrink-0 shadow-[18px_0_48px_-32px_rgba(0,0,0,.85)]">
+        <div className="flex items-center gap-5 px-1 mb-16">
+          <LogoMark className="w-20 h-20" />
+          <Wordmark className="text-5xl" />
         </div>
-        {Object.entries(TABS).map(([key, { label, Icon }]) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className={`relative flex items-center gap-2.5 text-left px-3 py-2 rounded-lg mb-1 text-sm font-medium transition-all ${
-              tab === key
-                ? 'bg-gradient-to-r from-accent-600 to-accent-500 text-white shadow-glow'
-                : 'text-gray-400 hover:text-gray-200 hover:bg-bg-800'
-            }`}
-          >
-            <Icon className="w-5 h-5 flex-shrink-0" />
-            {label}
-          </button>
-        ))}
+        <div className="space-y-4">
+          {Object.entries(TABS).map(([key, { label, Icon }]) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className={`relative flex items-center gap-5 w-full text-left px-5 py-4 rounded-xl text-[22px] font-extrabold tracking-tight transition-all ${
+                tab === key
+                  ? 'bg-gradient-to-r from-indigo-500 via-accent-600 to-purple-600 text-white shadow-glow'
+                  : 'text-gray-100/90 hover:text-white hover:bg-bg-800/70'
+              }`}
+            >
+              <Icon className="w-8 h-8 flex-shrink-0" />
+              {label}
+            </button>
+          ))}
+        </div>
         <button
           onClick={logout}
-          className="flex items-center gap-2.5 mt-auto text-left px-3 py-2 rounded-lg text-sm text-gray-500 hover:text-gray-300 hover:bg-bg-800 transition-colors"
+          className="flex items-center gap-4 mt-auto text-left px-5 py-3 rounded-xl text-base font-semibold text-gray-400 hover:text-gray-100 hover:bg-bg-800 transition-colors"
         >
-          <IconLogout className="w-5 h-5 flex-shrink-0" />
+          <IconLogout className="w-6 h-6 flex-shrink-0" />
           Cerrar sesión
         </button>
         {version && (
-          <div className="px-3 pt-3 mt-2 border-t border-bg-700/60 text-[11px] text-gray-600">
-            <span className="tabular-nums">
-              v{version.version} · {version.sha ?? 'dev'}
-            </span>
+          <div className="mt-4 rounded-xl border border-bg-600/90 bg-bg-950/45 px-5 py-4 text-sm text-gray-300 shadow-card">
+            <div className="flex items-center gap-3">
+              <span className="inline-flex w-9 h-9 rounded-lg border border-gray-500/70 items-center justify-center">
+                <IconGear className="w-5 h-5" />
+              </span>
+              <div>
+                <div className="font-bold text-gray-200">Limitarr</div>
+                <div className="tabular-nums tracking-[0.18em] text-gray-300">
+                  {version.version}
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 text-[11px] text-gray-500 tabular-nums">
+              {version.sha ?? 'dev'}
+            </div>
             {version.updateAvailable && (
               <a
                 href="https://github.com/edupufpuf/limitARR"
                 target="_blank"
                 rel="noreferrer"
                 title={`Nueva imagen en GHCR: ${version.latestSha}`}
-                className="flex items-center gap-1.5 mt-1 text-accent-400 hover:text-accent-300"
+                className="flex items-center gap-1.5 mt-2 text-accent-300 hover:text-white"
               >
-                <span className="w-1.5 h-1.5 rounded-full bg-accent-400 animate-pulse" />
+                <span className="w-1.5 h-1.5 rounded-full bg-accent-300 animate-pulse" />
                 Actualización disponible
               </a>
             )}
@@ -83,10 +96,10 @@ export default function Dashboard({ onLoggedOut }) {
       </nav>
 
       {/* Top bar — solo móvil */}
-      <header className="sm:hidden flex items-center justify-between px-4 h-14 bg-bg-900/90 border-b border-bg-700/60 flex-shrink-0 sticky top-0 z-10 backdrop-blur">
+      <header className="sm:hidden flex items-center justify-between px-4 h-16 bg-bg-900/95 border-b border-bg-700/60 flex-shrink-0 sticky top-0 z-10 backdrop-blur">
         <div className="flex items-center gap-2">
-          <LogoMark className="w-7 h-7" />
-          <Wordmark className="text-base" />
+          <LogoMark className="w-9 h-9" />
+          <Wordmark className="text-xl" />
         </div>
         <span className="text-sm text-gray-400">{label}</span>
         <button onClick={logout} className="text-gray-400 p-1 -mr-1">
@@ -94,7 +107,7 @@ export default function Dashboard({ onLoggedOut }) {
         </button>
       </header>
 
-      <main className="flex-1 p-4 sm:p-8 pb-20 sm:pb-8 overflow-x-hidden">
+      <main className="flex-1 p-4 sm:p-8 lg:p-10 pb-20 sm:pb-8 overflow-x-hidden">
         <Component />
       </main>
 
@@ -105,7 +118,7 @@ export default function Dashboard({ onLoggedOut }) {
             key={key}
             onClick={() => setTab(key)}
             className={`flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] transition-colors ${
-              tab === key ? 'text-accent-400' : 'text-gray-500'
+              tab === key ? 'text-accent-300' : 'text-gray-500'
             }`}
           >
             <Icon className="w-5 h-5" />

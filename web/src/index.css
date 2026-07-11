@@ -4,11 +4,10 @@
 
 @layer base {
   body {
-    /* Lavado radial muy sutil hacia el rojo de marca, para que el fondo no sea plano. */
     background-color: theme('colors.bg.950');
     background-image:
-      radial-gradient(ellipse 80% 50% at 50% -20%, rgba(220, 38, 38, 0.08), transparent),
-      radial-gradient(ellipse 60% 40% at 100% 100%, rgba(43, 54, 78, 0.25), transparent);
+      radial-gradient(ellipse 80% 42% at 15% -10%, rgba(168, 85, 247, 0.16), transparent),
+      radial-gradient(ellipse 55% 35% at 100% 100%, rgba(99, 102, 241, 0.16), transparent);
     background-attachment: fixed;
   }
 }
@@ -17,21 +16,21 @@
   /* Vocabulario de componentes compartido — cambiar aquí re-estiliza todo el panel. */
 
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-1.5 text-sm font-medium transition-all disabled:opacity-50 disabled:pointer-events-none;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-1.5 text-sm font-semibold transition-all disabled:opacity-50 disabled:pointer-events-none;
   }
   .btn-primary {
-    @apply bg-accent-600 hover:bg-accent-500 text-white font-semibold hover:shadow-glow active:scale-[.98];
+    @apply bg-gradient-to-r from-indigo-500 via-accent-600 to-purple-600 text-white hover:shadow-glow active:scale-[.98];
   }
   .btn-ghost {
-    @apply bg-bg-700/60 hover:bg-bg-600/60 border border-bg-600/80 text-gray-200 active:scale-[.98];
+    @apply bg-bg-800/80 hover:bg-bg-700/80 border border-bg-600/80 text-gray-200 active:scale-[.98];
   }
 
   .card {
-    @apply bg-bg-800/80 border border-bg-700/80 rounded-xl shadow-card;
+    @apply bg-bg-800/75 border border-bg-700/80 rounded-xl shadow-card;
   }
 
   .input {
-    @apply w-full bg-bg-900/70 border border-bg-600/80 rounded-lg px-3 py-1.5 text-sm text-gray-100 placeholder-gray-600 transition-colors focus:outline-none focus:ring-2 focus:ring-accent-500/50 focus:border-accent-500/50;
+    @apply w-full bg-bg-950/60 border border-bg-600/80 rounded-xl px-3 py-1.5 text-sm text-gray-100 placeholder-gray-600 transition-colors focus:outline-none focus:ring-2 focus:ring-accent-500/50 focus:border-accent-500/50;
   }
   .label {
     @apply block text-xs font-medium text-gray-400 mb-1;
