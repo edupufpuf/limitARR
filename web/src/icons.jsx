@@ -88,6 +88,52 @@ export function IconSearch({ className }) {
   );
 }
 
+export function IconUsers({ className }) {
+  return (
+    <svg {...base} className={className}>
+      <circle cx="9" cy="8" r="3.2" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.5 19c.6-3 2.8-4.5 5.5-4.5s4.9 1.5 5.5 4.5" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M16 5.5a3.2 3.2 0 0 1 0 5.4M18.5 14.7c1.3.7 2.2 1.9 2.5 3.8" />
+    </svg>
+  );
+}
+
+export function IconEye({ className }) {
+  return (
+    <svg {...base} className={className}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+export function IconBan({ className }) {
+  return (
+    <svg {...base} className={className}>
+      <circle cx="12" cy="12" r="9" />
+      <path strokeLinecap="round" d="M5.6 5.6l12.8 12.8" />
+    </svg>
+  );
+}
+
+export function IconCheckCircle({ className }) {
+  return (
+    <svg {...base} className={className}>
+      <circle cx="12" cy="12" r="9" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="m8.5 12.5 2.3 2.3 4.7-5" />
+    </svg>
+  );
+}
+
+export function IconXCircle({ className }) {
+  return (
+    <svg {...base} className={className}>
+      <circle cx="12" cy="12" r="9" />
+      <path strokeLinecap="round" d="M9 9l6 6M15 9l-6 6" />
+    </svg>
+  );
+}
+
 export function IconMenu({ className }) {
   return (
     <svg {...base} className={className}>

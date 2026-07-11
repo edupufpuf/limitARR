@@ -52,7 +52,7 @@ export default function Overrides() {
 
   return (
     <div>
-      <h2 className="text-xl font-semibold mb-4">Overrides manuales (usuario + biblioteca)</h2>
+      <h2 className="text-2xl font-bold tracking-tight mb-1">Overrides manuales</h2>
       <p className="text-xs text-gray-500 mb-4">
         Fija un límite de solicitudes sin ver distinto del de la biblioteca para ese usuario. Pon 0
         para bloquearlo del todo.

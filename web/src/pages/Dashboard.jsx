@@ -39,15 +39,12 @@ export default function Dashboard({ onLoggedOut }) {
           <button
             key={key}
             onClick={() => setTab(key)}
-            className={`relative flex items-center gap-2.5 text-left px-3 py-2 rounded-lg mb-1 text-sm font-medium transition-colors ${
+            className={`relative flex items-center gap-2.5 text-left px-3 py-2 rounded-lg mb-1 text-sm font-medium transition-all ${
               tab === key
-                ? 'bg-accent-600/15 text-accent-300'
+                ? 'bg-gradient-to-r from-accent-600 to-accent-500 text-white shadow-glow'
                 : 'text-gray-400 hover:text-gray-200 hover:bg-bg-800'
             }`}
           >
-            {tab === key && (
-              <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-full bg-accent-500" />
-            )}
             <Icon className="w-5 h-5 flex-shrink-0" />
             {label}
           </button>

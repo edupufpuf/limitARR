@@ -67,7 +67,7 @@ export default function DecisionsLog() {
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-        <h2 className="text-xl font-semibold">Registro de decisiones</h2>
+        <h2 className="text-2xl font-bold tracking-tight">Registro de decisiones</h2>
         <span className="text-xs text-gray-500">{total} en total</span>
       </div>
 
