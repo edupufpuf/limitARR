@@ -357,6 +357,15 @@ async function buildQuotaByUser() {
   const tautulliUserMap = new Map(tautulliUsers.map((u) => [u.id, u]));
   const libraries = db.prepare('SELECT id, name FROM libraries').all();
   const libraryMap = new Map(libraries.map((l) => [l.id, l.name]));
+  const recentRows = db.prepare(`
+    SELECT user_id,
+           SUM(CASE WHEN decision = 'approved' THEN 1 ELSE 0 END) AS approved7d,
+           SUM(CASE WHEN decision = 'no_quota' THEN 1 ELSE 0 END) AS blocked7d
+    FROM decisions_log
+    WHERE created_at > datetime('now', '-7 days') AND user_id IS NOT NULL
+    GROUP BY user_id
+  `).all();
+  const recentMap = new Map(recentRows.map((r) => [r.user_id, r]));
 
   function findAvatar(tautulliUser) {
     if (!tautulliUser) return null;
@@ -371,6 +380,8 @@ async function buildQuotaByUser() {
         userId: row.user_id,
         username: tautulliUser?.username ?? `user#${row.user_id}`,
         avatar: findAvatar(tautulliUser),
+        approved7d: recentMap.get(row.user_id)?.approved7d ?? 0,
+        blocked7d: recentMap.get(row.user_id)?.blocked7d ?? 0,
         libraries: [],
       });
     }

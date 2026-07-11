@@ -24,17 +24,53 @@ function totalOutstanding(libraries) {
   return libraries.reduce((sum, l) => sum + l.outstanding, 0);
 }
 
-function StatTile({ label, value, Icon, tint }) {
+function isBlocked(user) {
+  return user.libraries.some((lib) => lib.balance <= 0);
+}
+
+const STAT_TILES = {
+  all: {
+    label: 'usuarios',
+    tone: 'from-sky-500/25 via-sky-500/10 to-bg-800 border-sky-400/30 text-sky-100',
+    icon: 'bg-sky-400/20 text-sky-100',
+  },
+  pending: {
+    label: 'sin ver',
+    tone: 'from-amber-400/25 via-amber-500/10 to-bg-800 border-amber-300/30 text-amber-100',
+    icon: 'bg-amber-300/20 text-amber-100',
+  },
+  blocked: {
+    label: 'sin saldo',
+    tone: 'from-accent-500/30 via-accent-500/10 to-bg-800 border-accent-400/40 text-red-100',
+    icon: 'bg-accent-400/20 text-red-100',
+  },
+  approved7d: {
+    label: 'aprobadas · 7d',
+    tone: 'from-emerald-400/25 via-emerald-500/10 to-bg-800 border-emerald-300/30 text-emerald-100',
+    icon: 'bg-emerald-300/20 text-emerald-100',
+  },
+  blocked7d: {
+    label: 'sin cupo · 7d',
+    tone: 'from-fuchsia-400/25 via-fuchsia-500/10 to-bg-800 border-fuchsia-300/30 text-fuchsia-100',
+    icon: 'bg-fuchsia-300/20 text-fuchsia-100',
+  },
+};
+
+function StatTile({ label, value, Icon, tone, iconTone, active, onClick }) {
   return (
-    <div className="card px-4 py-3 flex items-center gap-3 min-w-0">
-      <span className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${tint}`}>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`card px-4 py-3 flex items-center gap-3 min-w-0 text-left bg-gradient-to-br transition-all hover:-translate-y-0.5 hover:border-white/20 ${tone} ${active ? 'ring-2 ring-white/30' : ''}`}
+    >
+      <span className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${iconTone}`}>
         <Icon className="w-5 h-5" />
       </span>
       <div className="min-w-0">
         <div className="text-2xl font-bold tabular-nums leading-tight">{value}</div>
-        <div className="text-[11px] uppercase tracking-wider text-gray-500 truncate">{label}</div>
+        <div className="text-[11px] uppercase tracking-wider text-current/70 truncate">{label}</div>
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -180,6 +216,7 @@ export default function Quota() {
   const [importResult, setImportResult] = useState(null);
   const [resetting, setResetting] = useState({});
   const [expanded, setExpanded] = useState(new Set());
+  const [activeFilter, setActiveFilter] = useState('all');
 
   function load() {
     api.quota().then(setUsers);
@@ -196,8 +233,19 @@ export default function Quota() {
     const q = query.trim().toLowerCase();
     return users
       .filter((u) => !q || u.username.toLowerCase().includes(q))
+      .filter((u) => {
+        if (activeFilter === 'pending') return totalOutstanding(u.libraries) > 0;
+        if (activeFilter === 'blocked') return isBlocked(u);
+        if (activeFilter === 'approved7d') return (u.approved7d ?? 0) > 0;
+        if (activeFilter === 'blocked7d') return (u.blocked7d ?? 0) > 0;
+        return true;
+      })
       .sort((a, b) => worstLib(a.libraries).balance - worstLib(b.libraries).balance);
-  }, [users, query]);
+  }, [users, query, activeFilter]);
+
+  function selectFilter(filter) {
+    setActiveFilter((current) => (current === filter && filter !== 'all' ? 'all' : filter));
+  }
 
   async function recalculate() {
     setRecalculating(true);
@@ -253,13 +301,62 @@ export default function Quota() {
       </div>
 
       {stats && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
-          <StatTile label="usuarios" value={stats.users} Icon={IconUsers} tint="bg-bg-700/70 text-gray-300" />
-          <StatTile label="sin ver" value={stats.outstanding} Icon={IconEye} tint="bg-blue-400/10 text-blue-400" />
-          <StatTile label="sin saldo" value={stats.usersBlocked} Icon={IconBan} tint="bg-accent-500/10 text-accent-400" />
-          <StatTile label="aprobadas · 7d" value={stats.approved7d} Icon={IconCheckCircle} tint="bg-green-400/10 text-green-400" />
-          <StatTile label="sin cupo · 7d" value={stats.blocked7d} Icon={IconXCircle} tint="bg-yellow-400/10 text-yellow-400" />
-        </div>
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-3">
+            <StatTile
+              label={STAT_TILES.all.label}
+              value={stats.users}
+              Icon={IconUsers}
+              tone={STAT_TILES.all.tone}
+              iconTone={STAT_TILES.all.icon}
+              active={activeFilter === 'all'}
+              onClick={() => selectFilter('all')}
+            />
+            <StatTile
+              label={STAT_TILES.pending.label}
+              value={stats.outstanding}
+              Icon={IconEye}
+              tone={STAT_TILES.pending.tone}
+              iconTone={STAT_TILES.pending.icon}
+              active={activeFilter === 'pending'}
+              onClick={() => selectFilter('pending')}
+            />
+            <StatTile
+              label={STAT_TILES.blocked.label}
+              value={stats.usersBlocked}
+              Icon={IconBan}
+              tone={STAT_TILES.blocked.tone}
+              iconTone={STAT_TILES.blocked.icon}
+              active={activeFilter === 'blocked'}
+              onClick={() => selectFilter('blocked')}
+            />
+            <StatTile
+              label={STAT_TILES.approved7d.label}
+              value={stats.approved7d}
+              Icon={IconCheckCircle}
+              tone={STAT_TILES.approved7d.tone}
+              iconTone={STAT_TILES.approved7d.icon}
+              active={activeFilter === 'approved7d'}
+              onClick={() => selectFilter('approved7d')}
+            />
+            <StatTile
+              label={STAT_TILES.blocked7d.label}
+              value={stats.blocked7d}
+              Icon={IconXCircle}
+              tone={STAT_TILES.blocked7d.tone}
+              iconTone={STAT_TILES.blocked7d.icon}
+              active={activeFilter === 'blocked7d'}
+              onClick={() => selectFilter('blocked7d')}
+            />
+          </div>
+          {activeFilter !== 'all' && (
+            <div className="mb-4">
+              <button onClick={() => setActiveFilter('all')} className="text-xs text-gray-400 hover:text-gray-200">
+                Mostrando {STAT_TILES[activeFilter].label.toLowerCase()} · quitar filtro
+              </button>
+            </div>
+          )}
+        </>
       )}
 
       <div className="relative mb-4 max-w-xs">
