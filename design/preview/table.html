@@ -1,0 +1,23 @@
+<!-- @dsCard group="Patrones" name="Registro" subtitle="Tabla de decisiones con badges" -->
+<!doctype html><html lang="es"><head><meta charset="utf-8">
+<link rel="stylesheet" href="../tokens.css"><link rel="stylesheet" href="_card.css">
+<style>
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { text-align: left; padding: 8px 16px 8px 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); border-bottom: 1px solid var(--bg-700); }
+td { padding: 8px 16px 8px 0; border-bottom: 1px solid color-mix(in srgb, var(--bg-700) 50%, transparent); }
+tr:last-child td { border-bottom: none; }
+tbody tr:hover { background: color-mix(in srgb, var(--bg-700) 20%, transparent); }
+.mini { width: 24px; height: 36px; border-radius: 4px; background: linear-gradient(160deg, var(--bg-600), var(--bg-700)); display: inline-block; vertical-align: middle; margin-right: 8px; }
+</style></head><body>
+<h1>Registro de decisiones</h1>
+<div class="card" style="padding:0 16px">
+<table>
+  <thead><tr><th>Fecha</th><th>Usuario</th><th>Título</th><th>Saldo antes</th><th>Decisión</th></tr></thead>
+  <tbody>
+    <tr><td style="color:var(--ink-3)">10/07/26 21:14</td><td>edu</td><td><i class="mini"></i>Dune: Part Two</td><td>3</td><td><span class="badge badge-ok">aprobada</span></td></tr>
+    <tr><td style="color:var(--ink-3)">10/07/26 20:02</td><td>ana</td><td><i class="mini"></i>Oppenheimer</td><td>0</td><td><span class="badge badge-danger">sin cupo</span></td></tr>
+    <tr><td style="color:var(--ink-3)">09/07/26 18:40</td><td>guest</td><td>—</td><td>—</td><td><span class="badge">usuario no encontrado en Tautulli</span></td></tr>
+  </tbody>
+</table>
+</div>
+</body></html>

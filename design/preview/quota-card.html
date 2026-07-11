@@ -1,0 +1,39 @@
+<!-- @dsCard group="Patrones" name="Tarjeta de cupo" subtitle="Usuario con barra de saldo y pendientes" -->
+<!doctype html><html lang="es"><head><meta charset="utf-8">
+<link rel="stylesheet" href="../tokens.css"><link rel="stylesheet" href="_card.css">
+<style>
+.uc { max-width: 360px; overflow: hidden; }
+.uc-head { display: flex; align-items: center; gap: 12px; padding: 16px; }
+.avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--bg-600); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; }
+.uc-body { border-top: 1px solid var(--bg-700); padding: 16px; }
+.lib-row { display: flex; align-items: center; gap: 12px; font-size: 14px; margin-bottom: 6px; }
+.poster { width: 48px; height: 72px; border-radius: 4px; background: linear-gradient(160deg, var(--bg-600), var(--bg-700)); display: flex; align-items: center; justify-content: center; font-size: 18px; }
+.pi { width: 56px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.pi span { font-size: 10px; color: var(--ink-2); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+</style></head><body>
+<h1>Tarjeta de cupo (expandida)</h1>
+<div class="card uc">
+  <div class="uc-head">
+    <div class="avatar">ED</div>
+    <div style="flex:1;min-width:0">
+      <div style="font-weight:500">edu</div>
+      <div style="font-size:12px;color:var(--ink-3)">2 pendiente(s) · 2 biblioteca(s)</div>
+    </div>
+    <b style="font-size:18px;color:var(--warn);font-variant-numeric:tabular-nums">1</b>
+    <span style="color:var(--ink-3);font-size:12px">▲</span>
+  </div>
+  <div class="uc-body">
+    <div class="lib-row">
+      <span style="flex:1">Películas</span>
+      <span style="color:var(--ink-2)"><b style="color:var(--warn)">1</b> / 4</span>
+      <a style="color:var(--accent-400);font-size:12px;cursor:pointer">resetear</a>
+    </div>
+    <div class="quota-bar"><i style="width:25%;background:var(--warn)"></i></div>
+    <div class="row" style="margin-top:12px;margin-bottom:0">
+      <div class="pi"><div class="poster">🎬</div><span>Dune: Part Two</span></div>
+      <div class="pi"><div class="poster">🎬</div><span>La sociedad de la nieve</span></div>
+    </div>
+  </div>
+</div>
+<p class="note">Barra = saldo restante sobre límite. Verde &gt;1, ámbar 1, rojo 0. Carátulas TMDB reales en producción.</p>
+</body></html>

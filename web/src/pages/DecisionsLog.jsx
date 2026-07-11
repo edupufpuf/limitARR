@@ -4,11 +4,11 @@ import { IconSearch } from '../icons.jsx';
 
 const PAGE_SIZE = 50;
 
-const decisionColor = {
-  approved: 'text-green-400',
-  no_quota: 'text-accent-400',
-  no_library_config: 'text-gray-500',
-  unmatched_user: 'text-gray-500',
+const decisionBadge = {
+  approved: 'bg-green-400/10 text-green-400 ring-green-400/25',
+  no_quota: 'bg-accent-500/10 text-accent-400 ring-accent-500/25',
+  no_library_config: 'bg-bg-700/60 text-gray-400 ring-bg-600',
+  unmatched_user: 'bg-bg-700/60 text-gray-400 ring-bg-600',
 };
 
 const decisionLabel = {
@@ -78,13 +78,13 @@ export default function DecisionsLog() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Usuario o título…"
-            className="w-48 bg-bg-800 border border-bg-700 rounded pl-8 pr-2 py-1.5 text-sm placeholder-gray-600"
+            className="input w-48 pl-8"
           />
         </div>
         <select
           value={decision}
           onChange={(e) => setDecision(e.target.value)}
-          className="bg-bg-800 border border-bg-700 rounded px-2 py-1.5 text-sm"
+          className="input w-auto"
         >
           <option value="">todas las decisiones</option>
           {Object.entries(decisionLabel).map(([value, label]) => (
@@ -93,21 +93,21 @@ export default function DecisionsLog() {
         </select>
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="card overflow-x-auto px-4">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-gray-400 border-b border-bg-700">
-              <th className="py-2 pr-4">Fecha</th>
-              <th className="py-2 pr-4">Usuario</th>
-              <th className="py-2 pr-4">Título</th>
-              <th className="py-2 pr-4">Saldo antes</th>
-              <th className="py-2 pr-4">Límite</th>
-              <th className="py-2 pr-4">Decisión</th>
+            <tr className="border-b border-bg-700">
+              <th className="th">Fecha</th>
+              <th className="th">Usuario</th>
+              <th className="th">Título</th>
+              <th className="th">Saldo antes</th>
+              <th className="th">Límite</th>
+              <th className="th">Decisión</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.id} className="border-b border-bg-800">
+              <tr key={r.id} className="border-b border-bg-700/50 last:border-0 hover:bg-bg-700/20 transition-colors">
                 <td className="py-2 pr-4 text-gray-500 whitespace-nowrap">{formatDate(r.created_at)}</td>
                 <td className="py-2 pr-4 whitespace-nowrap">{r.username}</td>
                 <td className="py-2 pr-4">
@@ -120,8 +120,10 @@ export default function DecisionsLog() {
                 </td>
                 <td className="py-2 pr-4 tabular-nums">{r.balance_before ?? '—'}</td>
                 <td className="py-2 pr-4 tabular-nums">{r.limit_applied ?? '—'}</td>
-                <td className={`py-2 pr-4 font-semibold whitespace-nowrap ${decisionColor[r.decision] ?? ''}`}>
-                  {decisionLabel[r.decision] ?? r.decision}
+                <td className="py-2 pr-4">
+                  <span className={`badge ${decisionBadge[r.decision] ?? 'bg-bg-700/60 text-gray-400 ring-bg-600'}`}>
+                    {decisionLabel[r.decision] ?? r.decision}
+                  </span>
                 </td>
               </tr>
             ))}
@@ -138,11 +140,7 @@ export default function DecisionsLog() {
 
       {rows.length < total && (
         <div className="text-center mt-4">
-          <button
-            onClick={loadMore}
-            disabled={loadingMore}
-            className="bg-bg-700 hover:bg-bg-600 border border-bg-600 rounded px-4 py-1.5 text-sm disabled:opacity-50"
-          >
+          <button onClick={loadMore} disabled={loadingMore} className="btn btn-ghost">
             {loadingMore ? 'Cargando…' : `Cargar más (${total - rows.length} restantes)`}
           </button>
         </div>

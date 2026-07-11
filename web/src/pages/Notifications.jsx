@@ -98,9 +98,9 @@ export default function Notifications() {
         <span className="text-gray-400">@BotFather</span> en Telegram y pega el token aquí.
       </p>
 
-      <form onSubmit={saveSettings} className="bg-bg-800 border border-bg-700 rounded-lg p-4 mb-6 space-y-4">
+      <form onSubmit={saveSettings} className="card p-4 mb-6 space-y-4">
         <div>
-          <label className="block text-xs text-gray-400 mb-1">
+          <label className="label">
             Token del bot {botSettings.bot_token_set && <span className="text-gray-600">(guardado: {botSettings.bot_token_masked})</span>}
           </label>
           <input
@@ -108,7 +108,7 @@ export default function Notifications() {
             value={tokenInput}
             onChange={(e) => setTokenInput(e.target.value)}
             placeholder={botSettings.bot_token_set ? '•••• dejar en blanco para no cambiar' : '123456:ABC-token-de-BotFather'}
-            className="w-full bg-bg-700 border border-bg-600 rounded px-2 py-1.5"
+            className="input"
           />
         </div>
 
@@ -128,24 +128,24 @@ export default function Notifications() {
           {mode === 'group' && (
             <div className="flex flex-wrap items-end gap-3">
               <div>
-                <label className="block text-xs text-gray-400 mb-1">Chat ID del grupo</label>
+                <label className="label">Chat ID del grupo</label>
                 <input
                   value={groupChatId}
                   onChange={(e) => setGroupChatId(e.target.value)}
                   placeholder="-1001234567890"
-                  className="w-40 bg-bg-700 border border-bg-600 rounded px-2 py-1.5"
+                  className="input w-40"
                 />
               </div>
               <div>
-                <label className="block text-xs text-gray-400 mb-1">Topic ID (opcional)</label>
+                <label className="label">Topic ID (opcional)</label>
                 <input
                   value={groupTopicId}
                   onChange={(e) => setGroupTopicId(e.target.value)}
                   placeholder="—"
-                  className="w-28 bg-bg-700 border border-bg-600 rounded px-2 py-1.5"
+                  className="input w-28"
                 />
               </div>
-              <button type="button" onClick={testGroup} className="bg-bg-700 hover:bg-bg-600 border border-bg-600 rounded px-3 py-1.5 text-sm">
+              <button type="button" onClick={testGroup} className="btn btn-ghost">
                 Probar
               </button>
               {groupTestResult && <span className="text-xs text-gray-500">{groupTestResult}</span>}
@@ -153,7 +153,7 @@ export default function Notifications() {
           )}
         </div>
 
-        <button type="submit" disabled={savingSettings} className="bg-accent-600 hover:bg-accent-700 rounded px-4 py-1.5 text-sm font-semibold disabled:opacity-50">
+        <button type="submit" disabled={savingSettings} className="btn btn-primary">
           {savingSettings ? 'Guardando…' : 'Guardar'}
         </button>
       </form>
@@ -163,7 +163,7 @@ export default function Notifications() {
         <button
           onClick={discover}
           disabled={discovering}
-          className="bg-bg-700 hover:bg-bg-600 border border-bg-600 rounded px-3 py-1.5 text-sm disabled:opacity-50"
+          className="btn btn-ghost"
         >
           {discovering ? 'Buscando…' : 'Buscar chats nuevos'}
         </button>
@@ -174,7 +174,7 @@ export default function Notifications() {
       </p>
 
       {discovered.length > 0 && (
-        <div className="bg-bg-800 border border-bg-700 rounded-lg p-4 mb-6 space-y-3">
+        <div className="card p-4 mb-6 space-y-3">
           {discovered.map((d) => (
             <div key={`${d.chatId}-${d.messageThreadId}`} className="flex flex-wrap items-center gap-3 text-sm">
               <span className="text-gray-400 w-full sm:w-44 truncate">
@@ -188,7 +188,7 @@ export default function Notifications() {
                   <select
                     value={pickUser[d.chatId] ?? ''}
                     onChange={(e) => setPickUser({ ...pickUser, [d.chatId]: e.target.value })}
-                    className="bg-bg-700 border border-bg-600 rounded px-2 py-1"
+                    className="input w-auto py-1"
                   >
                     <option value="">— usuario Tautulli —</option>
                     {users.map((u) => (

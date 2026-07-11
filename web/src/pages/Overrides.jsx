@@ -58,13 +58,13 @@ export default function Overrides() {
         para bloquearlo del todo.
       </p>
 
-      <form onSubmit={applyBulk} className="bg-bg-800 border border-bg-700 rounded-lg p-4 mb-4 flex flex-wrap gap-3 items-end">
+      <form onSubmit={applyBulk} className="card p-4 mb-4 flex flex-wrap gap-3 items-end">
         <div>
-          <label className="block text-xs text-gray-400 mb-1">Biblioteca</label>
+          <label className="label">Biblioteca</label>
           <select
             value={bulkForm.libraryId}
             onChange={(e) => setBulkForm({ ...bulkForm, libraryId: e.target.value })}
-            className="bg-bg-700 border border-bg-600 rounded px-2 py-1"
+            className="input w-auto py-1"
           >
             <option value="">—</option>
             {libraries.map((l) => (
@@ -75,32 +75,32 @@ export default function Overrides() {
           </select>
         </div>
         <div>
-          <label className="block text-xs text-gray-400 mb-1">Límite para todos</label>
+          <label className="label">Límite para todos</label>
           <input
             type="number"
             min={0}
             value={bulkForm.limitOverride}
             onChange={(e) => setBulkForm({ ...bulkForm, limitOverride: e.target.value })}
-            className="w-20 bg-bg-700 border border-bg-600 rounded px-2 py-1"
+            className="input w-20 py-1"
           />
         </div>
         <button
           type="submit"
           disabled={applyingBulk}
-          className="bg-accent-600 hover:bg-accent-700 rounded px-4 py-1.5 text-sm font-semibold disabled:opacity-50"
+          className="btn btn-primary"
         >
           {applyingBulk ? 'Aplicando…' : 'Aplicar a todos'}
         </button>
         {bulkResult && <span className="text-xs text-gray-500">{bulkResult}</span>}
       </form>
 
-      <form onSubmit={submit} className="bg-bg-800 border border-bg-700 rounded-lg p-4 mb-6 flex flex-wrap gap-3 items-end">
+      <form onSubmit={submit} className="card p-4 mb-6 flex flex-wrap gap-3 items-end">
         <div>
-          <label className="block text-xs text-gray-400 mb-1">Usuario</label>
+          <label className="label">Usuario</label>
           <select
             value={form.userId}
             onChange={(e) => setForm({ ...form, userId: e.target.value })}
-            className="bg-bg-700 border border-bg-600 rounded px-2 py-1"
+            className="input w-auto py-1"
           >
             <option value="">—</option>
             {users.map((u) => (
@@ -111,11 +111,11 @@ export default function Overrides() {
           </select>
         </div>
         <div>
-          <label className="block text-xs text-gray-400 mb-1">Biblioteca</label>
+          <label className="label">Biblioteca</label>
           <select
             value={form.libraryId}
             onChange={(e) => setForm({ ...form, libraryId: e.target.value })}
-            className="bg-bg-700 border border-bg-600 rounded px-2 py-1"
+            className="input w-auto py-1"
           >
             <option value="">—</option>
             {libraries.map((l) => (
@@ -126,42 +126,42 @@ export default function Overrides() {
           </select>
         </div>
         <div>
-          <label className="block text-xs text-gray-400 mb-1">Límite</label>
+          <label className="label">Límite</label>
           <input
             type="number"
             min={0}
             value={form.limitOverride}
             onChange={(e) => setForm({ ...form, limitOverride: e.target.value })}
-            className="w-20 bg-bg-700 border border-bg-600 rounded px-2 py-1"
+            className="input w-20 py-1"
           />
         </div>
         <div className="flex-1 min-w-[120px]">
-          <label className="block text-xs text-gray-400 mb-1">Nota</label>
+          <label className="label">Nota</label>
           <input
             value={form.note}
             onChange={(e) => setForm({ ...form, note: e.target.value })}
-            className="w-full bg-bg-700 border border-bg-600 rounded px-2 py-1"
+            className="input py-1"
           />
         </div>
-        <button type="submit" className="bg-accent-600 hover:bg-accent-700 rounded px-4 py-1.5 text-sm font-semibold">
+        <button type="submit" className="btn btn-primary">
           Guardar override
         </button>
       </form>
 
-      <div className="overflow-x-auto">
+      <div className="card overflow-x-auto px-4">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-gray-400 border-b border-bg-700">
-              <th className="py-2 pr-4">Usuario</th>
-              <th className="py-2 pr-4">Biblioteca</th>
-              <th className="py-2 pr-4">Límite</th>
-              <th className="py-2 pr-4">Nota</th>
-              <th className="py-2 pr-4"></th>
+            <tr className="border-b border-bg-700">
+              <th className="th">Usuario</th>
+              <th className="th">Biblioteca</th>
+              <th className="th">Límite</th>
+              <th className="th">Nota</th>
+              <th className="th"></th>
             </tr>
           </thead>
           <tbody>
             {overrides.map((o) => (
-              <tr key={`${o.user_id}-${o.library_id}`} className="border-b border-bg-800">
+              <tr key={`${o.user_id}-${o.library_id}`} className="border-b border-bg-700/50 last:border-0 hover:bg-bg-700/20 transition-colors">
                 <td className="py-2 pr-4 whitespace-nowrap">{userName(o.user_id)}</td>
                 <td className="py-2 pr-4 whitespace-nowrap">{libName(o.library_id)}</td>
                 <td className="py-2 pr-4">{o.limit_override}</td>

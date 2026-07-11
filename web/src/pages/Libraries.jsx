@@ -15,7 +15,7 @@ function LibraryCard({ lib, onSaved }) {
   }
 
   return (
-    <div className="bg-bg-800 border border-bg-700 rounded-lg p-4 mb-4">
+    <div className="card p-4 mb-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="font-semibold">
           {lib.name} <span className="text-gray-500 text-xs">#{lib.id}</span>
@@ -32,7 +32,7 @@ function LibraryCard({ lib, onSaved }) {
           <select
             value={kind}
             onChange={(e) => setKind(e.target.value)}
-            className="bg-bg-700 border border-bg-600 rounded px-2 py-1 text-sm"
+            className="input w-auto py-1"
           >
             <option value="standard">standard</option>
             <option value="4k">4k</option>
@@ -45,7 +45,7 @@ function LibraryCard({ lib, onSaved }) {
             min={0}
             value={defaultLimit}
             onChange={(e) => setDefaultLimit(e.target.value)}
-            className="w-20 bg-bg-700 border border-bg-600 rounded px-2 py-1 text-sm"
+            className="input w-20 py-1"
           />
         </div>
       </div>
@@ -53,7 +53,7 @@ function LibraryCard({ lib, onSaved }) {
       <button
         onClick={save}
         disabled={saving}
-        className="bg-accent-600 hover:bg-accent-700 rounded px-4 py-1.5 text-sm font-semibold disabled:opacity-50"
+        className="btn btn-primary"
       >
         {saving ? 'Guardando…' : 'Guardar'}
       </button>
@@ -85,7 +85,7 @@ export default function Libraries() {
         <button
           onClick={sync}
           disabled={syncing}
-          className="bg-bg-700 hover:bg-bg-600 border border-bg-600 rounded px-3 py-1.5 text-sm disabled:opacity-50"
+          className="btn btn-ghost"
         >
           {syncing ? 'Sincronizando…' : 'Sincronizar desde Tautulli'}
         </button>

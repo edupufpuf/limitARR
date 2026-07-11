@@ -1,0 +1,18 @@
+<!-- @dsCard group="Componentes" name="Campos" subtitle="Input, búsqueda, select — focus ring rojo" -->
+<!doctype html><html lang="es"><head><meta charset="utf-8">
+<link rel="stylesheet" href="../tokens.css"><link rel="stylesheet" href="_card.css">
+</head><body>
+<h1>Campos</h1>
+<div style="display:flex;flex-direction:column;gap:12px;max-width:320px">
+  <div>
+    <label style="display:block;font-size:12px;font-weight:500;color:var(--ink-2);margin-bottom:4px">URL</label>
+    <input class="input" style="width:100%" placeholder="http://seerr:5055">
+  </div>
+  <div style="position:relative">
+    <svg viewBox="0 0 24 24" fill="none" stroke="var(--ink-3)" stroke-width="1.8" style="width:16px;height:16px;position:absolute;left:10px;top:50%;transform:translateY(-50%)"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="m21 21-4.3-4.3"/></svg>
+    <input class="input" style="width:100%;padding-left:32px" placeholder="Buscar usuario…">
+  </div>
+  <select class="input"><option>todas las decisiones</option></select>
+</div>
+<p class="note">Focus: ring rojo al 50%. Fondo del campo un paso más oscuro que la tarjeta.</p>
+</body></html>

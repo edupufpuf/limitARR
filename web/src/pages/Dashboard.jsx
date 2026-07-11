@@ -6,6 +6,7 @@ import Overrides from './Overrides.jsx';
 import DecisionsLog from './DecisionsLog.jsx';
 import Settings from './Settings.jsx';
 import Notifications from './Notifications.jsx';
+import { LogoMark, Wordmark } from '../components/Brand.jsx';
 import { IconGauge, IconFilm, IconSliders, IconClock, IconBell, IconGear, IconLogout } from '../icons.jsx';
 
 const TABS = {
@@ -29,23 +30,31 @@ export default function Dashboard({ onLoggedOut }) {
   return (
     <div className="min-h-screen flex flex-col sm:flex-row">
       {/* Sidebar — solo desktop */}
-      <nav className="hidden sm:flex w-56 bg-bg-800 border-r border-bg-700 p-4 flex-col flex-shrink-0">
-        <h1 className="text-xl font-bold text-accent-500 mb-8">limitARR</h1>
+      <nav className="hidden sm:flex w-60 bg-bg-900/80 border-r border-bg-700/60 p-4 flex-col flex-shrink-0 backdrop-blur">
+        <div className="flex items-center gap-2.5 px-1 mb-8">
+          <LogoMark />
+          <Wordmark />
+        </div>
         {Object.entries(TABS).map(([key, { label, Icon }]) => (
           <button
             key={key}
             onClick={() => setTab(key)}
-            className={`flex items-center gap-2.5 text-left px-3 py-2 rounded mb-1 text-sm font-medium ${
-              tab === key ? 'bg-accent-600 text-white' : 'text-gray-300 hover:bg-bg-700'
+            className={`relative flex items-center gap-2.5 text-left px-3 py-2 rounded-lg mb-1 text-sm font-medium transition-colors ${
+              tab === key
+                ? 'bg-accent-600/15 text-accent-300'
+                : 'text-gray-400 hover:text-gray-200 hover:bg-bg-800'
             }`}
           >
+            {tab === key && (
+              <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-full bg-accent-500" />
+            )}
             <Icon className="w-5 h-5 flex-shrink-0" />
             {label}
           </button>
         ))}
         <button
           onClick={logout}
-          className="flex items-center gap-2.5 mt-auto text-left px-3 py-2 rounded text-sm text-gray-500 hover:bg-bg-700"
+          className="flex items-center gap-2.5 mt-auto text-left px-3 py-2 rounded-lg text-sm text-gray-500 hover:text-gray-300 hover:bg-bg-800 transition-colors"
         >
           <IconLogout className="w-5 h-5 flex-shrink-0" />
           Cerrar sesión
@@ -53,8 +62,11 @@ export default function Dashboard({ onLoggedOut }) {
       </nav>
 
       {/* Top bar — solo móvil */}
-      <header className="sm:hidden flex items-center justify-between px-4 h-14 bg-bg-800 border-b border-bg-700 flex-shrink-0 sticky top-0 z-10">
-        <span className="text-lg font-bold text-accent-500">limitARR</span>
+      <header className="sm:hidden flex items-center justify-between px-4 h-14 bg-bg-900/90 border-b border-bg-700/60 flex-shrink-0 sticky top-0 z-10 backdrop-blur">
+        <div className="flex items-center gap-2">
+          <LogoMark className="w-7 h-7" />
+          <Wordmark className="text-base" />
+        </div>
         <span className="text-sm text-gray-400">{label}</span>
         <button onClick={logout} className="text-gray-400 p-1 -mr-1">
           <IconLogout className="w-5 h-5" />
@@ -66,12 +78,12 @@ export default function Dashboard({ onLoggedOut }) {
       </main>
 
       {/* Barra de pestañas — solo móvil */}
-      <nav className="sm:hidden fixed bottom-0 left-0 right-0 bg-bg-800 border-t border-bg-700 flex z-10">
+      <nav className="sm:hidden fixed bottom-0 left-0 right-0 bg-bg-900/95 border-t border-bg-700/60 flex z-10 backdrop-blur">
         {Object.entries(TABS).map(([key, { label, Icon }]) => (
           <button
             key={key}
             onClick={() => setTab(key)}
-            className={`flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] ${
+            className={`flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] transition-colors ${
               tab === key ? 'text-accent-400' : 'text-gray-500'
             }`}
           >

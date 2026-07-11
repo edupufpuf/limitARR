@@ -28,9 +28,9 @@ function totalOutstanding(libraries) {
 // los saldos de las tarjetas, donde sí es semántico.
 function StatTile({ label, value }) {
   return (
-    <div className="bg-bg-800 border border-bg-700 rounded-lg px-4 py-3">
+    <div className="card px-4 py-3">
       <div className="text-2xl font-bold tabular-nums">{value}</div>
-      <div className="text-xs text-gray-500 mt-0.5">{label}</div>
+      <div className="text-[11px] uppercase tracking-wider text-gray-500 mt-0.5">{label}</div>
     </div>
   );
 }
@@ -69,10 +69,10 @@ function UserCard({ user, expanded, onToggle, onReset, resetting }) {
   const worst = worstBalance(user.libraries);
   const pending = totalOutstanding(user.libraries);
   return (
-    <div className="bg-bg-800 border border-bg-700 rounded-lg overflow-hidden">
+    <div className="card overflow-hidden hover:border-bg-600/80 transition-colors">
       <button
         onClick={onToggle}
-        className="w-full flex items-center gap-3 p-4 text-left hover:bg-bg-700/50 transition-colors"
+        className="w-full flex items-center gap-3 p-4 text-left hover:bg-bg-700/40 transition-colors"
       >
         {user.avatar ? (
           <img src={user.avatar} alt="" className="w-10 h-10 rounded-full flex-shrink-0" referrerPolicy="no-referrer" />
@@ -195,18 +195,10 @@ export default function Quota() {
         <h2 className="text-xl font-semibold">Cupo por usuario</h2>
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           {importResult && <span className="text-xs text-gray-500">{importResult}</span>}
-          <button
-            onClick={importHistory}
-            disabled={importing}
-            className="bg-bg-700 hover:bg-bg-600 border border-bg-600 rounded px-3 py-1.5 text-sm disabled:opacity-50"
-          >
+          <button onClick={importHistory} disabled={importing} className="btn btn-ghost">
             {importing ? 'Importando…' : 'Importar historial de Seerr'}
           </button>
-          <button
-            onClick={recalculate}
-            disabled={recalculating}
-            className="bg-bg-700 hover:bg-bg-600 border border-bg-600 rounded px-3 py-1.5 text-sm disabled:opacity-50"
-          >
+          <button onClick={recalculate} disabled={recalculating} className="btn btn-ghost">
             {recalculating ? 'Recalculando…' : 'Recalcular todos'}
           </button>
         </div>
@@ -234,7 +226,7 @@ export default function Quota() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Buscar usuario…"
-          className="w-full bg-bg-800 border border-bg-700 rounded pl-8 pr-2 py-1.5 text-sm placeholder-gray-600"
+          className="input pl-8"
         />
       </div>
 

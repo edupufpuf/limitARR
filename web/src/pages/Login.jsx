@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api.js';
+import { LogoMark, Wordmark } from '../components/Brand.jsx';
 
 export default function Login({ onLoggedIn }) {
   const [password, setPassword] = useState('');
@@ -21,23 +22,22 @@ export default function Login({ onLoggedIn }) {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-bg-900">
-      <form onSubmit={submit} className="bg-bg-800 rounded-lg p-8 w-full max-w-sm shadow-xl border border-bg-700">
-        <h1 className="text-2xl font-bold text-accent-500 mb-6 text-center">limitARR</h1>
+    <div className="min-h-screen flex items-center justify-center p-4">
+      <form onSubmit={submit} className="card p-8 w-full max-w-sm">
+        <div className="flex flex-col items-center gap-3 mb-8">
+          <LogoMark className="w-12 h-12" />
+          <Wordmark className="text-2xl" />
+        </div>
         <input
           type="password"
           autoFocus
           placeholder="Contraseña admin"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="w-full rounded bg-bg-700 border border-bg-600 px-3 py-2 mb-4 text-gray-100 focus:outline-none focus:ring-2 focus:ring-accent-500"
+          className="input py-2 mb-4"
         />
         {error && <p className="text-accent-400 text-sm mb-4">{error}</p>}
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full bg-accent-600 hover:bg-accent-700 transition-colors rounded py-2 font-semibold disabled:opacity-50"
-        >
+        <button type="submit" disabled={loading} className="btn btn-primary w-full py-2">
           {loading ? 'Entrando…' : 'Entrar'}
         </button>
       </form>

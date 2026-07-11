@@ -103,17 +103,17 @@ export default function Settings() {
         Conexión a Seerr y Tautulli. Deja la clave en blanco para no cambiar la ya guardada.
       </p>
 
-      <form onSubmit={save} className="bg-bg-800 border border-bg-700 rounded-lg p-5 space-y-5">
+      <form onSubmit={save} className="card p-5 space-y-5">
         <fieldset>
           <legend className="text-sm font-semibold text-accent-400 mb-2">Seerr</legend>
-          <label className="block text-xs text-gray-400 mb-1">URL</label>
+          <label className="label">URL</label>
           <input
             value={form.seerr_url}
             onChange={(e) => setForm({ ...form, seerr_url: e.target.value })}
             placeholder="http://seerr:5055"
-            className="w-full bg-bg-700 border border-bg-600 rounded px-2 py-1.5 mb-3"
+            className="input mb-3"
           />
-          <label className="block text-xs text-gray-400 mb-1">
+          <label className="label">
             API key {settings.seerr_api_key_set && <span className="text-gray-600">(guardada: {settings.seerr_api_key_masked})</span>}
           </label>
           <input
@@ -121,20 +121,20 @@ export default function Settings() {
             value={form.seerr_api_key}
             onChange={(e) => setForm({ ...form, seerr_api_key: e.target.value })}
             placeholder={settings.seerr_api_key_set ? '•••• dejar en blanco para no cambiar' : ''}
-            className="w-full bg-bg-700 border border-bg-600 rounded px-2 py-1.5"
+            className="input"
           />
         </fieldset>
 
         <fieldset>
           <legend className="text-sm font-semibold text-accent-400 mb-2">Tautulli</legend>
-          <label className="block text-xs text-gray-400 mb-1">URL</label>
+          <label className="label">URL</label>
           <input
             value={form.tautulli_url}
             onChange={(e) => setForm({ ...form, tautulli_url: e.target.value })}
             placeholder="http://tautulli:8181"
-            className="w-full bg-bg-700 border border-bg-600 rounded px-2 py-1.5 mb-3"
+            className="input mb-3"
           />
-          <label className="block text-xs text-gray-400 mb-1">
+          <label className="label">
             API key {settings.tautulli_api_key_set && <span className="text-gray-600">(guardada: {settings.tautulli_api_key_masked})</span>}
           </label>
           <input
@@ -142,7 +142,7 @@ export default function Settings() {
             value={form.tautulli_api_key}
             onChange={(e) => setForm({ ...form, tautulli_api_key: e.target.value })}
             placeholder={settings.tautulli_api_key_set ? '•••• dejar en blanco para no cambiar' : ''}
-            className="w-full bg-bg-700 border border-bg-600 rounded px-2 py-1.5"
+            className="input"
           />
         </fieldset>
 
@@ -150,7 +150,7 @@ export default function Settings() {
           <button
             type="submit"
             disabled={saving}
-            className="bg-accent-600 hover:bg-accent-700 rounded px-4 py-1.5 text-sm font-semibold disabled:opacity-50"
+            className="btn btn-primary"
           >
             {saving ? 'Guardando…' : 'Guardar'}
           </button>
@@ -158,7 +158,7 @@ export default function Settings() {
             type="button"
             onClick={test}
             disabled={testing}
-            className="bg-bg-700 hover:bg-bg-600 border border-bg-600 rounded px-4 py-1.5 text-sm disabled:opacity-50"
+            className="btn btn-ghost"
           >
             {testing ? 'Probando…' : 'Probar conexión'}
           </button>
@@ -173,7 +173,7 @@ export default function Settings() {
       </form>
 
       <h3 className="text-sm font-semibold text-accent-400 mt-8 mb-2">Reacción instantánea</h3>
-      <div className="bg-bg-800 border border-bg-700 rounded-lg p-5">
+      <div className="card p-5">
         <p className="text-xs text-gray-500 mb-3">
           Sin esto, limitARR tarda hasta un minuto en enterarse de una solicitud
           nueva (sondeo periódico). Con el webhook de Seerr activado, reacciona
@@ -185,7 +185,7 @@ export default function Settings() {
             type="button"
             onClick={configureWebhook}
             disabled={configuringWebhook}
-            className="bg-bg-700 hover:bg-bg-600 border border-bg-600 rounded px-4 py-1.5 text-sm disabled:opacity-50"
+            className="btn btn-ghost"
           >
             {configuringWebhook ? 'Configurando…' : 'Configurar automáticamente en Seerr'}
           </button>
@@ -196,7 +196,7 @@ export default function Settings() {
       </div>
 
       <h3 className="text-sm font-semibold text-accent-400 mt-8 mb-2">Copia de seguridad</h3>
-      <div className="bg-bg-800 border border-bg-700 rounded-lg p-5">
+      <div className="card p-5">
         <p className="text-xs text-gray-500 mb-3">
           Descarga un volcado consistente de la base de datos (cupo, overrides,
           registro de decisiones, vínculos de Telegram). Es manual — descárgalo
@@ -204,46 +204,46 @@ export default function Settings() {
         </p>
         <a
           href="/api/backup"
-          className="inline-block bg-bg-700 hover:bg-bg-600 border border-bg-600 rounded px-4 py-1.5 text-sm"
+          className="btn btn-ghost"
         >
           Descargar backup
         </a>
       </div>
 
       <h3 className="text-sm font-semibold text-accent-400 mt-8 mb-2">Contraseña de admin</h3>
-      <form onSubmit={changePassword} className="bg-bg-800 border border-bg-700 rounded-lg p-5 space-y-3">
+      <form onSubmit={changePassword} className="card p-5 space-y-3">
         <div>
-          <label className="block text-xs text-gray-400 mb-1">Contraseña actual</label>
+          <label className="label">Contraseña actual</label>
           <input
             type="password"
             value={pwForm.current}
             onChange={(e) => setPwForm({ ...pwForm, current: e.target.value })}
-            className="w-full bg-bg-700 border border-bg-600 rounded px-2 py-1.5"
+            className="input"
           />
         </div>
         <div>
-          <label className="block text-xs text-gray-400 mb-1">Contraseña nueva (mín. 8)</label>
+          <label className="label">Contraseña nueva (mín. 8)</label>
           <input
             type="password"
             value={pwForm.next}
             onChange={(e) => setPwForm({ ...pwForm, next: e.target.value })}
-            className="w-full bg-bg-700 border border-bg-600 rounded px-2 py-1.5"
+            className="input"
           />
         </div>
         <div>
-          <label className="block text-xs text-gray-400 mb-1">Repite la contraseña nueva</label>
+          <label className="label">Repite la contraseña nueva</label>
           <input
             type="password"
             value={pwForm.confirm}
             onChange={(e) => setPwForm({ ...pwForm, confirm: e.target.value })}
-            className="w-full bg-bg-700 border border-bg-600 rounded px-2 py-1.5"
+            className="input"
           />
         </div>
         <div className="flex flex-wrap items-center gap-3 pt-1">
           <button
             type="submit"
             disabled={pwSaving}
-            className="bg-accent-600 hover:bg-accent-700 rounded px-4 py-1.5 text-sm font-semibold disabled:opacity-50"
+            className="btn btn-primary"
           >
             {pwSaving ? 'Guardando…' : 'Cambiar contraseña'}
           </button>

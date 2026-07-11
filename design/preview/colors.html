@@ -1,0 +1,30 @@
+<!-- @dsCard group="Fundamentos" name="Color" subtitle="Superficies navy, acento rojo, estados de saldo" -->
+<!doctype html><html lang="es"><head><meta charset="utf-8">
+<link rel="stylesheet" href="../tokens.css"><link rel="stylesheet" href="_card.css">
+<style>
+.sw { width: 88px; height: 64px; border-radius: 8px; display: flex; align-items: flex-end; padding: 6px 8px; font-size: 10px; color: var(--ink-2); font-family: ui-monospace, monospace; border: 1px solid rgba(255,255,255,.06); }
+</style></head><body>
+<h1>Superficies</h1>
+<div class="row">
+  <div class="sw" style="background:var(--bg-950)">950</div>
+  <div class="sw" style="background:var(--bg-900)">900</div>
+  <div class="sw" style="background:var(--bg-800)">800</div>
+  <div class="sw" style="background:var(--bg-700)">700</div>
+  <div class="sw" style="background:var(--bg-600)">600</div>
+</div>
+<h1>Acento</h1>
+<div class="row">
+  <div class="sw" style="background:var(--accent-300);color:#450a0a">300</div>
+  <div class="sw" style="background:var(--accent-400);color:#450a0a">400</div>
+  <div class="sw" style="background:var(--accent-500);color:#fff">500</div>
+  <div class="sw" style="background:var(--accent-600);color:#fff">600</div>
+  <div class="sw" style="background:var(--accent-700);color:#fff">700</div>
+</div>
+<h1>Estado de saldo</h1>
+<div class="row">
+  <div class="sw" style="background:var(--ok);color:#052e16">libre</div>
+  <div class="sw" style="background:var(--warn);color:#422006">justo</div>
+  <div class="sw" style="background:var(--danger);color:#450a0a">agotado</div>
+</div>
+<p class="note">El color de estado siempre va acompañado del número de saldo — nunca color solo.</p>
+</body></html>
