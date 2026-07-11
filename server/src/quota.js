@@ -21,6 +21,11 @@ export function normalize(title) {
 }
 
 const getOverride = db.prepare('SELECT * FROM overrides WHERE user_id = ? AND library_id = ?');
+const getGroupOverride = db.prepare(`
+  SELECT go.limit_override FROM group_members gm
+  JOIN group_overrides go ON go.group_id = gm.group_id
+  WHERE gm.user_id = ? AND go.library_id = ?
+`);
 const getLibrary = db.prepare('SELECT * FROM libraries WHERE id = ?');
 const getResetAt = db.prepare('SELECT reset_at FROM quota_resets WHERE user_id = ? AND library_id = ?');
 const getApprovedTitles = db.prepare(`
@@ -53,6 +58,14 @@ const upsertQuotaCache = db.prepare(`
     pending_items = excluded.pending_items,
     computed_at = excluded.computed_at
 `);
+
+// Precedencia del límite efectivo. Comparaciones con != null a propósito:
+// 0 es un valor legítimo (bloquear del todo) y no puede tratarse como "sin override".
+export function resolveLimit(userOverride, groupOverride, defaultLimit) {
+  if (userOverride != null) return userOverride;
+  if (groupOverride != null) return groupOverride;
+  return defaultLimit;
+}
 
 function toSqliteDateTime(isoString) {
   return isoString.replace('T', ' ').replace(/\.\d{3}Z$/, '');
@@ -89,7 +102,12 @@ export function computeBalance(limit, approvedRows, watchedTitles) {
 export async function getBalance(userId, libraryId) {
   const library = getLibrary.get(libraryId);
   const override = getOverride.get(userId, libraryId);
-  const limit = override ? override.limit_override : library.default_limit;
+  const groupOverride = getGroupOverride.get(userId, libraryId);
+  const limit = resolveLimit(
+    override?.limit_override ?? null,
+    groupOverride?.limit_override ?? null,
+    library.default_limit
+  );
   const resetAt = getResetAt.get(userId, libraryId)?.reset_at ?? '0000-01-01';
 
   const history = await getUserMovieHistory(userId, libraryId);

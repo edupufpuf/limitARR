@@ -73,6 +73,28 @@ db.exec(`
     PRIMARY KEY (user_id, library_id)
   );
 
+  -- Grupos de usuarios para poner límites por grupo en vez de uno a uno.
+  -- Un usuario pertenece como mucho a UN grupo (PK de group_members): así el
+  -- límite efectivo es determinista sin reglas de desempate entre grupos.
+  -- Precedencia: override individual > override de grupo > límite de biblioteca.
+  CREATE TABLE IF NOT EXISTS groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE
+  );
+
+  CREATE TABLE IF NOT EXISTS group_members (
+    user_id INTEGER PRIMARY KEY,      -- Tautulli user_id
+    group_id INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS group_overrides (
+    group_id INTEGER NOT NULL,
+    library_id INTEGER NOT NULL,
+    limit_override INTEGER NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (group_id, library_id)
+  );
+
   -- Mensajes normales (no callbacks) recibidos por el bot, para que el panel
   -- pueda "descubrir" chats/topics sin tener que llamar a Telegram en vivo.
   CREATE TABLE IF NOT EXISTS telegram_inbox (

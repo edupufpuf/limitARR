@@ -1,8 +1,108 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 
+function GroupCard({ group, users, libraries, onChanged }) {
+  // Límite por biblioteca como texto del input: '' = sin override de grupo.
+  const [limits, setLimits] = useState({});
+
+  useEffect(() => {
+    setLimits(
+      Object.fromEntries(
+        libraries.map((l) => [
+          l.id,
+          group.overrides.find((o) => o.library_id === l.id)?.limit_override ?? '',
+        ])
+      )
+    );
+  }, [group, libraries]);
+
+  async function toggleMember(userId) {
+    const next = group.members.includes(userId)
+      ? group.members.filter((id) => id !== userId)
+      : [...group.members, userId];
+    await api.setGroupMembers(group.id, next);
+    onChanged();
+  }
+
+  async function saveLimit(libraryId) {
+    const value = limits[libraryId];
+    if (value === '') {
+      if (group.overrides.some((o) => o.library_id === libraryId)) {
+        await api.deleteGroupOverride(group.id, libraryId);
+      }
+    } else {
+      await api.setGroupOverride(group.id, libraryId, Number(value));
+    }
+    onChanged();
+  }
+
+  async function removeGroup() {
+    if (!window.confirm(`¿Eliminar el grupo "${group.name}"? Sus miembros vuelven al límite de biblioteca.`)) return;
+    await api.deleteGroup(group.id);
+    onChanged();
+  }
+
+  return (
+    <div className="card p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-semibold">{group.name}</h3>
+        <button onClick={removeGroup} className="text-accent-400 text-xs">
+          eliminar grupo
+        </button>
+      </div>
+
+      <div className="label mb-1.5">Miembros</div>
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        {users.map((u) => {
+          const inGroup = group.members.includes(u.id);
+          return (
+            <button
+              key={u.id}
+              onClick={() => toggleMember(u.id)}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                inGroup
+                  ? 'bg-accent-600/20 text-accent-300 ring-1 ring-accent-500/40'
+                  : 'bg-bg-700/60 text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              {u.username}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="label mb-1.5">Límite por biblioteca (vacío = el de la biblioteca)</div>
+      <div className="flex flex-wrap gap-3">
+        {libraries.map((l) => {
+          const saved = group.overrides.find((o) => o.library_id === l.id)?.limit_override ?? '';
+          const dirty = String(limits[l.id] ?? '') !== String(saved);
+          return (
+            <div key={l.id} className="flex items-center gap-2 text-sm">
+              <span className="text-gray-400">{l.name}</span>
+              <input
+                type="number"
+                min={0}
+                value={limits[l.id] ?? ''}
+                onChange={(e) => setLimits({ ...limits, [l.id]: e.target.value })}
+                className="input w-16 py-1"
+              />
+              {dirty && (
+                <button onClick={() => saveLimit(l.id)} className="btn btn-primary py-1 px-2.5 text-xs">
+                  Guardar
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function Overrides() {
   const [overrides, setOverrides] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [newGroupName, setNewGroupName] = useState('');
   const [users, setUsers] = useState([]);
   const [libraries, setLibraries] = useState([]);
   const [form, setForm] = useState({ userId: '', libraryId: '', limitOverride: 4, note: '' });
@@ -12,6 +112,15 @@ export default function Overrides() {
 
   function load() {
     api.overrides().then(setOverrides);
+    api.groups().then(setGroups);
+  }
+
+  async function createGroup(e) {
+    e.preventDefault();
+    if (!newGroupName.trim()) return;
+    await api.createGroup(newGroupName.trim());
+    setNewGroupName('');
+    load();
   }
 
   useEffect(() => {
@@ -52,11 +161,36 @@ export default function Overrides() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold tracking-tight mb-1">Overrides manuales</h2>
+      <h2 className="text-2xl font-bold tracking-tight mb-1">Overrides</h2>
       <p className="text-xs text-gray-500 mb-4">
-        Fija un límite de solicitudes sin ver distinto del de la biblioteca para ese usuario. Pon 0
-        para bloquearlo del todo.
+        Precedencia del límite: override individual &gt; override de grupo &gt; límite de la
+        biblioteca. Pon 0 para bloquear del todo.
       </p>
+
+      <h3 className="text-sm font-semibold text-gray-300 mb-2">Grupos</h3>
+      <form onSubmit={createGroup} className="flex gap-2 mb-3">
+        <input
+          value={newGroupName}
+          onChange={(e) => setNewGroupName(e.target.value)}
+          placeholder="Nombre del grupo (p.ej. Familia)"
+          className="input py-1 max-w-xs"
+        />
+        <button type="submit" className="btn btn-primary">
+          Crear grupo
+        </button>
+      </form>
+      {groups.length > 0 && (
+        <div className="space-y-3 mb-6">
+          {groups.map((g) => (
+            <GroupCard key={g.id} group={g} users={users} libraries={libraries} onChanged={load} />
+          ))}
+        </div>
+      )}
+      <p className="text-[11px] text-gray-600 mb-6">
+        Cada usuario puede estar como mucho en un grupo: marcarlo en otro lo mueve.
+      </p>
+
+      <h3 className="text-sm font-semibold text-gray-300 mb-2">Overrides individuales</h3>
 
       <form onSubmit={applyBulk} className="card p-4 mb-4 flex flex-wrap gap-3 items-end">
         <div>

@@ -32,6 +32,16 @@ export const api = {
   bulkSetOverride: (libraryId, limitOverride, note) =>
     request('/overrides/bulk', { method: 'POST', body: JSON.stringify({ libraryId, limitOverride, note }) }),
 
+  groups: () => request('/groups'),
+  createGroup: (name) => request('/groups', { method: 'POST', body: JSON.stringify({ name }) }),
+  deleteGroup: (id) => request(`/groups/${id}`, { method: 'DELETE' }),
+  setGroupMembers: (id, userIds) =>
+    request(`/groups/${id}/members`, { method: 'PUT', body: JSON.stringify({ userIds }) }),
+  setGroupOverride: (id, libraryId, limitOverride) =>
+    request(`/groups/${id}/overrides/${libraryId}`, { method: 'PUT', body: JSON.stringify({ limitOverride }) }),
+  deleteGroupOverride: (id, libraryId) =>
+    request(`/groups/${id}/overrides/${libraryId}`, { method: 'DELETE' }),
+
   quota: () => request('/quota'),
   recalculateQuota: () => request('/quota/recalculate', { method: 'POST' }),
   resetQuota: (userId, libraryId) => request(`/quota/reset/${userId}/${libraryId}`, { method: 'POST' }),

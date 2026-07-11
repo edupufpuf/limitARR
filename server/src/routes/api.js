@@ -240,6 +240,113 @@ router.post('/overrides/bulk', ah(async (req, res) => {
   res.json({ ok: true, applied: users.length });
 }));
 
+// --- Grupos ---
+// Un usuario pertenece como mucho a un grupo (PK user_id en group_members);
+// asignarlo a otro grupo lo mueve. Cualquier mutación refresca quota_cache de
+// los usuarios afectados en las bibliotecas con override de grupo, porque el
+// límite efectivo puede cambiar al momento.
+
+const groupExists = db.prepare('SELECT id FROM groups WHERE id = ?');
+const groupMemberIds = db.prepare('SELECT user_id FROM group_members WHERE group_id = ?');
+const groupOverrideLibs = db.prepare('SELECT library_id FROM group_overrides WHERE group_id = ?');
+
+async function refreshAffected(userIds, libraryIds) {
+  for (const userId of userIds) {
+    for (const libraryId of libraryIds) {
+      await refreshQuotaCache(userId, libraryId);
+    }
+  }
+}
+
+router.get('/groups', (req, res) => {
+  const groups = db.prepare('SELECT * FROM groups ORDER BY name').all();
+  const members = db.prepare('SELECT * FROM group_members').all();
+  const overrides = db.prepare('SELECT * FROM group_overrides').all();
+  res.json(
+    groups.map((g) => ({
+      ...g,
+      members: members.filter((m) => m.group_id === g.id).map((m) => m.user_id),
+      overrides: overrides.filter((o) => o.group_id === g.id),
+    }))
+  );
+});
+
+router.post('/groups', (req, res) => {
+  const name = (req.body?.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'name_required' });
+  try {
+    const { lastInsertRowid } = db.prepare('INSERT INTO groups (name) VALUES (?)').run(name);
+    res.json({ ok: true, id: lastInsertRowid });
+  } catch (err) {
+    if (/UNIQUE/.test(err.message)) return res.status(409).json({ error: 'name_taken' });
+    throw err;
+  }
+});
+
+router.delete('/groups/:id', ah(async (req, res) => {
+  const { id } = req.params;
+  const userIds = groupMemberIds.all(id).map((r) => r.user_id);
+  const libraryIds = groupOverrideLibs.all(id).map((r) => r.library_id);
+  db.transaction(() => {
+    db.prepare('DELETE FROM group_overrides WHERE group_id = ?').run(id);
+    db.prepare('DELETE FROM group_members WHERE group_id = ?').run(id);
+    db.prepare('DELETE FROM groups WHERE id = ?').run(id);
+  })();
+  await refreshAffected(userIds, libraryIds);
+  res.json({ ok: true });
+}));
+
+// Reemplaza la lista completa de miembros del grupo.
+router.put('/groups/:id/members', ah(async (req, res) => {
+  const { id } = req.params;
+  if (!groupExists.get(id)) return res.status(404).json({ error: 'group_not_found' });
+  if (!Array.isArray(req.body?.userIds)) return res.status(400).json({ error: 'userIds_required' });
+  const userIds = req.body.userIds.map(Number);
+
+  const before = groupMemberIds.all(id).map((r) => r.user_id);
+  db.transaction(() => {
+    db.prepare('DELETE FROM group_members WHERE group_id = ?').run(id);
+    const insert = db.prepare(
+      'INSERT INTO group_members (user_id, group_id) VALUES (?, ?) ' +
+        'ON CONFLICT (user_id) DO UPDATE SET group_id = excluded.group_id'
+    );
+    for (const userId of userIds) insert.run(userId, id);
+  })();
+
+  // Solo cambia el límite de quien entra o sale, y solo en bibliotecas donde
+  // el grupo tiene override.
+  const changed = [
+    ...userIds.filter((u) => !before.includes(u)),
+    ...before.filter((u) => !userIds.includes(u)),
+  ];
+  const libraryIds = groupOverrideLibs.all(id).map((r) => r.library_id);
+  await refreshAffected(changed, libraryIds);
+  res.json({ ok: true });
+}));
+
+router.put('/groups/:id/overrides/:libraryId', ah(async (req, res) => {
+  const { id, libraryId } = req.params;
+  if (!groupExists.get(id)) return res.status(404).json({ error: 'group_not_found' });
+  const { limitOverride } = req.body || {};
+  if (limitOverride === undefined) return res.status(400).json({ error: 'limitOverride_required' });
+  db.prepare(`
+    INSERT INTO group_overrides (group_id, library_id, limit_override, updated_at)
+    VALUES (?, ?, ?, datetime('now'))
+    ON CONFLICT (group_id, library_id) DO UPDATE SET
+      limit_override = excluded.limit_override,
+      updated_at = excluded.updated_at
+  `).run(id, libraryId, limitOverride);
+  await refreshAffected(groupMemberIds.all(id).map((r) => r.user_id), [libraryId]);
+  res.json({ ok: true });
+}));
+
+router.delete('/groups/:id/overrides/:libraryId', ah(async (req, res) => {
+  const { id, libraryId } = req.params;
+  db.prepare('DELETE FROM group_overrides WHERE group_id = ? AND library_id = ?').run(id, libraryId);
+  await refreshAffected(groupMemberIds.all(id).map((r) => r.user_id), [libraryId]);
+  res.json({ ok: true });
+}));
+
 // --- Quota ---
 
 // Agrupado por usuario, con avatar de Seerr, para las tarjetas del panel.

@@ -1,6 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalize, computeBalance } from '../src/quota.js';
+import { normalize, computeBalance, resolveLimit } from '../src/quota.js';
+
+test('resolveLimit: individual gana a grupo, grupo gana a biblioteca', () => {
+  assert.equal(resolveLimit(5, 3, 4), 5);
+  assert.equal(resolveLimit(null, 3, 4), 3);
+  assert.equal(resolveLimit(null, null, 4), 4);
+});
+
+test('resolveLimit: 0 es un override válido, no "sin valor"', () => {
+  assert.equal(resolveLimit(0, 3, 4), 0);
+  assert.equal(resolveLimit(null, 0, 4), 0);
+});
 
 test('normalize: acentos y puntuación no importan', () => {
   assert.equal(normalize('Amélie'), normalize('Amelie'));
