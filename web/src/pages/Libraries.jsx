@@ -5,11 +5,17 @@ function LibraryCard({ lib, onSaved }) {
   const [kind, setKind] = useState(lib.kind);
   const [enabled, setEnabled] = useState(Boolean(lib.enabled));
   const [defaultLimit, setDefaultLimit] = useState(lib.default_limit);
+  const [expiryDays, setExpiryDays] = useState(lib.expiry_days ?? '');
   const [saving, setSaving] = useState(false);
 
   async function save() {
     setSaving(true);
-    await api.updateLibrary(lib.id, { kind, enabled, defaultLimit: Number(defaultLimit) });
+    await api.updateLibrary(lib.id, {
+      kind,
+      enabled,
+      defaultLimit: Number(defaultLimit),
+      expiryDays: expiryDays === '' ? null : Number(expiryDays),
+    });
     setSaving(false);
     onSaved();
   }
@@ -48,6 +54,19 @@ function LibraryCard({ lib, onSaved }) {
             min={0}
             value={defaultLimit}
             onChange={(e) => setDefaultLimit(e.target.value)}
+            className="input w-20 py-1"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-gray-400 mr-2" title="Pasados estos días sin verse, el pendiente sale del cupo. 0 = no caduca.">
+            Caducidad (días)
+          </label>
+          <input
+            type="number"
+            min={0}
+            value={expiryDays}
+            onChange={(e) => setExpiryDays(e.target.value)}
+            placeholder="30"
             className="input w-20 py-1"
           />
         </div>

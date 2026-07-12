@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 
 function GroupCard({ group, users, libraries, onChanged }) {
-  // Límite por biblioteca como texto del input: '' = sin override de grupo.
+  // Límite y caducidad por biblioteca como texto del input: '' = sin override.
   const [limits, setLimits] = useState({});
+  const [expiries, setExpiries] = useState({});
 
   useEffect(() => {
     setLimits(
@@ -11,6 +12,14 @@ function GroupCard({ group, users, libraries, onChanged }) {
         libraries.map((l) => [
           l.id,
           group.overrides.find((o) => o.library_id === l.id)?.limit_override ?? '',
+        ])
+      )
+    );
+    setExpiries(
+      Object.fromEntries(
+        libraries.map((l) => [
+          l.id,
+          group.overrides.find((o) => o.library_id === l.id)?.expiry_override ?? '',
         ])
       )
     );
@@ -31,7 +40,11 @@ function GroupCard({ group, users, libraries, onChanged }) {
         await api.deleteGroupOverride(group.id, libraryId);
       }
     } else {
-      await api.setGroupOverride(group.id, libraryId, Number(value));
+      const expiry = expiries[libraryId];
+      await api.setGroupOverride(group.id, libraryId, {
+        limitOverride: Number(value),
+        expiryOverride: expiry === '' ? null : Number(expiry),
+      });
     }
     onChanged();
   }
@@ -98,11 +111,15 @@ function GroupCard({ group, users, libraries, onChanged }) {
         })}
       </div>
 
-      <div className="label mb-1.5">Límite por biblioteca (vacío = el de la biblioteca)</div>
+      <div className="label mb-1.5">Límite y caducidad (días) por biblioteca (vacío = el de la biblioteca)</div>
       <div className="flex flex-wrap gap-3">
         {libraries.map((l) => {
-          const saved = group.overrides.find((o) => o.library_id === l.id)?.limit_override ?? '';
-          const dirty = String(limits[l.id] ?? '') !== String(saved);
+          const savedOverride = group.overrides.find((o) => o.library_id === l.id);
+          const savedLimit = savedOverride?.limit_override ?? '';
+          const savedExpiry = savedOverride?.expiry_override ?? '';
+          const dirty =
+            String(limits[l.id] ?? '') !== String(savedLimit) ||
+            String(expiries[l.id] ?? '') !== String(savedExpiry);
           return (
             <div key={l.id} className="flex items-center gap-2 text-sm">
               <span className="text-gray-400">{l.name}</span>
@@ -112,6 +129,16 @@ function GroupCard({ group, users, libraries, onChanged }) {
                 value={limits[l.id] ?? ''}
                 onChange={(e) => setLimits({ ...limits, [l.id]: e.target.value })}
                 className="input w-16 py-1"
+                title="Límite"
+              />
+              <input
+                type="number"
+                min={0}
+                value={expiries[l.id] ?? ''}
+                onChange={(e) => setExpiries({ ...expiries, [l.id]: e.target.value })}
+                className="input w-16 py-1"
+                placeholder="cad."
+                title="Caducidad en días (0 = no caduca; vacío = la de la biblioteca)"
               />
               {dirty && (
                 <button onClick={() => saveLimit(l.id)} className="btn btn-primary py-1 px-2.5 text-xs">
@@ -132,7 +159,7 @@ export default function Overrides() {
   const [newGroupName, setNewGroupName] = useState('');
   const [users, setUsers] = useState([]);
   const [libraries, setLibraries] = useState([]);
-  const [form, setForm] = useState({ userId: '', libraryId: '', limitOverride: 4, note: '' });
+  const [form, setForm] = useState({ userId: '', libraryId: '', limitOverride: 4, expiryOverride: '', note: '' });
   const [bulkForm, setBulkForm] = useState({ libraryId: '', limitOverride: 2 });
   const [applyingBulk, setApplyingBulk] = useState(false);
   const [bulkResult, setBulkResult] = useState(null);
@@ -161,6 +188,7 @@ export default function Overrides() {
     if (!form.userId || !form.libraryId) return;
     await api.setOverride(form.userId, form.libraryId, {
       limitOverride: Number(form.limitOverride),
+      expiryOverride: form.expiryOverride === '' ? null : Number(form.expiryOverride),
       note: form.note,
     });
     setForm({ ...form, note: '' });
@@ -296,6 +324,19 @@ export default function Overrides() {
             className="input w-20 py-1"
           />
         </div>
+        <div>
+          <label className="label" title="Días hasta que un pendiente sin ver sale del cupo. 0 = no caduca; vacío = la de la biblioteca.">
+            Caducidad
+          </label>
+          <input
+            type="number"
+            min={0}
+            value={form.expiryOverride}
+            onChange={(e) => setForm({ ...form, expiryOverride: e.target.value })}
+            placeholder="días"
+            className="input w-20 py-1"
+          />
+        </div>
         <div className="flex-1 min-w-[120px]">
           <label className="label">Nota</label>
           <input
@@ -316,6 +357,7 @@ export default function Overrides() {
               <th className="th">Usuario</th>
               <th className="th">Biblioteca</th>
               <th className="th">Límite</th>
+              <th className="th">Caducidad</th>
               <th className="th">Nota</th>
               <th className="th"></th>
             </tr>
@@ -326,6 +368,9 @@ export default function Overrides() {
                 <td className="py-2 pr-4 whitespace-nowrap">{userName(o.user_id)}</td>
                 <td className="py-2 pr-4 whitespace-nowrap">{libName(o.library_id)}</td>
                 <td className="py-2 pr-4">{o.limit_override}</td>
+                <td className="py-2 pr-4 text-gray-400">
+                  {o.expiry_override == null ? '—' : o.expiry_override === 0 ? 'no caduca' : `${o.expiry_override} días`}
+                </td>
                 <td className="py-2 pr-4 text-gray-400">{o.note}</td>
                 <td className="py-2 pr-4">
                   <button onClick={() => remove(o.user_id, o.library_id)} className="text-accent-400 text-xs">

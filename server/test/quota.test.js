@@ -11,6 +11,8 @@ import {
   buildWatchedEpisodeIndex,
   seasonWatchState,
   getSeasonWatchedPercent,
+  resolveExpiryDays,
+  dropExpiredRows,
 } from '../src/quota.js';
 import { setRawSetting } from '../src/settings.js';
 import { db } from '../src/db.js';
@@ -51,7 +53,7 @@ test('computeBalance: aprobada y no vista resta cupo', () => {
   assert.equal(r.balance, 0);
   assert.equal(r.outstanding, 1);
   assert.deepEqual(r.pendingItems, [
-    { title: 'Matrix', mediaType: 'movie', tmdbId: 603, seasonNumber: null, posterUrl: 'https://img/x.jpg', unavailable: false, watchedPercent: 0 },
+    { title: 'Matrix', mediaType: 'movie', tmdbId: 603, seasonNumber: null, posterUrl: 'https://img/x.jpg', unavailable: false, watchedPercent: 0, expiresAt: null },
   ]);
 });
 
@@ -392,4 +394,40 @@ test('getSeasonWatchedPercent: default 85, respeta el ajuste y descarta basura',
   assert.equal(getSeasonWatchedPercent(), 85);
   setRawSetting('tv_season_watched_percent', '100');
   assert.equal(getSeasonWatchedPercent(), 100);
+});
+
+// --- Issue #10: caducidad de pendientes ---
+
+test('resolveExpiryDays: misma precedencia que el límite y default 30', () => {
+  assert.equal(resolveExpiryDays(null, null, null), 30);
+  assert.equal(resolveExpiryDays(null, null, 15), 15);
+  assert.equal(resolveExpiryDays(null, 10, 15), 10);
+  assert.equal(resolveExpiryDays(5, 10, 15), 5);
+});
+
+test('resolveExpiryDays: 0 significa "no caduca" en cualquier nivel', () => {
+  assert.equal(resolveExpiryDays(0, 10, 15), null);
+  assert.equal(resolveExpiryDays(null, 0, 15), null);
+  assert.equal(resolveExpiryDays(null, null, 0), null);
+});
+
+test('dropExpiredRows: quita las filas más viejas que el plazo y respeta "sin caducidad"', () => {
+  const now = Date.parse('2026-07-12T12:00:00Z');
+  const rows = [
+    { media_title: 'Vieja', created_at: '2026-06-01 12:00:00' },   // 41 días
+    { media_title: 'Reciente', created_at: '2026-07-01 12:00:00' }, // 11 días
+    { media_title: 'Sin fecha', created_at: null },
+  ];
+  const kept = dropExpiredRows(rows, 30, now);
+  assert.deepEqual(kept.map((r) => r.media_title), ['Reciente', 'Sin fecha']);
+  assert.equal(dropExpiredRows(rows, null, now).length, 3); // sin caducidad no filtra
+});
+
+test('computeBalance: el pendiente lleva su fecha de caducidad', () => {
+  const approved = [{ media_title: 'Matrix', tmdb_id: 603, created_at: '2026-07-01 00:00:00' }];
+  const r = computeBalance(2, approved, new Set(), new Set(), new Map(), 30);
+  const expected = Date.parse('2026-07-01T00:00:00Z') + 30 * 86_400_000;
+  assert.equal(r.pendingItems[0].expiresAt, expected);
+  const sinCaducidad = computeBalance(2, approved, new Set(), new Set(), new Map(), null);
+  assert.equal(sinCaducidad.pendingItems[0].expiresAt, null);
 });

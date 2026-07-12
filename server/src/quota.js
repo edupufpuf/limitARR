@@ -47,7 +47,7 @@ export function normalize(title) {
 
 const getOverride = db.prepare('SELECT * FROM overrides WHERE user_id = ? AND library_id = ?');
 const getGroupOverride = db.prepare(`
-  SELECT go.limit_override FROM group_members gm
+  SELECT go.limit_override, go.expiry_override FROM group_members gm
   JOIN group_overrides go ON go.group_id = gm.group_id
   WHERE gm.user_id = ? AND go.library_id = ?
 `);
@@ -58,12 +58,12 @@ const getAggregatedGroupForUser = db.prepare(`
 `);
 const getGroupMemberIdsStmt = db.prepare('SELECT user_id FROM group_members WHERE group_id = ?');
 const getGroupOverrideByGroup = db.prepare(
-  'SELECT limit_override FROM group_overrides WHERE group_id = ? AND library_id = ?'
+  'SELECT limit_override, expiry_override FROM group_overrides WHERE group_id = ? AND library_id = ?'
 );
 const getLibrary = db.prepare('SELECT * FROM libraries WHERE id = ?');
 const getResetAt = db.prepare('SELECT reset_at FROM quota_resets WHERE user_id = ? AND library_id = ?');
 const getApprovedTitles = db.prepare(`
-  SELECT id, media_title, media_type, tmdb_id, season_number, poster_url FROM decisions_log
+  SELECT id, media_title, media_type, tmdb_id, season_number, poster_url, created_at FROM decisions_log
   WHERE user_id = ? AND library_id = ? AND decision = 'approved' AND voided_at IS NULL AND created_at > ?
 `);
 const updateApprovalPoster = db.prepare(`
@@ -108,6 +108,33 @@ function toSqliteDateTime(isoString) {
   return isoString.replace('T', ' ').replace(/\.\d{3}Z$/, '');
 }
 
+// created_at de SQLite es "YYYY-MM-DD HH:MM:SS" en UTC.
+function rowTimeMs(row) {
+  return Date.parse(row.created_at.replace(' ', 'T') + 'Z');
+}
+
+// Issue #10: caducidad. Pasados expiryDays sin ver un pendiente, deja de contar
+// y sale de la lista (el cupo se libera solo). 0 = sin caducidad; NULL hereda.
+const DEFAULT_EXPIRY_DAYS = 30;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export function resolveExpiryDays(userOverride, groupOverride, libraryDays) {
+  const days = resolveLimit(userOverride, groupOverride, libraryDays ?? DEFAULT_EXPIRY_DAYS);
+  return days > 0 ? days : null; // null = no caduca
+}
+
+export function dropExpiredRows(rows, expiryDays, nowMs = Date.now()) {
+  if (!expiryDays) return rows;
+  const cutoff = nowMs - expiryDays * DAY_MS;
+  return rows.filter((r) => !r.created_at || rowTimeMs(r) > cutoff);
+}
+
+// Fecha de caducidad de un pendiente, para la ventana de detalle.
+function expiresAtMs(row, expiryDays) {
+  if (!expiryDays || !row.created_at) return null;
+  return rowTimeMs(row) + expiryDays * DAY_MS;
+}
+
 // Issue #4: identidad de cupo de un id. Un usuario de un grupo agregado no tiene
 // cupo propio: comparte el del grupo, que vive en quota_cache/quota_resets con
 // user_id = -group_id (los ids de Tautulli son siempre positivos, no chocan).
@@ -140,7 +167,7 @@ export function resolveLimit(userOverride, groupOverride, defaultLimit) {
 // Tautulli/Seerr: dado el límite ya resuelto, las filas aprobadas y el set de
 // títulos vistos, decide cuántas están pendientes y cuál es el saldo. Nunca
 // negativo: por debajo de 0 se queda en 0 (el bloqueo ya lo gestiona balance < 1).
-export function computeBalance(limit, approvedRows, watchedTitles, unavailableTmdbIds = new Set(), percentByTitle = new Map()) {
+export function computeBalance(limit, approvedRows, watchedTitles, unavailableTmdbIds = new Set(), percentByTitle = new Map(), expiryDays = null) {
   const pending = approvedRows.filter((r) => !watchedTitles.has(normalize(r.media_title)));
   // Issue #1: las que aún no están disponibles en Plex (según Seerr: faltante,
   // sin estrenar o no encontrada) no restan cupo, pero sí se listan como
@@ -163,6 +190,8 @@ export function computeBalance(limit, approvedRows, watchedTitles, unavailableTm
       unavailable: isUnavailable(r),
       // Issue #7: % de avance del solicitante, para la rueda de la carátula.
       watchedPercent: Math.round(percentByTitle.get(key) ?? 0),
+      // Issue #10: cuándo caduca (ms epoch) o null si no caduca.
+      expiresAt: expiresAtMs(r, expiryDays),
     });
   }
 
@@ -223,7 +252,7 @@ export function seasonWatchState(index, episodes, { showTitle, showRatingKey, se
   };
 }
 
-async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatchedPercent = DEFAULT_SEASON_WATCHED_PERCENT) {
+async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatchedPercent = DEFAULT_SEASON_WATCHED_PERCENT, expiryDays = null) {
   await hydrateMissingPosters(approvedRows);
   const watchedIndex = buildWatchedEpisodeIndex(watchedEpisodes);
 
@@ -282,6 +311,7 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatc
     watchedPercent: r.watched_percent ?? 0,
     episodesWatched: r.episodes_watched ?? null,
     episodesTotal: r.episodes_total ?? null,
+    expiresAt: expiresAtMs(r, expiryDays),
   }));
 
   return {
@@ -303,9 +333,11 @@ export async function getBalance(userId, libraryId) {
   const identity = quotaIdentity(userId);
   const library = getLibrary.get(libraryId);
   let limit;
+  let expiryDays;
   if (identity.aggregated) {
     const groupOverride = getGroupOverrideByGroup.get(identity.groupId, libraryId);
     limit = resolveLimit(null, groupOverride?.limit_override ?? null, library.default_limit);
+    expiryDays = resolveExpiryDays(null, groupOverride?.expiry_override ?? null, library.expiry_days);
   } else {
     const override = getOverride.get(identity.cacheId, libraryId);
     const groupOverride = getGroupOverride.get(identity.cacheId, libraryId);
@@ -314,18 +346,25 @@ export async function getBalance(userId, libraryId) {
       groupOverride?.limit_override ?? null,
       library.default_limit
     );
+    expiryDays = resolveExpiryDays(
+      override?.expiry_override ?? null,
+      groupOverride?.expiry_override ?? null,
+      library.expiry_days
+    );
   }
   const resetAt = getResetAt.get(identity.cacheId, libraryId)?.reset_at ?? '0000-01-01';
 
-  const approved = identity.memberIds.flatMap((memberId) =>
-    getApprovedTitles.all(memberId, libraryId, resetAt)
+  // Issue #10: las aprobadas que han caducado sin verse ni se listan ni cuentan.
+  const approved = dropExpiredRows(
+    identity.memberIds.flatMap((memberId) => getApprovedTitles.all(memberId, libraryId, resetAt)),
+    expiryDays
   );
   if (library.section_type === 'show') {
     const history = [];
     for (const memberId of identity.memberIds) {
       history.push(...(await getUserEpisodeHistory(memberId, libraryId)));
     }
-    return computeTvBalance(limit, approved, history, getSeasonWatchedPercent());
+    return computeTvBalance(limit, approved, history, getSeasonWatchedPercent(), expiryDays);
   }
 
   const history = [];
@@ -343,7 +382,7 @@ export async function getBalance(userId, libraryId) {
   }
   await hydrateMissingPosters(approved);
   const unavailable = await getUnavailableTmdbIds(approved.map((r) => r.tmdb_id));
-  return computeBalance(limit, approved, watchedTitles, unavailable, percentByTitle);
+  return computeBalance(limit, approved, watchedTitles, unavailable, percentByTitle, expiryDays);
 }
 
 // "Resetea" el cupo de un usuario+biblioteca: las aprobaciones anteriores a ahora

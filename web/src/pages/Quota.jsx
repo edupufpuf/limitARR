@@ -198,6 +198,13 @@ function daysAgo(ms) {
   return days === 1 ? 'hace 1 día' : `hace ${days} días`;
 }
 
+// Issue #10: cuánto falta para que un pendiente caduque y salga del cupo.
+function daysLeft(ms) {
+  const days = Math.ceil((ms - Date.now()) / 86_400_000);
+  if (days <= 0) return 'hoy';
+  return days === 1 ? 'queda 1 día' : `quedan ${days} días`;
+}
+
 function percentColor(percent) {
   return percent >= 70 ? 'text-green-400' : percent >= 35 ? 'text-yellow-400' : 'text-accent-400';
 }
@@ -269,6 +276,15 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss }) 
                 <dt className="text-gray-500 w-[5.5rem] sm:w-28 flex-shrink-0">Últ. visionado</dt>
                 <dd>{detail ? (lastWatchMs ? `${fmtDate(lastWatchMs)} · ${daysAgo(lastWatchMs)}` : 'nadie la ha empezado') : '…'}</dd>
               </div>
+              {item.expiresAt != null && (
+                <div className="flex gap-2">
+                  <dt className="text-gray-500 w-[5.5rem] sm:w-28 flex-shrink-0">Caduca</dt>
+                  <dd>
+                    {fmtDate(item.expiresAt)} · {daysLeft(item.expiresAt)}
+                    <span className="text-gray-500"> — al caducar deja de restar cupo</span>
+                  </dd>
+                </div>
+              )}
               <div className="flex gap-2">
                 <dt className="text-gray-500 w-[5.5rem] sm:w-28 flex-shrink-0">Avance</dt>
                 <dd className={`font-bold tabular-nums ${percentColor(item.watchedPercent ?? 0)}`}>

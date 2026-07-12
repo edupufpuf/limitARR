@@ -38,8 +38,8 @@ export const api = {
   deleteGroup: (id) => request(`/groups/${id}`, { method: 'DELETE' }),
   setGroupMembers: (id, userIds) =>
     request(`/groups/${id}/members`, { method: 'PUT', body: JSON.stringify({ userIds }) }),
-  setGroupOverride: (id, libraryId, limitOverride) =>
-    request(`/groups/${id}/overrides/${libraryId}`, { method: 'PUT', body: JSON.stringify({ limitOverride }) }),
+  setGroupOverride: (id, libraryId, body) =>
+    request(`/groups/${id}/overrides/${libraryId}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteGroupOverride: (id, libraryId) =>
     request(`/groups/${id}/overrides/${libraryId}`, { method: 'DELETE' }),
 

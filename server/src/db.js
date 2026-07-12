@@ -135,6 +135,12 @@ addColumnIfMissing("ALTER TABLE decisions_log ADD COLUMN media_type TEXT NOT NUL
 addColumnIfMissing('ALTER TABLE decisions_log ADD COLUMN season_number INTEGER');
 // Issue #4: cupo grupal agregado (el grupo cuenta como un solo usuario).
 addColumnIfMissing('ALTER TABLE groups ADD COLUMN aggregated INTEGER NOT NULL DEFAULT 0');
+// Issue #10: caducidad — pasados N días sin ver, el pendiente deja de contar.
+// NULL = usar el default del código (30); 0 = sin caducidad. Misma precedencia
+// que el límite: override individual > override de grupo > biblioteca.
+addColumnIfMissing('ALTER TABLE libraries ADD COLUMN expiry_days INTEGER');
+addColumnIfMissing('ALTER TABLE overrides ADD COLUMN expiry_override INTEGER');
+addColumnIfMissing('ALTER TABLE group_overrides ADD COLUMN expiry_override INTEGER');
 
 // decisions_log se consulta en cada ciclo y crece sin límite; sin índices,
 // todo son full scans. El parcial cubre la consulta caliente (aprobadas

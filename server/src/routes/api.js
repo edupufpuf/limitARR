@@ -177,10 +177,10 @@ router.post('/libraries/sync', ah(async (req, res) => {
 }));
 
 router.put('/libraries/:id', ah(async (req, res) => {
-  const { kind, enabled, defaultLimit } = req.body || {};
+  const { kind, enabled, defaultLimit, expiryDays } = req.body || {};
   const result = db
-    .prepare('UPDATE libraries SET kind = ?, enabled = ?, default_limit = ? WHERE id = ?')
-    .run(kind, enabled ? 1 : 0, defaultLimit, req.params.id);
+    .prepare('UPDATE libraries SET kind = ?, enabled = ?, default_limit = ?, expiry_days = ? WHERE id = ?')
+    .run(kind, enabled ? 1 : 0, defaultLimit, expiryDays ?? null, req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'not_found' });
 
   if (enabled) {
@@ -207,15 +207,16 @@ router.get('/overrides', (req, res) => {
 
 router.put('/overrides/:userId/:libraryId', ah(async (req, res) => {
   const { userId, libraryId } = req.params;
-  const { limitOverride, note } = req.body || {};
+  const { limitOverride, note, expiryOverride } = req.body || {};
   db.prepare(`
-    INSERT INTO overrides (user_id, library_id, limit_override, note, updated_at)
-    VALUES (?, ?, ?, ?, datetime('now'))
+    INSERT INTO overrides (user_id, library_id, limit_override, note, expiry_override, updated_at)
+    VALUES (?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT (user_id, library_id) DO UPDATE SET
       limit_override = excluded.limit_override,
       note = excluded.note,
+      expiry_override = excluded.expiry_override,
       updated_at = excluded.updated_at
-  `).run(userId, libraryId, limitOverride, note || null);
+  `).run(userId, libraryId, limitOverride, note || null, expiryOverride ?? null);
   await refreshQuotaCache(userId, libraryId);
   res.json({ ok: true });
 }));
@@ -381,15 +382,16 @@ router.put('/groups/:id/members', ah(async (req, res) => {
 router.put('/groups/:id/overrides/:libraryId', ah(async (req, res) => {
   const { id, libraryId } = req.params;
   if (!groupExists.get(id)) return res.status(404).json({ error: 'group_not_found' });
-  const { limitOverride } = req.body || {};
+  const { limitOverride, expiryOverride } = req.body || {};
   if (limitOverride === undefined) return res.status(400).json({ error: 'limitOverride_required' });
   db.prepare(`
-    INSERT INTO group_overrides (group_id, library_id, limit_override, updated_at)
-    VALUES (?, ?, ?, datetime('now'))
+    INSERT INTO group_overrides (group_id, library_id, limit_override, expiry_override, updated_at)
+    VALUES (?, ?, ?, ?, datetime('now'))
     ON CONFLICT (group_id, library_id) DO UPDATE SET
       limit_override = excluded.limit_override,
+      expiry_override = excluded.expiry_override,
       updated_at = excluded.updated_at
-  `).run(id, libraryId, limitOverride);
+  `).run(id, libraryId, limitOverride, expiryOverride ?? null);
   await refreshAffected(groupMemberIds.all(id).map((r) => r.user_id), [libraryId]);
   res.json({ ok: true });
 }));
