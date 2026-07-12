@@ -1,8 +1,11 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { db } from './db.js';
 import { config } from './config.js';
+import { getRawSetting, setRawSetting } from './settings.js';
 import { listPendingRequests, approveRequest, getMediaDetails } from './services/seerr.js';
 import { getUsers } from './services/tautulli.js';
-import { getBalance, reconcileVoidedRequests, refreshQuotaCache, refreshStaleOutstandingCaches } from './quota.js';
+import { getBalance, reconcileVoidedRequests, refreshQuotaCache, listStaleOutstandingPairs, normalize } from './quota.js';
 import { sendMessage, getNotifyTarget, pendingButton, renderNoQuotaMessage } from './services/telegram.js';
 import { matchByEmailOrUsername } from './userMatch.js';
 
@@ -24,6 +27,8 @@ const getLastDecision = db.prepare(`
 `);
 const getLibraryName = db.prepare('SELECT name FROM libraries WHERE id = ?');
 const getChatId = db.prepare('SELECT chat_id FROM telegram_links WHERE user_id = ?');
+const getCacheRow = db.prepare('SELECT outstanding, pending_items FROM quota_cache WHERE user_id = ? AND library_id = ?');
+const getGroupName = db.prepare('SELECT name FROM groups WHERE id = ?');
 
 // Avoids re-logging (and re-notifying) the same still-pending request every poll
 // cycle when nothing about its situation has changed since the last time.
@@ -66,7 +71,141 @@ async function notifyNoQuota(base) {
   }
 }
 
+// Aviso de aprobación: cierra el ciclo con el usuario (antes solo se le avisaba
+// de lo malo, el "sin cupo"). `remaining` = saldo tras descontar esta solicitud.
+async function notifyApproved(base, remaining) {
+  const target = getNotifyTarget();
+  if (!target.notifyApproved) return;
+  const libraryName = getLibraryName.get(base.libraryId)?.name ?? `biblioteca #${base.libraryId}`;
+  const holes = remaining === 1 ? '1 hueco' : `${remaining} huecos`;
+
+  try {
+    if (target.mode === 'group') {
+      if (!target.groupChatId) return;
+      await sendMessage(
+        target.groupChatId,
+        `✅ Aprobada para ${base.username}: ${base.mediaTitle} (${libraryName}). Le quedan ${holes}.`,
+        { messageThreadId: target.groupTopicId }
+      );
+    } else {
+      const chatId = getChatId.get(base.userId)?.chat_id;
+      if (!chatId) return;
+      await sendMessage(chatId, `✅ Solicitud aprobada: ${base.mediaTitle} (${libraryName}). Te quedan ${holes}.`);
+    }
+  } catch (err) {
+    console.error('[scheduler] telegram notify failed:', err.message);
+  }
+}
+
+// Clave estable de un pendiente para comparar caché vieja vs nueva.
+function pendingItemKey(item) {
+  if (item.tmdbId != null) return `${item.tmdbId}:${item.seasonNumber ?? ''}`;
+  return `t:${normalize(item.title)}`;
+}
+
+// Aviso de cupo liberado: al refrescar los pares con pendientes (issue #5) se
+// compara la caché de antes con la de después — lo que desaparece de la lista
+// con el contador bajando es cupo liberado (visto, o cancelado en Seerr).
+// Los avisos van tras el refresco para no retrasar la caché si Telegram cojea.
+async function refreshStaleAndNotify(tautulliUsers) {
+  const pairs = listStaleOutstandingPairs();
+  const userMap = new Map(tautulliUsers.map((u) => [u.id, u]));
+
+  for (const { user_id, library_id } of pairs) {
+    const before = getCacheRow.get(user_id, library_id);
+    const result = await refreshQuotaCache(user_id, library_id);
+
+    const target = getNotifyTarget();
+    if (!target.notifyFreed || !before || result.outstanding >= before.outstanding) continue;
+
+    let oldItems = [];
+    try {
+      oldItems = JSON.parse(before.pending_items || '[]');
+    } catch { /* caché de una versión anterior */ }
+    const newKeys = new Set(result.pendingItems.map(pendingItemKey));
+    const freedTitles = oldItems
+      .filter((item) => !newKeys.has(pendingItemKey(item)))
+      .map((item) => item.title)
+      .filter(Boolean);
+    if (freedTitles.length === 0) continue;
+
+    const libraryName = getLibraryName.get(library_id)?.name ?? `biblioteca #${library_id}`;
+    const list = freedTitles.map((t) => `• ${t}`).join('\n');
+    const saldo = `Saldo en ${libraryName}: ${result.balance} de ${result.limit}.`;
+    // user_id negativo = grupo agregado (issue #4): se nombra al grupo y, al no
+    // tener DM propio, el aviso solo sale en modo grupo.
+    const username = user_id < 0
+      ? getGroupName.get(-user_id)?.name ?? `grupo#${-user_id}`
+      : userMap.get(user_id)?.username ?? `user#${user_id}`;
+
+    try {
+      if (target.mode === 'group') {
+        if (!target.groupChatId) continue;
+        await sendMessage(
+          target.groupChatId,
+          `🎉 ${username} ha liberado cupo:\n${list}\n${saldo}`,
+          { messageThreadId: target.groupTopicId }
+        );
+      } else {
+        const chatId = getChatId.get(user_id)?.chat_id;
+        if (!chatId) continue;
+        await sendMessage(chatId, `🎉 Has liberado cupo:\n${list}\n${saldo}`);
+      }
+    } catch (err) {
+      console.error('[scheduler] telegram notify failed:', err.message);
+    }
+  }
+  return pairs.length;
+}
+
+// Mantenimiento diario, colgado del propio ciclo de sondeo (no hace falta otro
+// timer): retención del registro y backup de la DB. Se apunta el día en
+// settings para ejecutarse una sola vez aunque haya muchos ciclos.
+const MAINTENANCE_KEY = 'last_maintenance_day';
+const purgeOldDecisions = db.prepare(`
+  DELETE FROM decisions_log
+  WHERE created_at < datetime('now', '-' || ? || ' days')
+    AND (decision != 'approved' OR voided_at IS NOT NULL)
+`);
+
+async function runDailyMaintenance() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (getRawSetting(MAINTENANCE_KEY) === today) return;
+  setRawSetting(MAINTENANCE_KEY, today);
+
+  // Retención: solo filas que ya no afectan al cupo (anuladas, o bloqueos y
+  // errores viejos). Una aprobada viva no se toca nunca, por vieja que sea:
+  // sigue contando hasta que se vea.
+  try {
+    const { changes } = purgeOldDecisions.run(config.decisionsRetentionDays);
+    if (changes > 0) console.log(`[maintenance] registro: ${changes} fila(s) antiguas purgadas`);
+  } catch (err) {
+    console.error('[maintenance] purge failed:', err.message);
+  }
+
+  // Backup diario con la API online de SQLite (consistente aunque haya
+  // escrituras), junto a la DB — en Docker cae dentro del volumen /data.
+  if (config.dbPath !== ':memory:') {
+    try {
+      const dir = path.join(path.dirname(config.dbPath), 'backups');
+      fs.mkdirSync(dir, { recursive: true });
+      await db.backup(path.join(dir, `limitarr-${today}.db`));
+      const backups = fs
+        .readdirSync(dir)
+        .filter((f) => /^limitarr-\d{4}-\d{2}-\d{2}\.db$/.test(f))
+        .sort();
+      for (const old of backups.slice(0, -config.backupKeep)) {
+        fs.unlinkSync(path.join(dir, old));
+      }
+      console.log(`[maintenance] backup ${today} OK (${Math.min(backups.length, config.backupKeep)} conservados)`);
+    } catch (err) {
+      console.error('[maintenance] backup failed:', err.message);
+    }
+  }
+}
+
 export async function runPollCycle() {
+  await runDailyMaintenance();
   await reconcileVoidedRequests();
 
   const [pending, tautulliUsers] = await Promise.all([
@@ -140,6 +279,9 @@ export async function runPollCycle() {
       isNew = logIfChanged(row, decision) || isNew;
     }
     if (decision === 'no_quota' && isNew) await notifyNoQuota(base);
+    if (decision === 'approved' && isNew) {
+      await notifyApproved(base, Math.max(0, balance - requiredUnits));
+    }
 
     // Recalcula la caché de verdad (con la aprobación recién logueada incluida)
     // en vez de ajustar el contador a mano — así pending_items queda al día y
@@ -149,7 +291,8 @@ export async function runPollCycle() {
 
   // Issue #5: detectar visionados sin esperar a un "recalcular todo" manual —
   // los pares recién refrescados arriba quedan excluidos por su computed_at.
-  await refreshStaleOutstandingCaches();
+  // Además avisa por Telegram del cupo liberado (si está activado).
+  await refreshStaleAndNotify(tautulliUsers);
 }
 
 function formatMediaTitle(mediaType, title, seasonNumber = null) {

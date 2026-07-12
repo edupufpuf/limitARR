@@ -8,6 +8,8 @@ export default function Notifications() {
   const [groupChatId, setGroupChatId] = useState('');
   const [groupTopicId, setGroupTopicId] = useState('');
   const [noQuotaMessage, setNoQuotaMessage] = useState('');
+  const [notifyApproved, setNotifyApproved] = useState(true);
+  const [notifyFreed, setNotifyFreed] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
   const [groupTestResult, setGroupTestResult] = useState(null);
   const [pendingSummaryResult, setPendingSummaryResult] = useState(null);
@@ -31,6 +33,8 @@ export default function Notifications() {
       setGroupChatId(s.groupChatId ?? '');
       setGroupTopicId(s.groupTopicId ?? '');
       setNoQuotaMessage(s.noQuotaMessage ?? '');
+      setNotifyApproved(s.notifyApproved ?? true);
+      setNotifyFreed(s.notifyFreed ?? true);
     });
     api.users().then(setUsers);
     loadLinks();
@@ -39,7 +43,7 @@ export default function Notifications() {
   async function saveSettings(e) {
     e.preventDefault();
     setSavingSettings(true);
-    const s = await api.updateNotificationSettings({ botToken: tokenInput, mode, groupChatId, groupTopicId, noQuotaMessage });
+    const s = await api.updateNotificationSettings({ botToken: tokenInput, mode, groupChatId, groupTopicId, noQuotaMessage, notifyApproved, notifyFreed });
     setBotSettings(s);
     setNoQuotaMessage(s.noQuotaMessage ?? '');
     setTokenInput('');
@@ -173,6 +177,28 @@ export default function Notifications() {
               {groupTestResult && <span className="text-xs text-gray-500">{groupTestResult}</span>}
             </div>
           )}
+        </div>
+
+        <div>
+          <label className="block text-xs text-gray-400 mb-2">Qué avisar</label>
+          <div className="flex flex-col gap-1.5 text-sm">
+            <label className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={notifyApproved}
+                onChange={(e) => setNotifyApproved(e.target.checked)}
+              />
+              Solicitud aprobada (con el saldo que le queda al usuario)
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={notifyFreed}
+                onChange={(e) => setNotifyFreed(e.target.checked)}
+              />
+              Cupo liberado (al terminar de ver algo, o si se cancela)
+            </label>
+          </div>
         </div>
 
         <div>

@@ -156,20 +156,30 @@ export async function getMovieDetails(tmdbId) {
 }
 
 export async function getShowDetails(tmdbId, seasonNumber = null) {
-  if (!tmdbId) return { title: null, posterUrl: null, showRatingKey: null };
+  if (!tmdbId) return { title: null, posterUrl: null, showRatingKey: null, seasonStatuses: null };
   try {
     const data = await call(`/tv/${tmdbId}`);
     const season = seasonNumber == null
       ? null
       : (data.seasons || []).find((s) => Number(s.seasonNumber) === Number(seasonNumber));
     const posterPath = season?.posterPath || data.posterPath;
+    // Estado por temporada según Seerr (mediaInfo.seasons), para el chequeo de
+    // "aún no disponible" también en series. Una temporada que no aparece en
+    // mediaInfo (o sin mediaInfo: la serie no está en Plex) queda sin entrada
+    // → status 0 → no disponible. seasonStatuses null solo en error de red
+    // (catch), que se trata como disponible para no regalar cupo.
+    const seasonStatuses = {};
+    for (const s of data.mediaInfo?.seasons || []) {
+      seasonStatuses[Number(s.seasonNumber)] = Number(s.status ?? 0);
+    }
     return {
       title: data.name || null,
       posterUrl: posterPath ? `https://image.tmdb.org/t/p/w185${posterPath}` : null,
       showRatingKey: data.mediaInfo?.ratingKey ? String(data.mediaInfo.ratingKey) : null,
+      seasonStatuses,
     };
   } catch {
-    return { title: null, posterUrl: null, showRatingKey: null };
+    return { title: null, posterUrl: null, showRatingKey: null, seasonStatuses: null };
   }
 }
 

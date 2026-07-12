@@ -14,4 +14,8 @@ export const config = {
   // Si una solicitud aprobada lleva más de esto sin llegar a "disponible" en Seerr
   // (nunca llega a descargarse), se libera su hueco de cupo automáticamente.
   stuckRequestGraceDays: Number(process.env.STUCK_REQUEST_GRACE_DAYS || 7),
+  // Mantenimiento diario (scheduler): retención del registro de decisiones
+  // (solo filas que ya no afectan al cupo) y nº de backups diarios a conservar.
+  decisionsRetentionDays: Number(process.env.DECISIONS_RETENTION_DAYS || 365),
+  backupKeep: Number(process.env.BACKUP_KEEP || 7),
 };

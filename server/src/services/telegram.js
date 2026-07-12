@@ -9,6 +9,10 @@ const MODE_KEY = 'telegram_notify_mode';         // 'dm' | 'group'
 const GROUP_CHAT_KEY = 'telegram_group_chat_id';
 const GROUP_TOPIC_KEY = 'telegram_group_topic_id'; // message_thread_id, opcional
 const NO_QUOTA_MESSAGE_KEY = 'telegram_no_quota_message';
+// Avisos opcionales (default ON): aprobación de solicitud y cupo liberado.
+// Guardados como '1'/'0'; "no configurado" cuenta como activado.
+const NOTIFY_APPROVED_KEY = 'telegram_notify_approved';
+const NOTIFY_FREED_KEY = 'telegram_notify_freed';
 
 export const DEFAULT_NO_QUOTA_MESSAGE =
   '🔴 {usuario} se ha pasado del cupo en {biblioteca} pidiendo "{titulo}".\n' +
@@ -33,14 +37,18 @@ export function getNotifyTarget() {
     groupChatId: getRawSetting(GROUP_CHAT_KEY),
     groupTopicId: getRawSetting(GROUP_TOPIC_KEY),
     noQuotaMessage: getNoQuotaMessage(),
+    notifyApproved: getRawSetting(NOTIFY_APPROVED_KEY) !== '0',
+    notifyFreed: getRawSetting(NOTIFY_FREED_KEY) !== '0',
   };
 }
 
-export function setNotifyTarget({ mode, groupChatId, groupTopicId, noQuotaMessage }) {
+export function setNotifyTarget({ mode, groupChatId, groupTopicId, noQuotaMessage, notifyApproved, notifyFreed }) {
   if (mode) setRawSetting(MODE_KEY, mode);
   if (groupChatId !== undefined) setRawSetting(GROUP_CHAT_KEY, String(groupChatId ?? ''));
   if (groupTopicId !== undefined) setRawSetting(GROUP_TOPIC_KEY, String(groupTopicId ?? ''));
   if (noQuotaMessage !== undefined) setNoQuotaMessage(noQuotaMessage);
+  if (notifyApproved !== undefined) setRawSetting(NOTIFY_APPROVED_KEY, notifyApproved ? '1' : '0');
+  if (notifyFreed !== undefined) setRawSetting(NOTIFY_FREED_KEY, notifyFreed ? '1' : '0');
 }
 
 export function getNoQuotaMessage() {

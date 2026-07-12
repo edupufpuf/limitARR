@@ -619,10 +619,13 @@ router.get('/notifications/settings', (req, res) => {
 });
 
 router.put('/notifications/settings', (req, res) => {
-  const { botToken, mode, groupChatId, groupTopicId, noQuotaMessage } = req.body || {};
+  const { botToken, mode, groupChatId, groupTopicId, noQuotaMessage, notifyApproved, notifyFreed } = req.body || {};
   if (typeof botToken === 'string' && botToken.trim() !== '') setBotToken(botToken);
-  if (mode || groupChatId !== undefined || groupTopicId !== undefined || noQuotaMessage !== undefined) {
-    setNotifyTarget({ mode, groupChatId, groupTopicId, noQuotaMessage });
+  if (
+    mode || groupChatId !== undefined || groupTopicId !== undefined || noQuotaMessage !== undefined ||
+    notifyApproved !== undefined || notifyFreed !== undefined
+  ) {
+    setNotifyTarget({ mode, groupChatId, groupTopicId, noQuotaMessage, notifyApproved, notifyFreed });
   }
   res.json({ ...getBotTokenForDisplay(), ...getNotifyTarget() });
 });

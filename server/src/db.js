@@ -135,3 +135,15 @@ addColumnIfMissing("ALTER TABLE decisions_log ADD COLUMN media_type TEXT NOT NUL
 addColumnIfMissing('ALTER TABLE decisions_log ADD COLUMN season_number INTEGER');
 // Issue #4: cupo grupal agregado (el grupo cuenta como un solo usuario).
 addColumnIfMissing('ALTER TABLE groups ADD COLUMN aggregated INTEGER NOT NULL DEFAULT 0');
+
+// decisions_log se consulta en cada ciclo y crece sin límite; sin índices,
+// todo son full scans. El parcial cubre la consulta caliente (aprobadas
+// vivas de un usuario+biblioteca); los otros dos, el registro paginado/KPIs
+// (created_at) y la deduplicación por solicitud (request_id).
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_decisions_pending
+    ON decisions_log (user_id, library_id, created_at)
+    WHERE decision = 'approved' AND voided_at IS NULL;
+  CREATE INDEX IF NOT EXISTS idx_decisions_created ON decisions_log (created_at);
+  CREATE INDEX IF NOT EXISTS idx_decisions_request ON decisions_log (request_id);
+`);

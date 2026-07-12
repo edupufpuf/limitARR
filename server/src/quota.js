@@ -193,7 +193,8 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes) {
     if (!showDetailsCache.has(row.tmdb_id)) {
       showDetailsCache.set(row.tmdb_id, await getMediaDetails('tv', row.tmdb_id, row.season_number));
     }
-    const showRatingKey = showDetailsCache.get(row.tmdb_id)?.showRatingKey;
+    const details = showDetailsCache.get(row.tmdb_id);
+    const showRatingKey = details?.showRatingKey;
     const cacheKey = `${showRatingKey || 'missing'}:${row.season_number}`;
     if (!seasonEpisodesCache.has(cacheKey)) {
       seasonEpisodesCache.set(cacheKey, await getSeasonEpisodes(showRatingKey, row.season_number));
@@ -201,6 +202,11 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes) {
     const episodes = seasonEpisodesCache.get(cacheKey);
     const complete = episodes.length > 0 && episodes.every((episode) => watchedRatingKeys.has(episode.ratingKey));
     if (!complete) {
+      // Mismo criterio que en películas (issue #1): una temporada que Seerr aún
+      // no da por disponible (status < 4: nada descargado) no resta cupo, pero
+      // se lista con marca. seasonStatuses null = error de red → cuenta.
+      const status = details?.seasonStatuses?.[row.season_number];
+      row.unavailable = details?.seasonStatuses != null && (status ?? 0) < 4;
       // Issue #7: avance de la temporada = fracción de episodios ya vistos.
       const watchedCount = episodes.filter((episode) => watchedRatingKeys.has(episode.ratingKey)).length;
       row.watched_percent = episodes.length > 0 ? Math.round((watchedCount / episodes.length) * 100) : 0;
@@ -208,19 +214,21 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes) {
     }
   }
 
+  const outstanding = pending.filter((r) => !r.unavailable).length;
   const pendingItems = pending.map((r) => ({
     title: r.media_title,
     mediaType: 'tv',
     tmdbId: r.tmdb_id,
     seasonNumber: r.season_number ?? null,
     posterUrl: r.poster_url ?? null,
+    unavailable: r.unavailable ?? false,
     watchedPercent: r.watched_percent ?? 0,
   }));
 
   return {
     limit,
-    outstanding: pending.length,
-    balance: Math.max(0, limit - pending.length),
+    outstanding,
+    balance: Math.max(0, limit - outstanding),
     pendingItems,
   };
 }
@@ -367,14 +375,6 @@ const getStaleOutstandingPairs = db.prepare(`
 
 export function listStaleOutstandingPairs(staleMinutes = STALE_OUTSTANDING_MINUTES) {
   return getStaleOutstandingPairs.all(staleMinutes);
-}
-
-export async function refreshStaleOutstandingCaches() {
-  const pairs = listStaleOutstandingPairs();
-  for (const { user_id, library_id } of pairs) {
-    await refreshQuotaCache(user_id, library_id);
-  }
-  return pairs.length;
 }
 
 const getPendingApprovedRows = db.prepare(`
