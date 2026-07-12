@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalize, computeBalance, resolveLimit, dismissPendingItem, listStaleOutstandingPairs } from '../src/quota.js';
+import {
+  normalize,
+  computeBalance,
+  resolveLimit,
+  dismissPendingItem,
+  listStaleOutstandingPairs,
+  getPendingItemDetail,
+} from '../src/quota.js';
 import { db } from '../src/db.js';
 
 test('resolveLimit: individual gana a grupo, grupo gana a biblioteca', () => {
@@ -174,6 +181,22 @@ test('dismissPendingItem: con series, anula solo la temporada pedida (mismo tmdb
   const dismissed = dismissPendingItem(15, 3, { tmdbId: 1396, seasonNumber: 2, title: 'Breaking Bad - Temporada 2' });
   assert.equal(dismissed, 1);
   assert.equal(pendingCount.get(15, 3).n, 1); // la temporada 1 sigue contando
+});
+
+// --- issue #6: detalle de un pendiente ---
+
+test('getPendingItemDetail: la fecha de solicitud es la fila aprobada más antigua', async () => {
+  db.exec(`
+    INSERT INTO decisions_log (request_id, user_id, library_id, media_title, tmdb_id, decision, created_at) VALUES
+      (30, 20, 1, 'Matrix', 603, 'approved', '2026-07-05 10:00:00'),
+      (31, 20, 1, 'Matrix', 603, 'approved', '2026-07-01 10:00:00'),
+      (32, 20, 1, 'Heat', 949, 'approved', '2026-06-01 10:00:00')
+  `);
+  const d = await getPendingItemDetail(20, 1, {
+    tmdbId: 603, seasonNumber: null, title: 'Matrix', ratingKey: null, mediaType: 'movie',
+  });
+  assert.equal(d.requestedAt, '2026-07-01 10:00:00'); // la de Heat no cuenta
+  assert.deepEqual(d.watchers, []); // sin ratingKey no se consulta Tautulli
 });
 
 // --- issue #5: refresco automático de pares con pendientes ---

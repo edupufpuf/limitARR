@@ -1,11 +1,11 @@
 import { db } from './db.js';
 
-const KEYS = ['seerr_url', 'seerr_api_key', 'tautulli_url', 'tautulli_api_key', 'tautulli_public_url', 'radarr_url', 'radarr_api_key'];
-const URL_KEYS = new Set(['seerr_url', 'tautulli_url', 'tautulli_public_url', 'radarr_url']);
+const KEYS = ['seerr_url', 'seerr_api_key', 'seerr_public_url', 'tautulli_url', 'tautulli_api_key', 'tautulli_public_url', 'radarr_url', 'radarr_api_key'];
+const URL_KEYS = new Set(['seerr_url', 'seerr_public_url', 'tautulli_url', 'tautulli_public_url', 'radarr_url']);
 // Claves opcionales: enviar cadena vacía las borra (en el resto, vacío = "no cambiar",
 // para poder guardar sin reenviar API keys ya configuradas). radarr_url borrable
 // = forma de desconectar Radarr; su API key sigue el patrón "vacío = no cambiar".
-const CLEARABLE_KEYS = new Set(['tautulli_public_url', 'radarr_url']);
+const CLEARABLE_KEYS = new Set(['seerr_public_url', 'tautulli_public_url', 'radarr_url']);
 
 function normalize(key, value) {
   const trimmed = value.trim();
@@ -24,6 +24,7 @@ export function seedSettingsFromEnv() {
   const envDefaults = {
     seerr_url: process.env.SEERR_URL,
     seerr_api_key: process.env.SEERR_API_KEY,
+    seerr_public_url: process.env.SEERR_PUBLIC_URL,
     tautulli_url: process.env.TAUTULLI_URL,
     tautulli_api_key: process.env.TAUTULLI_API_KEY,
     tautulli_public_url: process.env.TAUTULLI_PUBLIC_URL,
@@ -79,6 +80,7 @@ export function getSettingsForDisplay() {
     seerr_url: s.seerr_url,
     seerr_api_key_set: Boolean(s.seerr_api_key),
     seerr_api_key_masked: mask(s.seerr_api_key),
+    seerr_public_url: s.seerr_public_url,
     tautulli_url: s.tautulli_url,
     tautulli_api_key_set: Boolean(s.tautulli_api_key),
     tautulli_api_key_masked: mask(s.tautulli_api_key),

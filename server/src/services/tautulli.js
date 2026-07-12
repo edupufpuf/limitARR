@@ -108,6 +108,34 @@ export async function getUserEpisodeHistory(userId, sectionId, limit = 1000) {
   });
 }
 
+// Historial de reproducciones de UN ítem concreto (todas las cuentas), para la
+// ventana de detalle de un pendiente: quién lo ha visto, cuándo y hasta qué %.
+// Para series el ratingKey guardado puede ser el de la temporada o el de la
+// serie entera (ver lookupRatingKey en quota.js): se prueba como temporada y,
+// si no devuelve nada, como serie.
+export async function getItemWatchHistory(ratingKey, isTv = false) {
+  const attempts = isTv
+    ? [{ parent_rating_key: ratingKey }, { grandparent_rating_key: ratingKey }]
+    : [{ rating_key: ratingKey }];
+  for (const params of attempts) {
+    const data = await call('get_history', { ...params, length: 500 });
+    const rows = (data.data || []).map((row) => {
+      let percent = Number(row.percent_complete);
+      if (!Number.isFinite(percent)) {
+        percent = Number(row.watched_status) * 100;
+      }
+      return {
+        userId: Number(row.user_id),
+        username: row.friendly_name || row.user,
+        watchedAt: Number(row.date) ? Number(row.date) * 1000 : null,
+        percent: Math.max(0, Math.min(100, percent)),
+      };
+    });
+    if (rows.length > 0) return rows;
+  }
+  return [];
+}
+
 export async function getSeasonEpisodes(showRatingKey, seasonNumber) {
   if (!showRatingKey || !seasonNumber) return [];
   const seasons = await call('get_children_metadata', { rating_key: showRatingKey });

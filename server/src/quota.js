@@ -1,6 +1,7 @@
 import { db } from './db.js';
 import { config } from './config.js';
 import {
+  getItemWatchHistory,
   getSeasonEpisodes,
   getUserEpisodeHistory,
   getUserMovieHistory,
@@ -320,25 +321,59 @@ export async function refreshStaleOutstandingCaches() {
 }
 
 const getPendingApprovedRows = db.prepare(`
-  SELECT id, media_title, tmdb_id, season_number FROM decisions_log
+  SELECT id, media_title, tmdb_id, season_number, created_at FROM decisions_log
   WHERE user_id = ? AND library_id = ? AND decision = 'approved' AND voided_at IS NULL
 `);
 
+// Mismo criterio de match que dismissPendingItem: tmdb_id+temporada o, en su
+// defecto, título normalizado (filas antiguas/importadas sin tmdb_id).
+function matchesPendingRow(row, { tmdbId, seasonNumber, title }) {
+  const wanted = normalize(title);
+  return (
+    (tmdbId != null &&
+      row.tmdb_id === Number(tmdbId) &&
+      (row.season_number ?? null) === (seasonNumber ?? null)) ||
+    (wanted !== '' && normalize(row.media_title) === wanted)
+  );
+}
+
+// Issue #6: datos para la ventana de detalle de un pendiente — cuándo se
+// solicitó/aprobó (decisions_log) y quién lo ha visto, cuánto y cuándo
+// (historial de Tautulli del ítem, todas las cuentas, agregado por usuario).
+export async function getPendingItemDetail(userId, libraryId, { tmdbId, seasonNumber, title, ratingKey, mediaType }) {
+  const matching = getPendingApprovedRows
+    .all(userId, libraryId)
+    .filter((row) => matchesPendingRow(row, { tmdbId, seasonNumber, title }));
+  const requestedAt = matching.map((r) => r.created_at).sort()[0] ?? null;
+
+  const sessions = ratingKey ? await getItemWatchHistory(ratingKey, mediaType === 'tv') : [];
+  const byUser = new Map();
+  for (const s of sessions) {
+    const u = byUser.get(s.userId) ?? {
+      userId: s.userId,
+      username: s.username,
+      plays: 0,
+      maxPercent: 0,
+      lastWatchedAt: null,
+    };
+    u.plays += 1;
+    u.maxPercent = Math.max(u.maxPercent, Math.round(s.percent));
+    if (s.watchedAt && (!u.lastWatchedAt || s.watchedAt > u.lastWatchedAt)) u.lastWatchedAt = s.watchedAt;
+    byUser.set(s.userId, u);
+  }
+  const watchers = [...byUser.values()].sort(
+    (a, b) => b.maxPercent - a.maxPercent || (b.lastWatchedAt ?? 0) - (a.lastWatchedAt ?? 0)
+  );
+  return { requestedAt, watchers };
+}
+
 // Quita a mano UN pendiente del cupo de un usuario (botón ✕ del panel), sin
 // resetear todo: anula (voided_at) sus filas aprobadas, igual que hace la
-// reconciliación automática con las canceladas. Matchea por tmdb_id+temporada
-// (una serie comparte tmdb_id entre temporadas) o, en su defecto, por título
-// normalizado — hay filas antiguas/importadas sin tmdb_id.
+// reconciliación automática con las canceladas.
 export function dismissPendingItem(userId, libraryId, { tmdbId, seasonNumber, title }) {
-  const wanted = normalize(title);
   let dismissed = 0;
   for (const row of getPendingApprovedRows.all(userId, libraryId)) {
-    const matches =
-      (tmdbId != null &&
-        row.tmdb_id === Number(tmdbId) &&
-        (row.season_number ?? null) === (seasonNumber ?? null)) ||
-      (wanted !== '' && normalize(row.media_title) === wanted);
-    if (matches) {
+    if (matchesPendingRow(row, { tmdbId, seasonNumber, title })) {
       markVoided.run(row.id);
       dismissed += 1;
     }

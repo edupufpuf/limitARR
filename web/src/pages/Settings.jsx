@@ -15,6 +15,7 @@ export default function Settings() {
   const [form, setForm] = useState({
     seerr_url: '',
     seerr_api_key: '',
+    seerr_public_url: '',
     tautulli_url: '',
     tautulli_api_key: '',
     tautulli_public_url: '',
@@ -39,6 +40,7 @@ export default function Settings() {
       setForm((f) => ({
         ...f,
         seerr_url: s.seerr_url ?? '',
+        seerr_public_url: s.seerr_public_url ?? '',
         tautulli_url: s.tautulli_url ?? '',
         tautulli_public_url: s.tautulli_public_url ?? '',
         radarr_url: s.radarr_url ?? '',
@@ -130,6 +132,15 @@ export default function Settings() {
             value={form.seerr_api_key}
             onChange={(e) => setForm({ ...form, seerr_api_key: e.target.value })}
             placeholder={settings.seerr_api_key_set ? '•••• dejar en blanco para no cambiar' : ''}
+            className="input mb-3"
+          />
+          <label className="label">
+            URL pública <span className="text-gray-600">(opcional — para abrir Seerr desde el navegador)</span>
+          </label>
+          <input
+            value={form.seerr_public_url}
+            onChange={(e) => setForm({ ...form, seerr_public_url: e.target.value })}
+            placeholder="http://192.168.1.10:5055 — vacío = usar la URL de arriba"
             className="input"
           />
         </fieldset>

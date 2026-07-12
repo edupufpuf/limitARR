@@ -47,6 +47,12 @@ export const api = {
   resetQuota: (userId, libraryId) => request(`/quota/reset/${userId}/${libraryId}`, { method: 'POST' }),
   dismissPending: (userId, libraryId, body) =>
     request(`/quota/dismiss/${userId}/${libraryId}`, { method: 'POST', body: JSON.stringify(body) }),
+  pendingDetail: (userId, libraryId, params) => {
+    const query = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+    );
+    return request(`/quota/pending-detail/${userId}/${libraryId}?${query}`);
+  },
   importSeerrHistory: () => request('/quota/import-seerr-history', { method: 'POST' }),
   decisions: (params = {}) => request(`/decisions?${new URLSearchParams(params)}`),
   stats: () => request('/stats'),

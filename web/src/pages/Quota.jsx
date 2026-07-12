@@ -125,18 +125,19 @@ function WatchProgressRing({ percent }) {
   );
 }
 
-// Póster grande con el título en overlay sobre gradiente, estilo Seerr. Si la
-// película ya existe en Plex (hay ratingKey) y hay URL de Tautulli, el póster
-// enlaza a su página de estadísticas; el ✕ (al pasar el ratón) la quita del cupo.
+// Póster grande con el título en overlay sobre gradiente, estilo Seerr. Al
+// pulsarlo se abre la ventana de detalle (issue #6) — los enlaces a Tautulli y
+// Seerr viven ahí dentro; el ✕ (al pasar el ratón) la quita del cupo.
 // Una película "no disponible" en Radarr (sin fichero aún) se enseña apagada y
 // con etiqueta: sigue pendiente pero no resta cupo hasta que se descargue.
-function PendingPoster({ item, statsBase, onDismiss }) {
-  const href = statsBase && item.ratingKey ? `${statsBase}/info?rating_key=${item.ratingKey}` : null;
-  const Wrapper = href ? 'a' : 'div';
+function PendingPoster({ item, onDetail, onDismiss }) {
   return (
-    <Wrapper
-      {...(href ? { href, target: '_blank', rel: 'noreferrer' } : {})}
-      className="relative block w-16 h-24 rounded-lg overflow-hidden shadow-card group flex-shrink-0"
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onDetail(item)}
+      onKeyDown={(e) => e.key === 'Enter' && onDetail(item)}
+      className="relative block w-16 h-24 rounded-lg overflow-hidden shadow-card group flex-shrink-0 cursor-pointer"
       title={
         item.unavailable
           ? `${item.title ?? ''} — no disponible en Radarr, no resta cupo`
@@ -177,7 +178,149 @@ function PendingPoster({ item, statsBase, onDismiss }) {
       >
         ✕
       </button>
-    </Wrapper>
+    </div>
+  );
+}
+
+function fmtDate(ms) {
+  return new Date(ms).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function daysAgo(ms) {
+  const days = Math.floor((Date.now() - ms) / 86_400_000);
+  if (days <= 0) return 'hoy';
+  return days === 1 ? 'hace 1 día' : `hace ${days} días`;
+}
+
+function percentColor(percent) {
+  return percent >= 70 ? 'text-green-400' : percent >= 35 ? 'text-yellow-400' : 'text-accent-400';
+}
+
+// Ventana de detalle de un pendiente (issue #6): fecha de solicitud/aprobación,
+// días transcurridos, quién lo ha visto (todas las cuentas, no solo el
+// solicitante) y hasta qué %, enlaces a Tautulli/Seerr y quitar del cupo.
+function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss }) {
+  const [detail, setDetail] = useState(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    api
+      .pendingDetail(user.userId, lib.libraryId, {
+        tmdbId: item.tmdbId,
+        seasonNumber: item.seasonNumber,
+        title: item.title,
+        ratingKey: item.ratingKey,
+        mediaType: item.mediaType,
+      })
+      .then(setDetail)
+      .catch(() => setError(true));
+  }, []);
+
+  // created_at de SQLite es "YYYY-MM-DD HH:MM:SS" en UTC.
+  const requestedAtMs = detail?.requestedAt ? Date.parse(detail.requestedAt.replace(' ', 'T') + 'Z') : null;
+  const lastWatchMs = detail?.watchers?.reduce((max, w) => Math.max(max, w.lastWatchedAt ?? 0), 0) || null;
+  const tautulliUrl = statsBase && item.ratingKey ? `${statsBase}/info?rating_key=${item.ratingKey}` : null;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="card w-full max-w-lg max-h-[90vh] overflow-y-auto p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex gap-4">
+          <div className="w-24 h-36 rounded-lg overflow-hidden bg-bg-600 flex-shrink-0">
+            {item.posterUrl ? (
+              <img src={item.posterUrl} alt="" className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-2xl">🎬</div>
+            )}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-2">
+              <h3 className="font-semibold text-lg leading-tight">{item.title ?? '—'}</h3>
+              <button onClick={onClose} className="text-gray-500 hover:text-gray-200 text-xl leading-none">✕</button>
+            </div>
+            <div className="text-xs text-gray-500 mt-1">
+              {lib.libraryName} · solicitado por {user.username}
+            </div>
+            {item.unavailable && (
+              <div className="text-xs text-amber-300 mt-1">No disponible en Radarr — no resta cupo.</div>
+            )}
+            <dl className="mt-3 space-y-1.5 text-sm">
+              <div className="flex gap-2">
+                <dt className="text-gray-500 w-28 flex-shrink-0">Solicitada</dt>
+                <dd>{requestedAtMs ? `${fmtDate(requestedAtMs)} · ${daysAgo(requestedAtMs)}` : detail ? 'sin registro' : '…'}</dd>
+              </div>
+              <div className="flex gap-2">
+                <dt className="text-gray-500 w-28 flex-shrink-0">Último visionado</dt>
+                <dd>{detail ? (lastWatchMs ? `${fmtDate(lastWatchMs)} · ${daysAgo(lastWatchMs)}` : 'nadie la ha empezado') : '…'}</dd>
+              </div>
+              <div className="flex gap-2">
+                <dt className="text-gray-500 w-28 flex-shrink-0">Avance</dt>
+                <dd className={`font-bold tabular-nums ${percentColor(item.watchedPercent ?? 0)}`}>
+                  {item.watchedPercent ?? 0}%
+                  <span className="text-gray-500 font-normal"> del solicitante</span>
+                </dd>
+              </div>
+            </dl>
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <div className="text-xs uppercase tracking-wider text-gray-500 mb-2">Visualizaciones</div>
+          {error && <p className="text-sm text-accent-400">No se pudo cargar el detalle.</p>}
+          {!error && !detail && <p className="text-sm text-gray-500">Cargando…</p>}
+          {detail && detail.watchers.length === 0 && (
+            <p className="text-sm text-gray-500">
+              {item.ratingKey ? 'Sin reproducciones registradas en Tautulli.' : 'Todavía no está en Plex — sin datos de visionado.'}
+            </p>
+          )}
+          {detail && detail.watchers.length > 0 && (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-gray-500">
+                  <th className="font-normal pb-1">Usuario</th>
+                  <th className="font-normal pb-1 text-right">Veces</th>
+                  <th className="font-normal pb-1 text-right">Último visionado</th>
+                  <th className="font-normal pb-1 text-right">%</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detail.watchers.map((w) => (
+                  <tr key={w.userId} className="border-t border-bg-700">
+                    <td className="py-1.5">
+                      {w.username}
+                      {w.userId === user.userId && (
+                        <span className="ml-1.5 text-[9px] uppercase tracking-wide text-accent-400">solicitante</span>
+                      )}
+                    </td>
+                    <td className="py-1.5 text-right tabular-nums">{w.plays}</td>
+                    <td className="py-1.5 text-right text-gray-400">
+                      {w.lastWatchedAt ? daysAgo(w.lastWatchedAt) : '—'}
+                    </td>
+                    <td className={`py-1.5 text-right font-bold tabular-nums ${percentColor(w.maxPercent)}`}>
+                      {w.maxPercent}%
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div className="flex flex-wrap gap-2 mt-5">
+          {tautulliUrl && (
+            <a href={tautulliUrl} target="_blank" rel="noreferrer" className="btn btn-ghost">Ver en Tautulli</a>
+          )}
+          {detail?.seerrUrl && (
+            <a href={detail.seerrUrl} target="_blank" rel="noreferrer" className="btn btn-ghost">Ver en Seerr</a>
+          )}
+          <button onClick={() => onDismiss(item)} className="btn btn-ghost text-accent-400 ml-auto">
+            Quitar del cupo
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -196,7 +339,7 @@ function PosterStack({ libraries }) {
   );
 }
 
-function UserCard({ user, expanded, onToggle, onReset, onDismiss, resetting, statsBase }) {
+function UserCard({ user, expanded, onToggle, onReset, onDismiss, onDetail, resetting }) {
   const worst = worstLib(user.libraries);
   const pending = totalOutstanding(user.libraries);
   return (
@@ -250,7 +393,7 @@ function UserCard({ user, expanded, onToggle, onReset, onDismiss, resetting, sta
                       <PendingPoster
                         key={`${item.tmdbId ?? 'x'}-${item.seasonNumber ?? 0}-${i}`}
                         item={item}
-                        statsBase={statsBase}
+                        onDetail={(it) => onDetail(user, lib, it)}
                         onDismiss={(it) => onDismiss(user.userId, lib.libraryId, it)}
                       />
                     ))}
@@ -275,6 +418,8 @@ export default function Quota() {
   const [resetting, setResetting] = useState({});
   const [expanded, setExpanded] = useState(new Set());
   const [activeFilter, setActiveFilter] = useState('all');
+  // Pendiente abierto en la ventana de detalle: { user, lib, item } o null.
+  const [detailTarget, setDetailTarget] = useState(null);
   // Base para enlazar pósters con Tautulli: la URL pública si está configurada
   // (la interna suele ser un hostname docker que el navegador no resuelve).
   const [statsBase, setStatsBase] = useState('');
@@ -335,13 +480,14 @@ export default function Quota() {
   }
 
   async function dismiss(userId, libraryId, item) {
-    if (!confirm(`¿Quitar "${item.title ?? 'este pendiente'}" del cupo?`)) return;
+    if (!confirm(`¿Quitar "${item.title ?? 'este pendiente'}" del cupo?`)) return false;
     await api.dismissPending(userId, libraryId, {
       tmdbId: item.tmdbId,
       seasonNumber: item.seasonNumber ?? null,
       title: item.title,
     });
     load();
+    return true;
   }
 
   function toggle(userId) {
@@ -450,11 +596,23 @@ export default function Quota() {
             onToggle={() => toggle(u.userId)}
             onReset={reset}
             onDismiss={dismiss}
+            onDetail={(user, lib, item) => setDetailTarget({ user, lib, item })}
             resetting={resetting}
-            statsBase={statsBase}
           />
         ))}
       </div>
+
+      {detailTarget && (
+        <PendingDetailModal
+          {...detailTarget}
+          statsBase={statsBase}
+          onClose={() => setDetailTarget(null)}
+          onDismiss={async (item) => {
+            const done = await dismiss(detailTarget.user.userId, detailTarget.lib.libraryId, item);
+            if (done) setDetailTarget(null);
+          }}
+        />
+      )}
 
       {users.length === 0 && (
         <p className="text-gray-500 text-sm py-6 text-center">

@@ -10,8 +10,8 @@ import { needsSetup, setPassword, checkPassword, getWebhookSecret } from '../aut
 import { getUsers, getLibraries } from '../services/tautulli.js';
 import { listPendingRequests, getSeerrUsers, configureWebhook } from '../services/seerr.js';
 import { radarrConfigured, ping as pingRadarr } from '../services/radarr.js';
-import { getSettingsForDisplay, updateSettings } from '../settings.js';
-import { resetQuota, importSeerrHistory, refreshQuotaCache, dismissPendingItem } from '../quota.js';
+import { getSettings, getSettingsForDisplay, updateSettings } from '../settings.js';
+import { resetQuota, importSeerrHistory, refreshQuotaCache, dismissPendingItem, getPendingItemDetail } from '../quota.js';
 import { matchByEmailOrUsername } from '../userMatch.js';
 import { runPollCycle } from '../scheduler.js';
 import { getVersionInfo } from '../services/version.js';
@@ -101,8 +101,8 @@ router.get('/settings', (req, res) => {
 });
 
 router.put('/settings', (req, res) => {
-  const { seerr_url, seerr_api_key, tautulli_url, tautulli_api_key, tautulli_public_url, radarr_url, radarr_api_key } = req.body || {};
-  updateSettings({ seerr_url, seerr_api_key, tautulli_url, tautulli_api_key, tautulli_public_url, radarr_url, radarr_api_key });
+  const { seerr_url, seerr_api_key, seerr_public_url, tautulli_url, tautulli_api_key, tautulli_public_url, radarr_url, radarr_api_key } = req.body || {};
+  updateSettings({ seerr_url, seerr_api_key, seerr_public_url, tautulli_url, tautulli_api_key, tautulli_public_url, radarr_url, radarr_api_key });
   res.json(getSettingsForDisplay());
 });
 
@@ -473,6 +473,27 @@ router.post('/quota/dismiss/:userId/:libraryId', ah(async (req, res) => {
   const dismissed = dismissPendingItem(userId, libraryId, { tmdbId, seasonNumber, title });
   const result = await refreshQuotaCache(userId, libraryId);
   res.json({ ok: true, dismissed, ...result });
+}));
+
+// Detalle de un pendiente para la ventana de detalle (issue #6): fecha de
+// solicitud/aprobación y visualizaciones agregadas por usuario (todas las
+// cuentas, no solo el solicitante), más el enlace a la ficha en Seerr.
+router.get('/quota/pending-detail/:userId/:libraryId', ah(async (req, res) => {
+  const { userId, libraryId } = req.params;
+  const { tmdbId, seasonNumber, title, ratingKey, mediaType } = req.query;
+  const detail = await getPendingItemDetail(Number(userId), Number(libraryId), {
+    tmdbId: tmdbId ? Number(tmdbId) : null,
+    seasonNumber: seasonNumber ? Number(seasonNumber) : null,
+    title: title || '',
+    ratingKey: ratingKey || null,
+    mediaType: mediaType || 'movie',
+  });
+  const settings = getSettings();
+  const seerrBase = settings.seerr_public_url || settings.seerr_url;
+  const seerrUrl = seerrBase && tmdbId
+    ? `${seerrBase}/${mediaType === 'tv' ? 'tv' : 'movie'}/${tmdbId}`
+    : null;
+  res.json({ ...detail, seerrUrl });
 }));
 
 // --- Stats (KPIs para la cabecera de la pestaña Cupo) ---
