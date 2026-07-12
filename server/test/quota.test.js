@@ -221,6 +221,21 @@ test('listStaleOutstandingPairs: solo pares con pendientes, caché vieja y bibli
   assert.deepEqual(pairs, [{ user_id: 100, library_id: 50 }]);
 });
 
+test('listStaleOutstandingPairs: pendientes no disponibles cuentan aunque outstanding sea 0', () => {
+  // Caso "La Infiltrada": única solicitud del usuario aún no disponible en Plex
+  // → outstanding 0, pero al llegar a Plex debe pasar a restar sin recalcular a mano.
+  const old = "datetime('now', '-10 minutes')";
+  db.exec(`
+    INSERT INTO quota_cache (user_id, library_id, limit_applied, outstanding, balance, pending_items, computed_at) VALUES
+      (104, 50, 4, 0, 4, '[{"title":"La Infiltrada","unavailable":true}]', ${old}),
+      (105, 50, 4, 0, 4, '[{"title":"Heat","unavailable":false}]', ${old})
+  `);
+
+  const pairs = listStaleOutstandingPairs(5);
+  assert.equal(pairs.some((p) => p.user_id === 104), true);
+  assert.equal(pairs.some((p) => p.user_id === 105), false);
+});
+
 test('listStaleOutstandingPairs: el umbral de minutos se respeta', () => {
   db.exec(`
     INSERT INTO quota_cache (user_id, library_id, limit_applied, outstanding, balance, computed_at)

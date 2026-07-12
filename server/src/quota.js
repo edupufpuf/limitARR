@@ -349,9 +349,11 @@ export async function refreshQuotaCache(userId, libraryId) {
 
 // Issue #5: ver una película en Plex no dispara ningún evento hacia limitARR, así
 // que la caché del panel se quedaba desactualizada hasta la siguiente solicitud o
-// un "recalcular todo" manual. Solo pueden cambiar por visionado los pares con
-// pendientes (outstanding > 0); se refrescan desde el ciclo de sondeo, con un
-// mínimo de antigüedad para no golpear Tautulli cada ciclo.
+// un "recalcular todo" manual. Se refrescan desde el ciclo de sondeo, con un
+// mínimo de antigüedad para no golpear Tautulli cada ciclo, los pares cuyo estado
+// puede cambiar solo por eventos externos: con pendientes que restan cupo
+// (outstanding > 0, un visionado los libera) o con pendientes aún no disponibles
+// (issue #1: al llegar a Plex pasan a restar, y eso ocurre justo con outstanding 0).
 const STALE_OUTSTANDING_MINUTES = 5;
 
 const getStaleOutstandingPairs = db.prepare(`
@@ -359,7 +361,7 @@ const getStaleOutstandingPairs = db.prepare(`
   FROM quota_cache qc
   JOIN libraries l ON l.id = qc.library_id
   WHERE l.enabled = 1
-    AND qc.outstanding > 0
+    AND (qc.outstanding > 0 OR qc.pending_items LIKE '%"unavailable":true%')
     AND qc.computed_at <= datetime('now', '-' || ? || ' minutes')
 `);
 
