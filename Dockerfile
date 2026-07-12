@@ -1,5 +1,5 @@
 # --- build frontend ---
-FROM node:20-bookworm-slim AS web-build
+FROM node:22-bookworm-slim AS web-build
 WORKDIR /web
 COPY web/package*.json ./
 RUN npm ci
@@ -7,7 +7,7 @@ COPY web/ ./
 RUN npm run build
 
 # --- build backend (native module compile) ---
-FROM node:20-bookworm-slim AS server-build
+FROM node:22-bookworm-slim AS server-build
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /server
@@ -16,7 +16,7 @@ RUN npm ci --omit=dev
 COPY server/src ./src
 
 # --- runtime ---
-FROM node:20-bookworm-slim AS runtime
+FROM node:22-bookworm-slim AS runtime
 # SHA del commit, lo pasa el workflow; el panel lo muestra y lo compara con la
 # imagen `latest` de GHCR para avisar de actualizaciones. Vacío en builds locales.
 ARG GIT_SHA=
