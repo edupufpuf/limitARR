@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { IconSearch, IconUsers, IconEye, IconBan, IconCheckCircle, IconXCircle } from '../icons.jsx';
 
@@ -162,6 +162,12 @@ function PendingPoster({ item, onDetail, onDismiss }) {
       {!item.unavailable && (item.watchedPercent ?? 0) > 0 && (
         <WatchProgressRing percent={item.watchedPercent} />
       )}
+      {/* Issue #8: episodios vistos/totales de la temporada, bajo la rueda. */}
+      {!item.unavailable && item.mediaType === 'tv' && item.episodesTotal != null && (
+        <span className="absolute top-8 right-1 rounded bg-black/75 px-1 py-0.5 text-[8px] font-semibold tabular-nums text-gray-200 pointer-events-none group-hover:opacity-0 transition-opacity">
+          {item.episodesWatched ?? 0}/{item.episodesTotal}
+        </span>
+      )}
       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent pt-6 pb-1 px-1.5 pointer-events-none">
         <span className="block text-[9px] leading-tight text-gray-100 font-medium line-clamp-2">
           {item.title ?? '—'}
@@ -202,6 +208,10 @@ function percentColor(percent) {
 function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss }) {
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState(false);
+  // Issue #8: usuario desplegado en la tabla de visualizaciones (series) para
+  // ver sus episodios uno a uno.
+  const [openWatcher, setOpenWatcher] = useState(null);
+  const isTv = item.mediaType === 'tv';
 
   useEffect(() => {
     api
@@ -211,6 +221,7 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss }) 
         title: item.title,
         ratingKey: item.ratingKey,
         mediaType: item.mediaType,
+        episodesTotal: item.episodesTotal,
       })
       .then(setDetail)
       .catch(() => setError(true));
@@ -262,6 +273,9 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss }) 
                 <dt className="text-gray-500 w-[5.5rem] sm:w-28 flex-shrink-0">Avance</dt>
                 <dd className={`font-bold tabular-nums ${percentColor(item.watchedPercent ?? 0)}`}>
                   {item.watchedPercent ?? 0}%
+                  {isTv && item.episodesTotal != null && (
+                    <span className="text-gray-400 font-normal"> · {item.episodesWatched ?? 0}/{item.episodesTotal} ep.</span>
+                  )}
                   <span className="text-gray-500 font-normal"> del solicitante</span>
                 </dd>
               </div>
@@ -286,28 +300,51 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss }) 
                 <thead>
                   <tr className="text-left text-xs text-gray-500">
                     <th className="font-normal pb-1 pr-3">Usuario</th>
-                    <th className="font-normal pb-1 pr-3 text-right">Veces</th>
+                    <th className="font-normal pb-1 pr-3 text-right">{isTv ? 'Vistos' : 'Veces'}</th>
                     <th className="font-normal pb-1 pr-3 text-right whitespace-nowrap">Últ. visionado</th>
                     <th className="font-normal pb-1 text-right">%</th>
                   </tr>
                 </thead>
                 <tbody>
                   {detail.watchers.map((w) => (
-                    <tr key={w.userId} className="border-t border-bg-700">
-                      <td className="py-1.5 pr-3 whitespace-nowrap">
-                        {w.username}
-                        {w.userId === user.userId && (
-                          <span className="ml-1.5 text-[9px] uppercase tracking-wide text-accent-400">solicitante</span>
-                        )}
-                      </td>
-                      <td className="py-1.5 pr-3 text-right tabular-nums">{w.plays}</td>
-                      <td className="py-1.5 pr-3 text-right text-gray-400 whitespace-nowrap">
-                        {w.lastWatchedAt ? daysAgo(w.lastWatchedAt) : '—'}
-                      </td>
-                      <td className={`py-1.5 text-right font-bold tabular-nums ${percentColor(w.maxPercent)}`}>
-                        {w.maxPercent}%
-                      </td>
-                    </tr>
+                    // En series la fila se puede desplegar para ver el % de
+                    // cada episodio reproducido (issue #8).
+                    <Fragment key={w.userId}>
+                      <tr
+                        className={`border-t border-bg-700 ${isTv && w.episodes?.length > 0 ? 'cursor-pointer hover:bg-bg-700/40' : ''}`}
+                        onClick={() => isTv && w.episodes?.length > 0 && setOpenWatcher(openWatcher === w.userId ? null : w.userId)}
+                      >
+                        <td className="py-1.5 pr-3 whitespace-nowrap">
+                          {isTv && w.episodes?.length > 0 && (
+                            <span className="text-gray-500 mr-1 text-[9px]">{openWatcher === w.userId ? '▼' : '▶'}</span>
+                          )}
+                          {w.username}
+                          {w.userId === user.userId && (
+                            <span className="ml-1.5 text-[9px] uppercase tracking-wide text-accent-400">solicitante</span>
+                          )}
+                        </td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">
+                          {isTv ? `${w.episodesWatched ?? 0}${w.episodesTotal ? `/${w.episodesTotal}` : ''}` : w.plays}
+                        </td>
+                        <td className="py-1.5 pr-3 text-right text-gray-400 whitespace-nowrap">
+                          {w.lastWatchedAt ? daysAgo(w.lastWatchedAt) : '—'}
+                        </td>
+                        <td className={`py-1.5 text-right font-bold tabular-nums ${percentColor(w.maxPercent)}`}>
+                          {w.maxPercent}%
+                        </td>
+                      </tr>
+                      {isTv && openWatcher === w.userId &&
+                        w.episodes.map((ep) => (
+                          <tr key={`${w.userId}-ep${ep.episodeNumber}`} className="text-gray-400">
+                            <td className="py-1 pr-3 pl-5 whitespace-nowrap truncate max-w-40" colSpan={2}>
+                              <span className="tabular-nums text-gray-500">{item.seasonNumber ?? '?'}x{String(ep.episodeNumber).padStart(2, '0')}</span>
+                              {ep.title && <span className="ml-1.5">{ep.title}</span>}
+                            </td>
+                            <td />
+                            <td className={`py-1 text-right tabular-nums ${percentColor(ep.percent)}`}>{ep.percent}%</td>
+                          </tr>
+                        ))}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>

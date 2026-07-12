@@ -456,13 +456,23 @@ function matchesPendingRow(row, { tmdbId, seasonNumber, title }) {
 // Issue #6: datos para la ventana de detalle de un pendiente — cuándo se
 // solicitó/aprobó (decisions_log) y quién lo ha visto, cuánto y cuándo
 // (historial de Tautulli del ítem, todas las cuentas, agregado por usuario).
-export async function getPendingItemDetail(userId, libraryId, { tmdbId, seasonNumber, title, ratingKey, mediaType }) {
+// Issue #8: en series, el % por usuario es el avance de la TEMPORADA (episodios
+// vistos / totales), no el % del último episodio reproducido, y cada usuario
+// lleva su lista de episodios con el % de cada uno para el desplegable.
+export async function getPendingItemDetail(userId, libraryId, { tmdbId, seasonNumber, title, ratingKey, mediaType, episodesTotal }) {
   const matching = quotaIdentity(userId)
     .memberIds.flatMap((memberId) => getPendingApprovedRows.all(memberId, libraryId))
     .filter((row) => matchesPendingRow(row, { tmdbId, seasonNumber, title }));
   const requestedAt = matching.map((r) => r.created_at).sort()[0] ?? null;
 
-  const sessions = ratingKey ? await getItemWatchHistory(ratingKey, mediaType === 'tv') : [];
+  const isTv = mediaType === 'tv';
+  let sessions = ratingKey ? await getItemWatchHistory(ratingKey, isTv) : [];
+  // El ratingKey guardado puede ser el de la serie entera: el historial trae
+  // entonces todas las temporadas y hay que quedarse solo con la pedida.
+  if (isTv && seasonNumber != null) {
+    sessions = sessions.filter((s) => s.seasonNumber == null || s.seasonNumber === seasonNumber);
+  }
+
   const byUser = new Map();
   for (const s of sessions) {
     const u = byUser.get(s.userId) ?? {
@@ -471,15 +481,38 @@ export async function getPendingItemDetail(userId, libraryId, { tmdbId, seasonNu
       plays: 0,
       maxPercent: 0,
       lastWatchedAt: null,
+      episodes: new Map(),
     };
     u.plays += 1;
     u.maxPercent = Math.max(u.maxPercent, Math.round(s.percent));
     if (s.watchedAt && (!u.lastWatchedAt || s.watchedAt > u.lastWatchedAt)) u.lastWatchedAt = s.watchedAt;
+    if (isTv && Number.isFinite(s.episodeNumber)) {
+      const episode = u.episodes.get(s.episodeNumber) ?? {
+        episodeNumber: s.episodeNumber,
+        title: s.episodeTitle,
+        percent: 0,
+      };
+      episode.percent = Math.max(episode.percent, Math.round(s.percent));
+      u.episodes.set(s.episodeNumber, episode);
+    }
     byUser.set(s.userId, u);
   }
-  const watchers = [...byUser.values()].sort(
-    (a, b) => b.maxPercent - a.maxPercent || (b.lastWatchedAt ?? 0) - (a.lastWatchedAt ?? 0)
-  );
+
+  const watchers = [...byUser.values()].map((u) => {
+    const episodes = [...u.episodes.values()].sort((a, b) => a.episodeNumber - b.episodeNumber);
+    if (!isTv) return { ...u, episodes: undefined };
+    const episodesWatched = episodes.filter((e) => e.percent >= WATCHED_THRESHOLD).length;
+    return {
+      ...u,
+      episodes,
+      episodesWatched,
+      episodesTotal: episodesTotal ?? null,
+      // % de temporada si sabemos cuántos episodios tiene; si no (caché vieja),
+      // el cliente enseña solo "vistos" y se apaña.
+      maxPercent: episodesTotal > 0 ? Math.round((episodesWatched / episodesTotal) * 100) : u.maxPercent,
+    };
+  });
+  watchers.sort((a, b) => b.maxPercent - a.maxPercent || (b.lastWatchedAt ?? 0) - (a.lastWatchedAt ?? 0));
   return { requestedAt, watchers };
 }
 

@@ -538,13 +538,14 @@ router.post('/quota/dismiss/:userId/:libraryId', ah(async (req, res) => {
 // cuentas, no solo el solicitante), más el enlace a la ficha en Seerr.
 router.get('/quota/pending-detail/:userId/:libraryId', ah(async (req, res) => {
   const { userId, libraryId } = req.params;
-  const { tmdbId, seasonNumber, title, ratingKey, mediaType } = req.query;
+  const { tmdbId, seasonNumber, title, ratingKey, mediaType, episodesTotal } = req.query;
   const detail = await getPendingItemDetail(Number(userId), Number(libraryId), {
     tmdbId: tmdbId ? Number(tmdbId) : null,
     seasonNumber: seasonNumber ? Number(seasonNumber) : null,
     title: title || '',
     ratingKey: ratingKey || null,
     mediaType: mediaType || 'movie',
+    episodesTotal: episodesTotal ? Number(episodesTotal) : null,
   });
   const settings = getSettings();
   const seerrBase = settings.seerr_public_url || settings.seerr_url;

@@ -129,6 +129,11 @@ export async function getItemWatchHistory(ratingKey, isTv = false) {
         username: row.friendly_name || row.user,
         watchedAt: Number(row.date) ? Number(row.date) * 1000 : null,
         percent: Math.max(0, Math.min(100, percent)),
+        // Issue #8: para series, el detalle agrega por temporada y despliega
+        // por episodio; en películas estos campos vienen vacíos y se ignoran.
+        seasonNumber: row.parent_media_index !== undefined && row.parent_media_index !== '' ? Number(row.parent_media_index) : null,
+        episodeNumber: row.media_index !== undefined && row.media_index !== '' ? Number(row.media_index) : null,
+        episodeTitle: row.title || null,
       };
     });
     if (rows.length > 0) return rows;
