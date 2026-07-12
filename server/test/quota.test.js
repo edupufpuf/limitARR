@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalize, computeBalance, resolveLimit, dismissPendingItem } from '../src/quota.js';
+import { normalize, computeBalance, resolveLimit, dismissPendingItem, listStaleOutstandingPairs } from '../src/quota.js';
 import { db } from '../src/db.js';
 
 test('resolveLimit: individual gana a grupo, grupo gana a biblioteca', () => {
@@ -158,6 +158,37 @@ test('dismissPendingItem: con series, anula solo la temporada pedida (mismo tmdb
   const dismissed = dismissPendingItem(15, 3, { tmdbId: 1396, seasonNumber: 2, title: 'Breaking Bad - Temporada 2' });
   assert.equal(dismissed, 1);
   assert.equal(pendingCount.get(15, 3).n, 1); // la temporada 1 sigue contando
+});
+
+// --- issue #5: refresco automático de pares con pendientes ---
+
+const insertLibrary = db.prepare(`
+  INSERT INTO libraries (id, name, section_type, enabled) VALUES (?, ?, 'movie', ?)
+`);
+test('listStaleOutstandingPairs: solo pares con pendientes, caché vieja y biblioteca activa', () => {
+  insertLibrary.run(50, 'Películas', 1);
+  insertLibrary.run(51, 'Deshabilitada', 0);
+  const old = "datetime('now', '-10 minutes')";
+  db.exec(`
+    INSERT INTO quota_cache (user_id, library_id, limit_applied, outstanding, balance, computed_at) VALUES
+      (100, 50, 4, 2, 2, ${old}),            -- pendiente y viejo: SÍ
+      (101, 50, 4, 0, 4, ${old}),            -- sin pendientes: no
+      (102, 50, 4, 1, 3, datetime('now')),   -- recién calculado: no
+      (103, 51, 4, 3, 1, ${old})             -- biblioteca deshabilitada: no
+  `);
+
+  const pairs = listStaleOutstandingPairs(5);
+  assert.deepEqual(pairs, [{ user_id: 100, library_id: 50 }]);
+});
+
+test('listStaleOutstandingPairs: el umbral de minutos se respeta', () => {
+  db.exec(`
+    INSERT INTO quota_cache (user_id, library_id, limit_applied, outstanding, balance, computed_at)
+    VALUES (110, 50, 4, 1, 3, datetime('now', '-3 minutes'))
+  `);
+
+  assert.equal(listStaleOutstandingPairs(5).some((p) => p.user_id === 110), false);
+  assert.equal(listStaleOutstandingPairs(2).some((p) => p.user_id === 110), true);
 });
 
 test('dismissPendingItem: no toca a otros usuarios ni otras bibliotecas', () => {

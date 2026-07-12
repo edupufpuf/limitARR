@@ -2,7 +2,7 @@ import { db } from './db.js';
 import { config } from './config.js';
 import { listPendingRequests, approveRequest, getMediaDetails } from './services/seerr.js';
 import { getUsers } from './services/tautulli.js';
-import { getBalance, reconcileVoidedRequests, refreshQuotaCache } from './quota.js';
+import { getBalance, reconcileVoidedRequests, refreshQuotaCache, refreshStaleOutstandingCaches } from './quota.js';
 import { sendMessage, getNotifyTarget, pendingButton, renderNoQuotaMessage } from './services/telegram.js';
 import { matchByEmailOrUsername } from './userMatch.js';
 
@@ -146,6 +146,10 @@ export async function runPollCycle() {
     // el panel enseña la película nueva sin esperar al siguiente sondeo.
     await refreshQuotaCache(tautulliUser.id, library.id);
   }
+
+  // Issue #5: detectar visionados sin esperar a un "recalcular todo" manual —
+  // los pares recién refrescados arriba quedan excluidos por su computed_at.
+  await refreshStaleOutstandingCaches();
 }
 
 function formatMediaTitle(mediaType, title, seasonNumber = null) {
