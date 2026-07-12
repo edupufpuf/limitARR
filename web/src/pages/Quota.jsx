@@ -212,7 +212,7 @@ function percentColor(percent) {
 // Ventana de detalle de un pendiente (issue #6): fecha de solicitud/aprobación,
 // días transcurridos, quién lo ha visto (todas las cuentas, no solo el
 // solicitante) y hasta qué %, enlaces a Tautulli/Seerr y quitar del cupo.
-function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss }) {
+function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss, onDecline }) {
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState(false);
   // Issue #8: usuario desplegado en la tabla de visualizaciones (series) para
@@ -375,11 +375,90 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss }) 
           {detail?.seerrUrl && (
             <a href={detail.seerrUrl} target="_blank" rel="noreferrer" className="btn btn-ghost">Ver en Seerr</a>
           )}
+          {/* Issue #11: un pendiente que aún no está en Plex se puede rechazar
+              directamente en Seerr (cancela la descarga y anula la fila). */}
+          {item.unavailable && item.requestId != null && (
+            <button onClick={() => onDecline(item)} className="btn btn-ghost text-accent-400">
+              Rechazar en Seerr
+            </button>
+          )}
           <button onClick={() => onDismiss(item)} className="btn btn-ghost text-accent-400 ml-auto">
             Quitar del cupo
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Issue #11: solicitudes que siguen sin aprobar en Seerr (fuera de cupo o sin
+// match de usuario), agrupadas por biblioteca, con aprobar/rechazar directos.
+function PendingApprovals({ items, onAction }) {
+  const [acting, setActing] = useState({});
+  if (items.length === 0) return null;
+
+  const byLibrary = new Map();
+  for (const item of items) {
+    const key = item.libraryName ?? 'Sin biblioteca configurada';
+    if (!byLibrary.has(key)) byLibrary.set(key, []);
+    byLibrary.get(key).push(item);
+  }
+
+  async function act(item, action) {
+    const label = action === 'approve' ? 'Aprobar' : 'Rechazar';
+    if (!confirm(`¿${label} "${item.title ?? 'esta solicitud'}" de ${item.username} en Seerr?`)) return;
+    setActing((a) => ({ ...a, [item.requestId]: action }));
+    try {
+      if (action === 'approve') await api.approveRequest(item.requestId);
+      else await api.declineRequest(item.requestId);
+    } finally {
+      setActing((a) => ({ ...a, [item.requestId]: null }));
+      onAction();
+    }
+  }
+
+  return (
+    <div className="card p-4 mb-6 border-amber-400/30">
+      <h3 className="font-semibold mb-1">Pendientes de aprobación</h3>
+      <p className="text-xs text-gray-500 mb-3">
+        Solicitudes que limitARR no aprobó (sin cupo, o usuario sin match) y siguen esperando en Seerr.
+      </p>
+      {[...byLibrary.entries()].map(([libraryName, libItems]) => (
+        <div key={libraryName} className="mb-3 last:mb-0">
+          <div className="text-xs uppercase tracking-wider text-gray-500 mb-2">{libraryName}</div>
+          <div className="space-y-2">
+            {libItems.map((item) => (
+              <div key={item.requestId} className="flex items-center gap-3 text-sm">
+                <span className="w-8 h-12 rounded overflow-hidden bg-bg-600 flex-shrink-0">
+                  {item.posterUrl && <img src={item.posterUrl} alt="" loading="lazy" className="w-full h-full object-cover" />}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="truncate font-medium">{item.title ?? `solicitud #${item.requestId}`}</div>
+                  <div className="text-xs text-gray-500 truncate">
+                    {item.username}
+                    {item.balance != null && ` · saldo ${item.balance}/${item.limit}`}
+                    {item.seasons.length > 1 && ` · ${item.seasons.length} temporadas`}
+                  </div>
+                </div>
+                <button
+                  onClick={() => act(item, 'approve')}
+                  disabled={Boolean(acting[item.requestId])}
+                  className="btn btn-primary py-1 px-2.5 text-xs"
+                >
+                  {acting[item.requestId] === 'approve' ? 'Aprobando…' : 'Aprobar'}
+                </button>
+                <button
+                  onClick={() => act(item, 'decline')}
+                  disabled={Boolean(acting[item.requestId])}
+                  className="btn btn-ghost py-1 px-2.5 text-xs text-accent-400"
+                >
+                  {acting[item.requestId] === 'decline' ? 'Rechazando…' : 'Rechazar'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -482,6 +561,7 @@ function UserCard({ user, expanded, onToggle, onReset, onDismiss, onDetail, rese
 export default function Quota() {
   const [users, setUsers] = useState([]);
   const [stats, setStats] = useState(null);
+  const [pendingApprovals, setPendingApprovals] = useState([]);
   const [query, setQuery] = useState('');
   const [recalculating, setRecalculating] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -498,6 +578,7 @@ export default function Quota() {
   function load() {
     api.quota().then(setUsers);
     api.stats().then(setStats);
+    api.pendingApprovals().then(setPendingApprovals).catch(() => {});
   }
 
   useEffect(() => {
@@ -588,6 +669,8 @@ export default function Quota() {
           </button>
         </div>
       </div>
+
+      <PendingApprovals items={pendingApprovals} onAction={load} />
 
       {stats && (
         <>
@@ -681,6 +764,12 @@ export default function Quota() {
           onDismiss={async (item) => {
             const done = await dismiss(detailTarget.user.userId, detailTarget.lib.libraryId, item);
             if (done) setDetailTarget(null);
+          }}
+          onDecline={async (item) => {
+            if (!confirm(`¿Rechazar "${item.title ?? 'esta solicitud'}" en Seerr? Se cancela la solicitud y deja de contar.`)) return;
+            await api.declineRequest(item.requestId);
+            load();
+            setDetailTarget(null);
           }}
         />
       )}

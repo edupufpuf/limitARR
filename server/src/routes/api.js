@@ -8,9 +8,17 @@ import { requireAuth } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { needsSetup, setPassword, checkPassword, getWebhookSecret } from '../auth.js';
 import { getUsers, getLibraries } from '../services/tautulli.js';
-import { listPendingRequests, getSeerrUsers, configureWebhook } from '../services/seerr.js';
+import {
+  listPendingRequests,
+  getSeerrUsers,
+  configureWebhook,
+  approveRequest,
+  declineRequest,
+  getRequest,
+  getMediaDetails,
+} from '../services/seerr.js';
 import { getSettings, getSettingsForDisplay, updateSettings } from '../settings.js';
-import { resetQuota, importSeerrHistory, refreshQuotaCache, dismissPendingItem, getPendingItemDetail, quotaIdentity } from '../quota.js';
+import { resetQuota, importSeerrHistory, refreshQuotaCache, dismissPendingItem, getPendingItemDetail, quotaIdentity, getBalance } from '../quota.js';
 import { matchByEmailOrUsername } from '../userMatch.js';
 import { runPollCycle } from '../scheduler.js';
 import { getVersionInfo } from '../services/version.js';
@@ -555,6 +563,151 @@ router.get('/quota/pending-detail/:userId/:libraryId', ah(async (req, res) => {
     ? `${seerrBase}/${mediaType === 'tv' ? 'tv' : 'movie'}/${tmdbId}`
     : null;
   res.json({ ...detail, seerrUrl });
+}));
+
+// --- Issue #11: solicitudes fuera de cupo, pendientes de aprobación en Seerr ---
+
+const getLibraryForRequestStmt = db.prepare(`
+  SELECT * FROM libraries WHERE section_type = ? AND kind = ? AND enabled = 1 LIMIT 1
+`);
+const getCachedBalance = db.prepare(
+  'SELECT balance, limit_applied FROM quota_cache WHERE user_id = ? AND library_id = ?'
+);
+const insertManualDecision = db.prepare(`
+  INSERT INTO decisions_log
+    (request_id, user_id, username, library_id, media_title, media_type, tmdb_id, season_number, poster_url, balance_before, limit_applied, decision)
+  VALUES
+    (@requestId, @userId, @username, @libraryId, @mediaTitle, @mediaType, @tmdbId, @seasonNumber, @posterUrl, @balanceBefore, @limitApplied, @decision)
+`);
+const approvedAlreadyLogged = db.prepare(`
+  SELECT 1 FROM decisions_log
+  WHERE request_id = ? AND decision = 'approved' AND voided_at IS NULL
+    AND COALESCE(season_number, -1) = COALESCE(?, -1)
+`);
+const approvedPairsForRequest = db.prepare(`
+  SELECT DISTINCT user_id, library_id FROM decisions_log
+  WHERE request_id = ? AND decision = 'approved' AND voided_at IS NULL
+`);
+const voidApprovedByRequest = db.prepare(`
+  UPDATE decisions_log SET voided_at = datetime('now')
+  WHERE request_id = ? AND decision = 'approved' AND voided_at IS NULL
+`);
+const lastRowForRequest = db.prepare(
+  'SELECT * FROM decisions_log WHERE request_id = ? ORDER BY id DESC LIMIT 1'
+);
+
+function formatRequestTitle(mediaType, title, seasonNumber = null) {
+  if (mediaType !== 'tv' || !seasonNumber) return title;
+  return `${title ?? 'Serie'} - Temporada ${seasonNumber}`;
+}
+
+// Lo que sigue sin aprobar en Seerr (el sondeo solo auto-aprueba dentro de
+// cupo, así que esto es en la práctica lo bloqueado por cupo o sin match),
+// con contexto para decidir: biblioteca, usuario y su saldo cacheado.
+router.get('/requests/pending-approval', ah(async (req, res) => {
+  const [pending, tautulliUsers] = await Promise.all([listPendingRequests(), getUsers()]);
+  const items = [];
+  for (const request of pending) {
+    const sectionType = request.mediaType === 'tv' ? 'show' : 'movie';
+    const library = getLibraryForRequestStmt.get(sectionType, request.is4k ? '4k' : 'standard');
+    const tautulliUser = matchByEmailOrUsername(tautulliUsers, request.requestedBy || {});
+    const seasonNumber = request.seasons[0] ?? null;
+    const details = await getMediaDetails(request.mediaType, request.tmdbId, seasonNumber);
+    const cached = library && tautulliUser
+      ? getCachedBalance.get(quotaIdentity(tautulliUser.id).cacheId, library.id)
+      : null;
+    items.push({
+      requestId: request.id,
+      mediaType: request.mediaType,
+      tmdbId: request.tmdbId ?? null,
+      seasons: request.seasons,
+      title: formatRequestTitle(request.mediaType, details.title, seasonNumber),
+      posterUrl: details.posterUrl ?? null,
+      libraryId: library?.id ?? null,
+      libraryName: library?.name ?? null,
+      userId: tautulliUser?.id ?? null,
+      username: tautulliUser?.username ?? request.requestedBy?.username ?? 'unknown',
+      balance: cached?.balance ?? null,
+      limit: cached?.limit_applied ?? null,
+    });
+  }
+  res.json(items);
+}));
+
+// Aprueba en Seerr Y lo registra como aprobada (si no, el cupo no lo contaría:
+// el sondeo solo loguea solicitudes que siguen pendientes).
+router.post('/requests/:id/approve', ah(async (req, res) => {
+  const requestId = Number(req.params.id);
+  const [request, tautulliUsers] = await Promise.all([getRequest(requestId), getUsers()]);
+  const sectionType = request.mediaType === 'tv' ? 'show' : 'movie';
+  const library = getLibraryForRequestStmt.get(sectionType, request.is4k ? '4k' : 'standard');
+  const tautulliUser = matchByEmailOrUsername(tautulliUsers, request.requestedBy || {});
+
+  await approveRequest(requestId);
+
+  let balanceBefore = null;
+  let limitApplied = null;
+  if (library && tautulliUser) {
+    try {
+      const b = await getBalance(tautulliUser.id, library.id);
+      balanceBefore = b.balance;
+      limitApplied = b.limit;
+    } catch { /* sin saldo no se bloquea la aprobación manual */ }
+  }
+  const seasons = request.mediaType === 'tv' && request.seasons.length > 0 ? request.seasons : [null];
+  for (const seasonNumber of seasons) {
+    if (approvedAlreadyLogged.get(requestId, seasonNumber ?? null)) continue;
+    const details = await getMediaDetails(request.mediaType, request.tmdbId, seasonNumber);
+    insertManualDecision.run({
+      requestId,
+      userId: tautulliUser?.id ?? null,
+      username: tautulliUser?.username ?? request.requestedBy?.username ?? 'unknown',
+      libraryId: library?.id ?? null,
+      mediaTitle: formatRequestTitle(request.mediaType, details.title, seasonNumber),
+      mediaType: request.mediaType,
+      tmdbId: request.tmdbId ?? null,
+      seasonNumber,
+      posterUrl: details.posterUrl ?? null,
+      balanceBefore,
+      limitApplied,
+      decision: 'approved',
+    });
+  }
+  if (library && tautulliUser) await refreshQuotaCache(tautulliUser.id, library.id);
+  res.json({ ok: true });
+}));
+
+// Rechaza en Seerr. Si la solicitud estaba aprobada y contando (caso "aún no
+// disponible" del detalle), sus filas se anulan y el cupo se libera al momento.
+router.post('/requests/:id/decline', ah(async (req, res) => {
+  const requestId = Number(req.params.id);
+  await declineRequest(requestId);
+
+  const affected = approvedPairsForRequest.all(requestId);
+  voidApprovedByRequest.run(requestId);
+
+  const lastRow = lastRowForRequest.get(requestId);
+  insertManualDecision.run({
+    requestId,
+    userId: lastRow?.user_id ?? null,
+    username: lastRow?.username ?? 'unknown',
+    libraryId: lastRow?.library_id ?? null,
+    mediaTitle: lastRow?.media_title ?? null,
+    mediaType: lastRow?.media_type ?? 'movie',
+    tmdbId: lastRow?.tmdb_id ?? null,
+    seasonNumber: lastRow?.season_number ?? null,
+    posterUrl: lastRow?.poster_url ?? null,
+    balanceBefore: null,
+    limitApplied: null,
+    decision: 'declined',
+  });
+
+  for (const pair of affected) {
+    if (pair.user_id != null && pair.library_id != null) {
+      await refreshQuotaCache(pair.user_id, pair.library_id);
+    }
+  }
+  res.json({ ok: true, freed: affected.length });
 }));
 
 // --- Stats (KPIs para la cabecera de la pestaña Cupo) ---

@@ -123,6 +123,15 @@ export async function approveRequest(requestId) {
   await call(`/request/${requestId}/approve`, { method: 'POST' });
 }
 
+// Issue #11: rechazar una solicitud en Seerr desde el panel.
+export async function declineRequest(requestId) {
+  await call(`/request/${requestId}/decline`, { method: 'POST' });
+}
+
+export async function getRequest(requestId) {
+  return mapRequest(await call(`/request/${requestId}`));
+}
+
 // Activa el webhook nativo de Seerr para que avise a limitARR en cuanto entra
 // una solicitud (MEDIA_PENDING = 2), en vez de depender solo del sondeo cada
 // minuto. El sondeo se deja igualmente como red de seguridad.

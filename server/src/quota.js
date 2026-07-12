@@ -63,7 +63,7 @@ const getGroupOverrideByGroup = db.prepare(
 const getLibrary = db.prepare('SELECT * FROM libraries WHERE id = ?');
 const getResetAt = db.prepare('SELECT reset_at FROM quota_resets WHERE user_id = ? AND library_id = ?');
 const getApprovedTitles = db.prepare(`
-  SELECT id, media_title, media_type, tmdb_id, season_number, poster_url, created_at FROM decisions_log
+  SELECT id, request_id, media_title, media_type, tmdb_id, season_number, poster_url, created_at FROM decisions_log
   WHERE user_id = ? AND library_id = ? AND decision = 'approved' AND voided_at IS NULL AND created_at > ?
 `);
 const updateApprovalPoster = db.prepare(`
@@ -192,6 +192,8 @@ export function computeBalance(limit, approvedRows, watchedTitles, unavailableTm
       watchedPercent: Math.round(percentByTitle.get(key) ?? 0),
       // Issue #10: cuándo caduca (ms epoch) o null si no caduca.
       expiresAt: expiresAtMs(r, expiryDays),
+      // Issue #11: para poder rechazar la solicitud en Seerr desde el detalle.
+      requestId: r.request_id ?? null,
     });
   }
 
@@ -312,6 +314,7 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatc
     episodesWatched: r.episodes_watched ?? null,
     episodesTotal: r.episodes_total ?? null,
     expiresAt: expiresAtMs(r, expiryDays),
+    requestId: r.request_id ?? null,
   }));
 
   return {
