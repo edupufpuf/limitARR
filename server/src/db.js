@@ -142,6 +142,10 @@ addColumnIfMissing('ALTER TABLE libraries ADD COLUMN expiry_days INTEGER');
 // Issue #13: solicitudes de series de temporada en temporada. Con el toggle
 // activo, una solicitud con más de una temporada se rechaza en Seerr con aviso.
 addColumnIfMissing('ALTER TABLE libraries ADD COLUMN one_season_per_request INTEGER NOT NULL DEFAULT 0');
+// Issue #13 (fase 2): cola secuencial — un usuario solo puede tener UNA
+// temporada sin ver de cada serie; las siguientes esperan en Seerr y se
+// aprueban al terminar la anterior. Implica rechazar multi-temporada.
+addColumnIfMissing('ALTER TABLE libraries ADD COLUMN sequential_seasons INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('ALTER TABLE overrides ADD COLUMN expiry_override INTEGER');
 addColumnIfMissing('ALTER TABLE group_overrides ADD COLUMN expiry_override INTEGER');
 

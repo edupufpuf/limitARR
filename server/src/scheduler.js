@@ -95,6 +95,29 @@ async function notifyMultiSeasonDeclined(base, seasonsCount) {
   }
 }
 
+// Issue #13 (fase 2): aviso de "en cola" — la solicitud no se pierde, espera a
+// que el usuario termine la temporada que tiene pendiente de esa serie.
+async function notifySeasonHold(base) {
+  const libraryName = getLibraryName.get(base.libraryId)?.name ?? `biblioteca #${base.libraryId}`;
+  const text =
+    `⏳ En cola: ${base.mediaTitle ?? 'una temporada'} (${libraryName}).\n` +
+    `${base.username}: se aprobará sola cuando termines la temporada que tienes pendiente de esa serie.`;
+
+  const target = getNotifyTarget();
+  try {
+    if (target.mode === 'group') {
+      if (!target.groupChatId) return;
+      await sendMessage(target.groupChatId, text, { messageThreadId: target.groupTopicId });
+    } else {
+      const chatId = getChatId.get(base.userId)?.chat_id;
+      if (!chatId) return;
+      await sendMessage(chatId, text);
+    }
+  } catch (err) {
+    console.error('[scheduler] telegram notify failed:', err.message);
+  }
+}
+
 // Aviso de aprobación: cierra el ciclo con el usuario (antes solo se le avisaba
 // de lo malo, el "sin cupo"). `remaining` = saldo tras descontar esta solicitud.
 async function notifyApproved(base, remaining) {
@@ -266,10 +289,10 @@ export async function runPollCycle() {
       continue;
     }
 
-    // Issue #13: temporada a temporada. Con el toggle activo en la biblioteca,
-    // una solicitud con varias temporadas se rechaza entera y con aviso —
-    // Seerr no permite aprobar una solicitud a medias.
-    if (library.one_season_per_request && request.mediaType === 'tv' && requestedSeasons.length > 1) {
+    // Issue #13: temporada a temporada. Con el toggle activo en la biblioteca
+    // (la cola secuencial lo implica: no se puede aprobar media solicitud),
+    // una solicitud con varias temporadas se rechaza entera y con aviso.
+    if ((library.one_season_per_request || library.sequential_seasons) && request.mediaType === 'tv' && requestedSeasons.length > 1) {
       const details = await getMediaDetails(request.mediaType, request.tmdbId, requestedSeasons[0]);
       base.mediaTitle = details.title;
       base.posterUrl = details.posterUrl;
@@ -291,7 +314,33 @@ export async function runPollCycle() {
     base.mediaTitle = formatMediaTitle(request.mediaType, firstDetails.title, requestedSeasons[0]);
     base.posterUrl = firstDetails.posterUrl;
 
-    const { limit, balance } = await getBalance(tautulliUser.id, library.id);
+    const { limit, balance, pendingItems } = await getBalance(tautulliUser.id, library.id);
+
+    // Issue #13 (fase 2): cola secuencial. La solicitud espera en Seerr si el
+    // usuario ya tiene una temporada de ESTA serie sin terminar de ver, o si
+    // hay otra solicitud pendiente suya de una temporada menor (se aprueba
+    // siempre la más baja primero). Al terminar la temporada en curso, el
+    // siguiente ciclo la deja pasar y sigue el flujo normal de cupo.
+    if (library.sequential_seasons && request.mediaType === 'tv' && request.tmdbId != null) {
+      const minSeason = Math.min(...requestedSeasons.map((s) => s ?? 0));
+      const sameShowUnwatched = pendingItems.some((item) => item.tmdbId === request.tmdbId);
+      const lowerSeasonQueued = pending.some(
+        (other) =>
+          other.id !== request.id &&
+          other.mediaType === 'tv' &&
+          other.tmdbId === request.tmdbId &&
+          other.requestedBy?.id === request.requestedBy?.id &&
+          other.seasons.length > 0 &&
+          Math.min(...other.seasons) < minSeason
+      );
+      if (sameShowUnwatched || lowerSeasonQueued) {
+        base.balanceBefore = balance;
+        base.limitApplied = limit;
+        if (logIfChanged(base, 'season_hold')) await notifySeasonHold(base);
+        continue;
+      }
+    }
+
     const requiredUnits = request.mediaType === 'tv' ? requestedSeasons.length : 1;
     const decision = balance >= requiredUnits ? 'approved' : 'no_quota';
 

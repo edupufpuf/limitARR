@@ -185,10 +185,10 @@ router.post('/libraries/sync', ah(async (req, res) => {
 }));
 
 router.put('/libraries/:id', ah(async (req, res) => {
-  const { kind, enabled, defaultLimit, expiryDays, oneSeasonPerRequest } = req.body || {};
+  const { kind, enabled, defaultLimit, expiryDays, oneSeasonPerRequest, sequentialSeasons } = req.body || {};
   const result = db
-    .prepare('UPDATE libraries SET kind = ?, enabled = ?, default_limit = ?, expiry_days = ?, one_season_per_request = ? WHERE id = ?')
-    .run(kind, enabled ? 1 : 0, defaultLimit, expiryDays ?? null, oneSeasonPerRequest ? 1 : 0, req.params.id);
+    .prepare('UPDATE libraries SET kind = ?, enabled = ?, default_limit = ?, expiry_days = ?, one_season_per_request = ?, sequential_seasons = ? WHERE id = ?')
+    .run(kind, enabled ? 1 : 0, defaultLimit, expiryDays ?? null, oneSeasonPerRequest ? 1 : 0, sequentialSeasons ? 1 : 0, req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'not_found' });
 
   if (enabled) {

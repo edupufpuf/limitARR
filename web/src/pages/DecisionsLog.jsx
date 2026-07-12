@@ -9,6 +9,7 @@ const decisionBadge = {
   no_quota: 'bg-accent-500/10 text-accent-400 ring-accent-500/25',
   declined: 'bg-accent-500/10 text-accent-400 ring-accent-500/25',
   declined_multi_season: 'bg-accent-500/10 text-accent-400 ring-accent-500/25',
+  season_hold: 'bg-yellow-400/10 text-yellow-400 ring-yellow-400/25',
   no_library_config: 'bg-bg-700/60 text-gray-400 ring-bg-600',
   unmatched_user: 'bg-bg-700/60 text-gray-400 ring-bg-600',
 };
@@ -18,6 +19,7 @@ const decisionLabel = {
   no_quota: 'sin cupo',
   declined: 'rechazada',
   declined_multi_season: 'rechazada (varias temporadas)',
+  season_hold: 'en cola (temporada anterior sin ver)',
   no_library_config: 'sin biblioteca configurada',
   unmatched_user: 'usuario no encontrado en Tautulli',
 };
