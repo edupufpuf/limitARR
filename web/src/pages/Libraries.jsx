@@ -6,6 +6,7 @@ function LibraryCard({ lib, onSaved }) {
   const [enabled, setEnabled] = useState(Boolean(lib.enabled));
   const [defaultLimit, setDefaultLimit] = useState(lib.default_limit);
   const [expiryDays, setExpiryDays] = useState(lib.expiry_days ?? '');
+  const [oneSeasonPerRequest, setOneSeasonPerRequest] = useState(Boolean(lib.one_season_per_request));
   const [saving, setSaving] = useState(false);
 
   async function save() {
@@ -15,6 +16,7 @@ function LibraryCard({ lib, onSaved }) {
       enabled,
       defaultLimit: Number(defaultLimit),
       expiryDays: expiryDays === '' ? null : Number(expiryDays),
+      oneSeasonPerRequest,
     });
     setSaving(false);
     onSaved();
@@ -71,6 +73,22 @@ function LibraryCard({ lib, onSaved }) {
           />
         </div>
       </div>
+
+      {lib.section_type === 'show' && (
+        <label className="flex items-start gap-2 mb-4 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={oneSeasonPerRequest}
+            onChange={(e) => setOneSeasonPerRequest(e.target.checked)}
+            className="mt-0.5 accent-accent-500"
+          />
+          <span className="text-xs text-gray-400">
+            <span className="text-gray-200 font-medium">Solo una temporada por solicitud</span> — una
+            solicitud con varias temporadas de golpe se rechaza en Seerr automáticamente (con aviso
+            por Telegram): hay que pedirlas de una en una.
+          </span>
+        </label>
+      )}
 
       <button
         onClick={save}

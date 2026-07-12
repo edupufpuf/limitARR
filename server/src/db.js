@@ -139,6 +139,9 @@ addColumnIfMissing('ALTER TABLE groups ADD COLUMN aggregated INTEGER NOT NULL DE
 // NULL = usar el default del código (30); 0 = sin caducidad. Misma precedencia
 // que el límite: override individual > override de grupo > biblioteca.
 addColumnIfMissing('ALTER TABLE libraries ADD COLUMN expiry_days INTEGER');
+// Issue #13: solicitudes de series de temporada en temporada. Con el toggle
+// activo, una solicitud con más de una temporada se rechaza en Seerr con aviso.
+addColumnIfMissing('ALTER TABLE libraries ADD COLUMN one_season_per_request INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('ALTER TABLE overrides ADD COLUMN expiry_override INTEGER');
 addColumnIfMissing('ALTER TABLE group_overrides ADD COLUMN expiry_override INTEGER');
 

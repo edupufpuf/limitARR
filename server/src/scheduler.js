@@ -3,7 +3,7 @@ import path from 'node:path';
 import { db } from './db.js';
 import { config } from './config.js';
 import { getRawSetting, setRawSetting } from './settings.js';
-import { listPendingRequests, approveRequest, getMediaDetails } from './services/seerr.js';
+import { listPendingRequests, approveRequest, declineRequest, getMediaDetails } from './services/seerr.js';
 import { getUsers } from './services/tautulli.js';
 import { getBalance, reconcileVoidedRequests, refreshQuotaCache, listStaleOutstandingPairs, normalize } from './quota.js';
 import { sendMessage, getNotifyTarget, pendingButton, renderNoQuotaMessage } from './services/telegram.js';
@@ -65,6 +65,30 @@ async function notifyNoQuota(base) {
         unit,
       });
       await sendMessage(chatId, text, { replyMarkup });
+    }
+  } catch (err) {
+    console.error('[scheduler] telegram notify failed:', err.message);
+  }
+}
+
+// Issue #13: aviso de rechazo por pedir varias temporadas de golpe, para que el
+// usuario sepa qué hacer (pedir de una en una) en vez de ver la solicitud
+// desaparecer en silencio.
+async function notifyMultiSeasonDeclined(base, seasonsCount) {
+  const libraryName = getLibraryName.get(base.libraryId)?.name ?? `biblioteca #${base.libraryId}`;
+  const text =
+    `🚫 Solicitud rechazada: ${base.mediaTitle ?? 'una serie'} (${libraryName}) pedía ${seasonsCount} temporadas de golpe.\n` +
+    `${base.username}: pide las temporadas de una en una.`;
+
+  const target = getNotifyTarget();
+  try {
+    if (target.mode === 'group') {
+      if (!target.groupChatId) return;
+      await sendMessage(target.groupChatId, text, { messageThreadId: target.groupTopicId });
+    } else {
+      const chatId = getChatId.get(base.userId)?.chat_id;
+      if (!chatId) return;
+      await sendMessage(chatId, text);
     }
   } catch (err) {
     console.error('[scheduler] telegram notify failed:', err.message);
@@ -239,6 +263,21 @@ export async function runPollCycle() {
     }
     if (!tautulliUser) {
       logIfChanged(base, 'unmatched_user');
+      continue;
+    }
+
+    // Issue #13: temporada a temporada. Con el toggle activo en la biblioteca,
+    // una solicitud con varias temporadas se rechaza entera y con aviso —
+    // Seerr no permite aprobar una solicitud a medias.
+    if (library.one_season_per_request && request.mediaType === 'tv' && requestedSeasons.length > 1) {
+      const details = await getMediaDetails(request.mediaType, request.tmdbId, requestedSeasons[0]);
+      base.mediaTitle = details.title;
+      base.posterUrl = details.posterUrl;
+      base.seasonNumber = null; // la decisión aplica a la solicitud entera
+      await declineRequest(request.id);
+      if (logIfChanged(base, 'declined_multi_season')) {
+        await notifyMultiSeasonDeclined(base, requestedSeasons.length);
+      }
       continue;
     }
 
