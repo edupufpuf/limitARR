@@ -73,6 +73,7 @@ export const api = {
   deleteNotificationLink: (userId) => request(`/notifications/links/${userId}`, { method: 'DELETE' }),
   discoverChats: () => request('/notifications/discover'),
   testNotification: (userId) => request(`/notifications/test/${userId}`, { method: 'POST' }),
-  testGroupNotification: () => request('/notifications/test-group', { method: 'POST' }),
+  testGroupNotification: (body) =>
+    request('/notifications/test-group', { method: 'POST', body: JSON.stringify(body ?? {}) }),
   sendPendingSummary: () => request('/notifications/pending-summary', { method: 'POST' }),
 };

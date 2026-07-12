@@ -88,8 +88,8 @@ export default function Notifications() {
   async function testGroup() {
     setGroupTestResult('probando…');
     try {
-      await api.testGroupNotification();
-      setGroupTestResult('enviado ✓');
+      await api.testGroupNotification({ groupChatId, groupTopicId });
+      setGroupTestResult('enviado ✓ (recuerda Guardar)');
     } catch (err) {
       setGroupTestResult(`error: ${err.message}`);
     }

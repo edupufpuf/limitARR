@@ -42,10 +42,28 @@ export function getNotifyTarget() {
   };
 }
 
+// Tautulli admite "chatid/topicid" en un solo campo y es fácil pegar ese
+// formato aquí: si el chat trae barra, se separa en chat + topic. Un topic
+// explícito gana sobre el que venga pegado al chat.
+export function normalizeGroupTarget(groupChatId, groupTopicId) {
+  const [chat, topicFromChat] = String(groupChatId ?? '').trim().split('/');
+  return {
+    groupChatId: chat,
+    groupTopicId: String(groupTopicId ?? '').trim() || topicFromChat || '',
+  };
+}
+
 export function setNotifyTarget({ mode, groupChatId, groupTopicId, noQuotaMessage, notifyApproved, notifyFreed }) {
   if (mode) setRawSetting(MODE_KEY, mode);
-  if (groupChatId !== undefined) setRawSetting(GROUP_CHAT_KEY, String(groupChatId ?? ''));
-  if (groupTopicId !== undefined) setRawSetting(GROUP_TOPIC_KEY, String(groupTopicId ?? ''));
+  if (groupChatId !== undefined || groupTopicId !== undefined) {
+    const saved = getNotifyTarget();
+    const normalized = normalizeGroupTarget(
+      groupChatId !== undefined ? groupChatId : saved.groupChatId,
+      groupTopicId !== undefined ? groupTopicId : saved.groupTopicId
+    );
+    setRawSetting(GROUP_CHAT_KEY, normalized.groupChatId);
+    setRawSetting(GROUP_TOPIC_KEY, normalized.groupTopicId);
+  }
   if (noQuotaMessage !== undefined) setNoQuotaMessage(noQuotaMessage);
   if (notifyApproved !== undefined) setRawSetting(NOTIFY_APPROVED_KEY, notifyApproved ? '1' : '0');
   if (notifyFreed !== undefined) setRawSetting(NOTIFY_FREED_KEY, notifyFreed ? '1' : '0');

@@ -21,6 +21,7 @@ import {
   getInboxMessages,
   getNotifyTarget,
   setNotifyTarget,
+  normalizeGroupTarget,
 } from '../services/telegram.js';
 
 export const router = Router();
@@ -804,8 +805,14 @@ router.post('/notifications/test/:userId', async (req, res) => {
   }
 });
 
+// Prueba con lo que haya en el formulario (si el body trae chat/topic) para no
+// obligar a guardar antes de probar; sin body usa lo guardado.
 router.post('/notifications/test-group', async (req, res) => {
-  const { groupChatId, groupTopicId } = getNotifyTarget();
+  const saved = getNotifyTarget();
+  const { groupChatId, groupTopicId } = normalizeGroupTarget(
+    req.body?.groupChatId !== undefined ? req.body.groupChatId : saved.groupChatId,
+    req.body?.groupTopicId !== undefined ? req.body.groupTopicId : saved.groupTopicId
+  );
   if (!groupChatId) return res.status(404).json({ error: 'group_not_configured' });
   try {
     await sendMessage(groupChatId, '✅ limitARR: notificaciones de grupo conectadas correctamente.', { messageThreadId: groupTopicId });

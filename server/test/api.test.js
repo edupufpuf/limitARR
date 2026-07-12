@@ -132,3 +132,34 @@ test('notifications: los toggles de aviso se guardan y se leen', async () => {
   assert.equal(s.notifyApproved, false);
   assert.equal(s.notifyFreed, true); // el otro no cambia
 });
+
+test('notifications: chat pegado en formato Tautulli "chat/topic" se separa al guardar', async () => {
+  let s = (await agent
+    .put('/api/notifications/settings')
+    .send({ mode: 'group', groupChatId: '-1001234567890/42' })
+    .expect(200)).body;
+  assert.equal(s.groupChatId, '-1001234567890');
+  assert.equal(s.groupTopicId, '42');
+
+  // Un topic explícito gana sobre el pegado al chat.
+  s = (await agent
+    .put('/api/notifications/settings')
+    .send({ groupChatId: '-1001234567890/42', groupTopicId: '7' })
+    .expect(200)).body;
+  assert.equal(s.groupChatId, '-1001234567890');
+  assert.equal(s.groupTopicId, '7');
+});
+
+test('notifications: probar grupo sin nada guardado ni en el body devuelve 404', async () => {
+  await agent
+    .put('/api/notifications/settings')
+    .send({ groupChatId: '', groupTopicId: '' })
+    .expect(200);
+  await agent.post('/api/notifications/test-group').send({}).expect(404);
+  // Con chat en el body (formulario sin guardar) ya no es "no configurado":
+  // pasa del 404 e intenta enviar (502 aquí porque no hay bot de verdad).
+  const res = await agent
+    .post('/api/notifications/test-group')
+    .send({ groupChatId: '-100999', groupTopicId: '3' });
+  assert.notEqual(res.status, 404);
+});
