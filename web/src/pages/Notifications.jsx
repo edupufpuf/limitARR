@@ -95,11 +95,11 @@ export default function Notifications() {
     }
   }
 
-  async function sendPendingSummary() {
+  async function sendPendingSummary(target) {
     setSendingPendingSummary(true);
     setPendingSummaryResult('enviando…');
     try {
-      const result = await api.sendPendingSummary();
+      const result = await api.sendPendingSummary(target);
       if (result.mode === 'group') {
         setPendingSummaryResult(`enviado al grupo · ${result.users} usuario(s) · ${result.messages} mensaje(s)`);
       } else {
@@ -227,12 +227,17 @@ export default function Notifications() {
           <div>
             <h3 className="font-semibold">Resumen de pendientes</h3>
             <p className="text-xs text-gray-500 mt-1">
-              Envía solo texto con lo que queda por ver. En modo grupo manda un resumen común; en modo DM manda uno a cada usuario vinculado.
+              Envía solo texto con lo que queda por ver. Al grupo manda un resumen común; por DM manda uno a cada usuario vinculado.
             </p>
           </div>
-          <button onClick={sendPendingSummary} disabled={sendingPendingSummary} className="btn btn-primary">
-            {sendingPendingSummary ? 'Enviando…' : 'Enviar resumen'}
-          </button>
+          <div className="flex gap-2">
+            <button onClick={() => sendPendingSummary('group')} disabled={sendingPendingSummary} className="btn btn-primary">
+              {sendingPendingSummary ? 'Enviando…' : 'Enviar al grupo'}
+            </button>
+            <button onClick={() => sendPendingSummary('dm')} disabled={sendingPendingSummary} className="btn btn-primary">
+              {sendingPendingSummary ? 'Enviando…' : 'Enviar por DM'}
+            </button>
+          </div>
         </div>
         {pendingSummaryResult && <p className="text-xs text-gray-500 mt-3">{pendingSummaryResult}</p>}
       </div>

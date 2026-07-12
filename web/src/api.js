@@ -75,5 +75,6 @@ export const api = {
   testNotification: (userId) => request(`/notifications/test/${userId}`, { method: 'POST' }),
   testGroupNotification: (body) =>
     request('/notifications/test-group', { method: 'POST', body: JSON.stringify(body ?? {}) }),
-  sendPendingSummary: () => request('/notifications/pending-summary', { method: 'POST' }),
+  sendPendingSummary: (target) =>
+    request('/notifications/pending-summary', { method: 'POST', body: JSON.stringify(target ? { target } : {}) }),
 };

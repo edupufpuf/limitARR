@@ -150,6 +150,23 @@ test('notifications: chat pegado en formato Tautulli "chat/topic" se separa al g
   assert.equal(s.groupTopicId, '7');
 });
 
+test('notifications: el resumen de pendientes acepta forzar el destino en el body', async () => {
+  await agent
+    .put('/api/notifications/settings')
+    .send({ mode: 'group', groupChatId: '', groupTopicId: '' })
+    .expect(200);
+
+  // target: 'dm' ignora el modo grupo guardado (sin usuarios vinculados no envía nada).
+  const dm = (await agent.post('/api/notifications/pending-summary').send({ target: 'dm' }).expect(200)).body;
+  assert.equal(dm.mode, 'dm');
+
+  // target: 'group' sin chat configurado corta con 404.
+  await agent.post('/api/notifications/pending-summary').send({ target: 'group' }).expect(404);
+
+  // Un target inválido cae al modo guardado (grupo sin chat → 404).
+  await agent.post('/api/notifications/pending-summary').send({ target: 'lo-que-sea' }).expect(404);
+});
+
 test('notifications: probar grupo sin nada guardado ni en el body devuelve 404', async () => {
   await agent
     .put('/api/notifications/settings')

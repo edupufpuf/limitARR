@@ -759,12 +759,17 @@ function chunkTelegramText(text) {
   return chunks;
 }
 
+// El body puede traer { target: 'group' | 'dm' } para forzar el destino;
+// sin él se usa el modo guardado en ajustes.
 router.post('/notifications/pending-summary', ah(async (req, res) => {
   const target = getNotifyTarget();
-  const summaries = await hydratePendingSummaryUsers(buildPendingSummaryRows());
+  const mode = ['group', 'dm'].includes(req.body?.target) ? req.body.target : target.mode;
+  const rows = buildPendingSummaryRows();
+  // Sin filas no hace falta hidratar (getUsers llama a Tautulli).
+  const summaries = rows.length > 0 ? await hydratePendingSummaryUsers(rows) : [];
   const withPending = summaries.filter((s) => s.libraries.length > 0);
 
-  if (target.mode === 'group') {
+  if (mode === 'group') {
     if (!target.groupChatId) return res.status(404).json({ error: 'group_not_configured' });
     const body = withPending.length > 0
       ? `📋 Pendientes por ver\n\n${withPending.map((s) => formatPendingSummaryForUser(s)).join('\n\n')}`
