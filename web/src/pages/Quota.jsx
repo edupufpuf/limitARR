@@ -128,7 +128,7 @@ function WatchProgressRing({ percent }) {
 // Póster grande con el título en overlay sobre gradiente, estilo Seerr. Al
 // pulsarlo se abre la ventana de detalle (issue #6) — los enlaces a Tautulli y
 // Seerr viven ahí dentro; el ✕ (al pasar el ratón) la quita del cupo.
-// Una película "no disponible" en Radarr (sin fichero aún) se enseña apagada y
+// Una película aún no disponible en Plex (según Seerr) se enseña apagada y
 // con etiqueta: sigue pendiente pero no resta cupo hasta que se descargue.
 function PendingPoster({ item, onDetail, onDismiss }) {
   return (
@@ -140,7 +140,7 @@ function PendingPoster({ item, onDetail, onDismiss }) {
       className="relative block w-16 h-24 rounded-lg overflow-hidden shadow-card group flex-shrink-0 cursor-pointer"
       title={
         item.unavailable
-          ? `${item.title ?? ''} — no disponible en Radarr, no resta cupo`
+          ? `${item.title ?? ''} — aún no disponible en Plex, no resta cupo`
           : `${item.title ?? ''}${(item.watchedPercent ?? 0) > 0 ? ` — ${item.watchedPercent}% visto` : ''}`
       }
     >
@@ -244,7 +244,7 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss }) 
               {lib.libraryName} · solicitado por {user.username}
             </div>
             {item.unavailable && (
-              <div className="text-xs text-amber-300 mt-1">No disponible en Radarr — no resta cupo.</div>
+              <div className="text-xs text-amber-300 mt-1">Aún no disponible en Plex — no resta cupo.</div>
             )}
             <dl className="mt-3 space-y-1.5 text-sm">
               <div className="flex gap-2">

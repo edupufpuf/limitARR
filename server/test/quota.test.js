@@ -87,9 +87,9 @@ test('computeBalance: mismo título aprobado dos veces no duplica pendingItems',
   assert.equal(r.pendingItems.length, 1); // pero solo se muestra una vez
 });
 
-// --- issue #1: no contabilizar películas "No disponible" en Radarr ---
+// --- issue #1: no contabilizar películas aún no disponibles en Plex ---
 
-test('computeBalance: no disponible en Radarr no resta cupo pero sigue listada', () => {
+test('computeBalance: no disponible aún no resta cupo pero sigue listada', () => {
   const approved = [
     { media_title: 'Matrix', tmdb_id: 603 },
     { media_title: 'Estreno Futuro', tmdb_id: 999 },

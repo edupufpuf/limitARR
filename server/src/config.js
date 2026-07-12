@@ -12,6 +12,6 @@ export const config = {
   dbPath: process.env.DB_PATH || './data/limitarr.db',
   pollIntervalMs: Number(process.env.POLL_INTERVAL_MS || 60_000),
   // Si una solicitud aprobada lleva más de esto sin llegar a "disponible" en Seerr
-  // (Radarr nunca la encuentra), se libera su hueco de cupo automáticamente.
+  // (nunca llega a descargarse), se libera su hueco de cupo automáticamente.
   stuckRequestGraceDays: Number(process.env.STUCK_REQUEST_GRACE_DAYS || 7),
 };

@@ -49,8 +49,7 @@ seerr/tautulli):
 3. Abre el panel en `http://<host>:5150` — como no hay contraseña
    definida, pedirá crearla en el primer acceso.
 4. Pestaña **Configuración**: URL + API key de Seerr y Tautulli (si no
-   se rellenaron por env, ver abajo). Opcionalmente también Radarr, para
-   que las películas aún sin descargar no resten cupo (ver "Cupo").
+   se rellenaron por env, ver abajo).
 5. Pestaña **Bibliotecas**: pulsa "Sincronizar desde Tautulli" para
    descubrirlas, márcalas `standard`/`4k` y ponles el límite por defecto.
 6. Si ya había solicitudes aprobadas antes de instalarlo (o admins
@@ -88,12 +87,10 @@ saldo = límite − (películas aprobadas para ese usuario en esa biblioteca que
   verdad (sin borrar el historial del registro).
 - Para quitar UNA sola película del cupo (sin resetear el resto), ✕ al
   pasar el ratón sobre su carátula en la tarjeta desplegada.
-- **Con Radarr conectado** (Configuración, opcional): una película
-  aprobada que aún no tiene fichero en Radarr — "No disponible":
-  faltante, sin estrenar o no encontrada — no resta cupo hasta que se
-  descarga de verdad. En el panel se enseña igualmente su carátula,
-  apagada y con la etiqueta "no cuenta". Sin Radarr configurado todo
-  funciona como antes (toda aprobada no vista cuenta).
+- Una película aprobada que **aún no está disponible en Plex** (según
+  Seerr: faltante, sin estrenar o no encontrada) no resta cupo hasta que
+  se descarga de verdad. En el panel se enseña igualmente su carátula,
+  apagada y con la etiqueta "no cuenta". No requiere configuración.
 
 ## Panel
 
@@ -115,7 +112,7 @@ ocupando cupo para siempre:
 
 - **Cancelada por el usuario en Seerr**: se detecta y se libera el hueco
   en el siguiente ciclo.
-- **Radarr nunca la encuentra**: pasado `STUCK_REQUEST_GRACE_DAYS` (7
+- **Nunca llega a estar disponible**: pasado `STUCK_REQUEST_GRACE_DAYS` (7
   días por defecto) sin llegar a "disponible", se libera sola. Una que sí
   llegó a estar disponible nunca se libera por antigüedad — sigue
   contando hasta que el usuario la vea de verdad.
@@ -134,7 +131,7 @@ El aviso no lista el contenido pendiente directamente: lleva un botón
 
 ## Pendiente / no incluido en esta primera versión
 
-- Series (Sonarr/Radarr solo cubre películas por ahora).
+- El chequeo de "aún no disponible" solo cubre películas por ahora.
 - Rechazo automático (solo se auto-aprueba o se deja pendiente para
   revisión manual; nunca se declina en nombre del usuario).
 - No hay forma de bloquear una aprobación hecha directamente en el panel

@@ -178,9 +178,43 @@ export async function getMediaDetails(mediaType, tmdbId, seasonNumber = null) {
   return getMovieDetails(tmdbId);
 }
 
+// "No disponible" (issue #1): una película aprobada que aún no está en Plex no
+// resta cupo — el usuario no puede verla todavía. Seerr ya sabe la
+// disponibilidad (media.status 4/5 cuando Plex la tiene), así que no hace falta
+// conectar Radarr aparte. Ante un error se trata como disponible: en la duda la
+// película sigue contando — al revés, un Seerr caído regalaría cupo infinito.
+// TTL corto: lo justo para no repetir la misma consulta por cada usuario dentro
+// de un ciclo de sondeo, sin retrasar apenas el "ya está en Plex".
+const AVAILABILITY_TTL_MS = 60_000;
+const availabilityCache = new Map(); // tmdbId -> { unavailable, at }
+
+async function isUnavailable(tmdbId) {
+  const cached = availabilityCache.get(tmdbId);
+  if (cached && Date.now() - cached.at < AVAILABILITY_TTL_MS) return cached.unavailable;
+
+  try {
+    const data = await call(`/movie/${tmdbId}`);
+    const status = Number(data.mediaInfo?.status ?? 0);
+    const unavailable = status < 4; // 4 parcial / 5 disponible = ya se puede ver
+    availabilityCache.set(tmdbId, { unavailable, at: Date.now() });
+    return unavailable;
+  } catch {
+    return false;
+  }
+}
+
+// Subconjunto de `tmdbIds` que aún no están disponibles en Plex según Seerr.
+export async function getUnavailableTmdbIds(tmdbIds) {
+  const out = new Set();
+  for (const tmdbId of new Set(tmdbIds.filter((id) => id != null))) {
+    if (await isUnavailable(tmdbId)) out.add(tmdbId);
+  }
+  return out;
+}
+
 // 'gone': Seerr confirma que ya no existe (404 = borrada/cancelada por el usuario).
 // 'available': el media ya está disponible (status 4 parcial o 5 completo en Seerr).
-// 'pending': existe pero Radarr aún no lo ha conseguido.
+// 'pending': existe pero aún no se ha conseguido descargar.
 // 'unknown': fallo de red/config/5xx — no se sabe, no se debe actuar sobre esto.
 export async function getRequestStatus(requestId) {
   const { seerr_url: baseUrl, seerr_api_key: apiKey } = getSettings();

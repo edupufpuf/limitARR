@@ -13,8 +13,8 @@ import {
   getSeerrUsers,
   getApprovedRequestsForUser,
   getMediaDetails,
+  getUnavailableTmdbIds,
 } from './services/seerr.js';
-import { getUnavailableTmdbIds } from './services/radarr.js';
 import { matchByEmailOrUsername } from './userMatch.js';
 
 // Tautulli's own "watched" threshold; below this a play doesn't free up quota.
@@ -130,9 +130,9 @@ export function resolveLimit(userOverride, groupOverride, defaultLimit) {
 // negativo: por debajo de 0 se queda en 0 (el bloqueo ya lo gestiona balance < 1).
 export function computeBalance(limit, approvedRows, watchedTitles, unavailableTmdbIds = new Set(), percentByTitle = new Map()) {
   const pending = approvedRows.filter((r) => !watchedTitles.has(normalize(r.media_title)));
-  // Issue #1: las "No disponible" en Radarr (sin fichero: faltante, sin estrenar
-  // o no encontrada) no restan cupo, pero sí se listan como pendientes (con
-  // marca) para que se vea que la solicitud existe y aún no cuenta.
+  // Issue #1: las que aún no están disponibles en Plex (según Seerr: faltante,
+  // sin estrenar o no encontrada) no restan cupo, pero sí se listan como
+  // pendientes (con marca) para que se vea que la solicitud existe y aún no cuenta.
   const isUnavailable = (r) => r.tmdb_id != null && unavailableTmdbIds.has(r.tmdb_id);
   const outstanding = pending.filter((r) => !isUnavailable(r)).length;
 
@@ -439,7 +439,7 @@ export function dismissPendingItem(userId, libraryId, { tmdbId, seasonNumber, ti
 }
 
 // Sin esto, una aprobada que nunca llega a ver la luz (cancelada por el usuario, o
-// Radarr no la encuentra) se queda ocupando su hueco de cupo para siempre. Se
+// nunca llega a descargarse) se queda ocupando su hueco de cupo para siempre. Se
 // libera si Seerr confirma que ya no existe, o si sigue "pendiente" (nunca
 // disponible) pasado el plazo de gracia — una ya disponible no se toca nunca,
 // por vieja que sea: sigue contando hasta que el usuario la vea de verdad.

@@ -9,7 +9,6 @@ import { rateLimit } from '../middleware/rateLimit.js';
 import { needsSetup, setPassword, checkPassword, getWebhookSecret } from '../auth.js';
 import { getUsers, getLibraries } from '../services/tautulli.js';
 import { listPendingRequests, getSeerrUsers, configureWebhook } from '../services/seerr.js';
-import { radarrConfigured, ping as pingRadarr } from '../services/radarr.js';
 import { getSettings, getSettingsForDisplay, updateSettings } from '../settings.js';
 import { resetQuota, importSeerrHistory, refreshQuotaCache, dismissPendingItem, getPendingItemDetail, quotaIdentity } from '../quota.js';
 import { matchByEmailOrUsername } from '../userMatch.js';
@@ -101,8 +100,8 @@ router.get('/settings', (req, res) => {
 });
 
 router.put('/settings', (req, res) => {
-  const { seerr_url, seerr_api_key, seerr_public_url, tautulli_url, tautulli_api_key, tautulli_public_url, radarr_url, radarr_api_key } = req.body || {};
-  updateSettings({ seerr_url, seerr_api_key, seerr_public_url, tautulli_url, tautulli_api_key, tautulli_public_url, radarr_url, radarr_api_key });
+  const { seerr_url, seerr_api_key, seerr_public_url, tautulli_url, tautulli_api_key, tautulli_public_url } = req.body || {};
+  updateSettings({ seerr_url, seerr_api_key, seerr_public_url, tautulli_url, tautulli_api_key, tautulli_public_url });
   res.json(getSettingsForDisplay());
 });
 
@@ -119,15 +118,6 @@ router.post('/settings/test', async (req, res) => {
     result.seerr = { ok: true };
   } catch (err) {
     result.seerr = { ok: false, error: err.message };
-  }
-  // Radarr es opcional: solo se prueba (y se muestra) si está configurado.
-  if (radarrConfigured()) {
-    try {
-      await pingRadarr();
-      result.radarr = { ok: true };
-    } catch (err) {
-      result.radarr = { ok: false, error: err.message };
-    }
   }
   res.json(result);
 });
