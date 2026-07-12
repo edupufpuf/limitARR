@@ -7,6 +7,7 @@ import {
   dismissPendingItem,
   listStaleOutstandingPairs,
   getPendingItemDetail,
+  quotaIdentity,
 } from '../src/quota.js';
 import { db } from '../src/db.js';
 
@@ -228,6 +229,68 @@ test('listStaleOutstandingPairs: el umbral de minutos se respeta', () => {
 
   assert.equal(listStaleOutstandingPairs(5).some((p) => p.user_id === 110), false);
   assert.equal(listStaleOutstandingPairs(2).some((p) => p.user_id === 110), true);
+});
+
+// --- issue #4: cupo grupal agregado (el grupo cuenta como un solo usuario) ---
+
+db.exec(`
+  INSERT INTO groups (id, name, aggregated) VALUES (90, 'Familia', 1), (91, 'Amigos', 0);
+  INSERT INTO group_members (user_id, group_id) VALUES (201, 90), (202, 90), (203, 91);
+`);
+
+test('quotaIdentity: miembro de grupo agregado resuelve a -group_id con todos los miembros', () => {
+  const identity = quotaIdentity(201);
+  assert.equal(identity.aggregated, true);
+  assert.equal(identity.cacheId, -90);
+  assert.equal(identity.groupId, 90);
+  assert.deepEqual(identity.memberIds.sort(), [201, 202]);
+});
+
+test('quotaIdentity: grupo sin agregar no cambia la identidad del usuario', () => {
+  const identity = quotaIdentity(203);
+  assert.equal(identity.aggregated, false);
+  assert.equal(identity.cacheId, 203);
+  assert.deepEqual(identity.memberIds, [203]);
+});
+
+test('quotaIdentity: usuario sin grupo es él mismo', () => {
+  const identity = quotaIdentity(999);
+  assert.equal(identity.aggregated, false);
+  assert.equal(identity.cacheId, 999);
+  assert.deepEqual(identity.memberIds, [999]);
+});
+
+test('quotaIdentity: un id negativo resuelve directamente al grupo', () => {
+  const identity = quotaIdentity(-90);
+  assert.equal(identity.aggregated, true);
+  assert.equal(identity.cacheId, -90);
+  assert.deepEqual(identity.memberIds.sort(), [201, 202]);
+});
+
+test('quotaIdentity: acepta ids como texto (params de ruta)', () => {
+  assert.equal(quotaIdentity('201').cacheId, -90);
+  assert.equal(quotaIdentity('-90').groupId, 90);
+});
+
+test('dismissPendingItem: sobre un grupo agregado anula el pendiente de cualquier miembro', () => {
+  insertDecision.run(40, 202, 1, 'Matrix', 603);
+
+  // Se pide con el id del grupo (como hace el panel) pero la fila es del miembro 202.
+  const dismissed = dismissPendingItem(-90, 1, { tmdbId: 603, title: 'Matrix' });
+  assert.equal(dismissed, 1);
+  assert.equal(pendingCount.get(202, 1).n, 0);
+});
+
+test('getPendingItemDetail: sobre un grupo agregado encuentra filas de todos los miembros', async () => {
+  db.exec(`
+    INSERT INTO decisions_log (request_id, user_id, library_id, media_title, tmdb_id, decision, created_at) VALUES
+      (41, 201, 1, 'Heat', 949, 'approved', '2026-07-03 10:00:00'),
+      (42, 202, 1, 'Heat', 949, 'approved', '2026-07-01 10:00:00')
+  `);
+  const d = await getPendingItemDetail(-90, 1, {
+    tmdbId: 949, seasonNumber: null, title: 'Heat', ratingKey: null, mediaType: 'movie',
+  });
+  assert.equal(d.requestedAt, '2026-07-01 10:00:00'); // la más antigua entre miembros
 });
 
 test('dismissPendingItem: no toca a otros usuarios ni otras bibliotecas', () => {

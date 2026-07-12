@@ -349,16 +349,27 @@ function UserCard({ user, expanded, onToggle, onReset, onDismiss, onDetail, rese
         className="w-full flex items-center gap-3 p-4 text-left hover:bg-bg-700/40 transition-colors"
       >
         <BalanceRing balance={worst.balance} limit={worst.limitApplied}>
-          {user.avatar ? (
+          {user.isGroup ? (
+            <IconUsers className="w-5 h-5 text-gray-300" />
+          ) : user.avatar ? (
             <img src={user.avatar} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
           ) : (
             <span className="text-xs font-bold">{user.username.slice(0, 2).toUpperCase()}</span>
           )}
         </BalanceRing>
         <div className="flex-1 min-w-0">
-          <div className="font-semibold truncate">{user.username}</div>
-          <div className="text-xs text-gray-500">
-            {pending === 0 ? 'sin pendientes' : `${pending} pendiente(s)`} · {user.libraries.length} biblioteca(s)
+          <div className="font-semibold truncate">
+            {user.username}
+            {user.isGroup && (
+              <span className="ml-1.5 text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-accent-600/20 text-accent-300 ring-1 ring-accent-500/40 align-middle">
+                grupo
+              </span>
+            )}
+          </div>
+          <div className="text-xs text-gray-500 truncate">
+            {user.isGroup && user.members?.length > 0
+              ? user.members.join(', ')
+              : `${pending === 0 ? 'sin pendientes' : `${pending} pendiente(s)`} · ${user.libraries.length} biblioteca(s)`}
           </div>
         </div>
         <PosterStack libraries={user.libraries} />

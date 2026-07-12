@@ -79,9 +79,13 @@ db.exec(`
   -- Un usuario pertenece como mucho a UN grupo (PK de group_members): así el
   -- límite efectivo es determinista sin reglas de desempate entre grupos.
   -- Precedencia: override individual > override de grupo > límite de biblioteca.
+  -- aggregated=1 (issue #4): el grupo entero cuenta como UN solo usuario — cupo
+  -- compartido entre los miembros, y en quota_cache/quota_resets se representa
+  -- con user_id = -id (los ids de Tautulli son siempre positivos).
   CREATE TABLE IF NOT EXISTS groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE
+    name TEXT NOT NULL UNIQUE,
+    aggregated INTEGER NOT NULL DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS group_members (
@@ -129,3 +133,5 @@ addColumnIfMissing('ALTER TABLE decisions_log ADD COLUMN poster_url TEXT');
 addColumnIfMissing('ALTER TABLE quota_cache ADD COLUMN pending_items TEXT');
 addColumnIfMissing("ALTER TABLE decisions_log ADD COLUMN media_type TEXT NOT NULL DEFAULT 'movie'");
 addColumnIfMissing('ALTER TABLE decisions_log ADD COLUMN season_number INTEGER');
+// Issue #4: cupo grupal agregado (el grupo cuenta como un solo usuario).
+addColumnIfMissing('ALTER TABLE groups ADD COLUMN aggregated INTEGER NOT NULL DEFAULT 0');

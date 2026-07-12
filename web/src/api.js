@@ -34,6 +34,7 @@ export const api = {
 
   groups: () => request('/groups'),
   createGroup: (name) => request('/groups', { method: 'POST', body: JSON.stringify({ name }) }),
+  updateGroup: (id, body) => request(`/groups/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteGroup: (id) => request(`/groups/${id}`, { method: 'DELETE' }),
   setGroupMembers: (id, userIds) =>
     request(`/groups/${id}/members`, { method: 'PUT', body: JSON.stringify({ userIds }) }),

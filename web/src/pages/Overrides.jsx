@@ -42,14 +42,41 @@ function GroupCard({ group, users, libraries, onChanged }) {
     onChanged();
   }
 
+  async function toggleAggregated() {
+    await api.updateGroup(group.id, { aggregated: !group.aggregated });
+    onChanged();
+  }
+
   return (
     <div className="card p-4">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="font-semibold">{group.name}</h3>
+        <h3 className="font-semibold">
+          {group.name}
+          {Boolean(group.aggregated) && (
+            <span className="ml-2 text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-accent-600/20 text-accent-300 ring-1 ring-accent-500/40 align-middle">
+              cupo agregado
+            </span>
+          )}
+        </h3>
         <button onClick={removeGroup} className="text-accent-400 text-xs">
           eliminar grupo
         </button>
       </div>
+
+      <label className="flex items-start gap-2 mb-4 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={Boolean(group.aggregated)}
+          onChange={toggleAggregated}
+          className="mt-0.5 accent-accent-500"
+        />
+        <span className="text-xs text-gray-400">
+          <span className="text-gray-200 font-medium">Cupo grupal agregado</span> — el grupo
+          cuenta como un solo usuario: las solicitudes de todos los miembros comparten cupo,
+          verla cualquiera lo libera, y en la pestaña Cupo aparece el grupo en vez de los
+          miembros. Los overrides individuales dejan de aplicar.
+        </span>
+      </label>
 
       <div className="label mb-1.5">Miembros</div>
       <div className="flex flex-wrap gap-1.5 mb-4">

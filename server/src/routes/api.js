@@ -11,7 +11,7 @@ import { getUsers, getLibraries } from '../services/tautulli.js';
 import { listPendingRequests, getSeerrUsers, configureWebhook } from '../services/seerr.js';
 import { radarrConfigured, ping as pingRadarr } from '../services/radarr.js';
 import { getSettings, getSettingsForDisplay, updateSettings } from '../settings.js';
-import { resetQuota, importSeerrHistory, refreshQuotaCache, dismissPendingItem, getPendingItemDetail } from '../quota.js';
+import { resetQuota, importSeerrHistory, refreshQuotaCache, dismissPendingItem, getPendingItemDetail, quotaIdentity } from '../quota.js';
 import { matchByEmailOrUsername } from '../userMatch.js';
 import { runPollCycle } from '../scheduler.js';
 import { getVersionInfo } from '../services/version.js';
@@ -270,12 +270,18 @@ const groupMemberIds = db.prepare('SELECT user_id FROM group_members WHERE group
 const groupOverrideLibs = db.prepare('SELECT library_id FROM group_overrides WHERE group_id = ?');
 
 async function refreshAffected(userIds, libraryIds) {
-  for (const userId of userIds) {
+  // Miembros de un grupo agregado comparten fila de caché: se dedupe por
+  // identidad para no recalcular el mismo grupo una vez por miembro.
+  const cacheIds = [...new Set(userIds.map((id) => quotaIdentity(id).cacheId))];
+  for (const cacheId of cacheIds) {
     for (const libraryId of libraryIds) {
-      await refreshQuotaCache(userId, libraryId);
+      await refreshQuotaCache(cacheId, libraryId);
     }
   }
 }
+
+const enabledLibraryIds = () =>
+  db.prepare('SELECT id FROM libraries WHERE enabled = 1').all().map((l) => l.id);
 
 router.get('/groups', (req, res) => {
   const groups = db.prepare('SELECT * FROM groups ORDER BY name').all();
@@ -293,8 +299,11 @@ router.get('/groups', (req, res) => {
 router.post('/groups', (req, res) => {
   const name = (req.body?.name || '').trim();
   if (!name) return res.status(400).json({ error: 'name_required' });
+  const aggregated = req.body?.aggregated ? 1 : 0;
   try {
-    const { lastInsertRowid } = db.prepare('INSERT INTO groups (name) VALUES (?)').run(name);
+    const { lastInsertRowid } = db
+      .prepare('INSERT INTO groups (name, aggregated) VALUES (?, ?)')
+      .run(name, aggregated);
     res.json({ ok: true, id: lastInsertRowid });
   } catch (err) {
     if (/UNIQUE/.test(err.message)) return res.status(409).json({ error: 'name_taken' });
@@ -302,14 +311,41 @@ router.post('/groups', (req, res) => {
   }
 });
 
+// Activa/desactiva el cupo grupal agregado (issue #4). Al activar, la caché de
+// los miembros se sustituye por una única fila del grupo (user_id = -id); al
+// desactivar, se borra esa fila y cada miembro recupera la suya.
+router.put('/groups/:id', ah(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!groupExists.get(id)) return res.status(404).json({ error: 'group_not_found' });
+  const { aggregated } = req.body || {};
+  if (aggregated === undefined) return res.status(400).json({ error: 'aggregated_required' });
+  db.prepare('UPDATE groups SET aggregated = ? WHERE id = ?').run(aggregated ? 1 : 0, id);
+
+  const libraryIds = enabledLibraryIds();
+  if (aggregated) {
+    // refreshQuotaCache(-id) recalcula el grupo y borra las filas individuales.
+    for (const libraryId of libraryIds) await refreshQuotaCache(-id, libraryId);
+  } else {
+    db.prepare('DELETE FROM quota_cache WHERE user_id = ?').run(-id);
+    await refreshAffected(groupMemberIds.all(id).map((r) => r.user_id), libraryIds);
+  }
+  res.json({ ok: true });
+}));
+
 router.delete('/groups/:id', ah(async (req, res) => {
-  const { id } = req.params;
+  const id = Number(req.params.id);
+  const wasAggregated = Boolean(db.prepare('SELECT aggregated FROM groups WHERE id = ?').get(id)?.aggregated);
   const userIds = groupMemberIds.all(id).map((r) => r.user_id);
-  const libraryIds = groupOverrideLibs.all(id).map((r) => r.library_id);
+  // Un grupo agregado afecta a todas las bibliotecas activas, no solo a las
+  // que tenían override: sus miembros recuperan cupo individual en todas.
+  const libraryIds = wasAggregated
+    ? enabledLibraryIds()
+    : groupOverrideLibs.all(id).map((r) => r.library_id);
   db.transaction(() => {
     db.prepare('DELETE FROM group_overrides WHERE group_id = ?').run(id);
     db.prepare('DELETE FROM group_members WHERE group_id = ?').run(id);
     db.prepare('DELETE FROM groups WHERE id = ?').run(id);
+    db.prepare('DELETE FROM quota_cache WHERE user_id = ?').run(-id);
   })();
   await refreshAffected(userIds, libraryIds);
   res.json({ ok: true });
@@ -332,14 +368,22 @@ router.put('/groups/:id/members', ah(async (req, res) => {
     for (const userId of userIds) insert.run(userId, id);
   })();
 
-  // Solo cambia el límite de quien entra o sale, y solo en bibliotecas donde
-  // el grupo tiene override.
-  const changed = [
-    ...userIds.filter((u) => !before.includes(u)),
-    ...before.filter((u) => !userIds.includes(u)),
-  ];
-  const libraryIds = groupOverrideLibs.all(id).map((r) => r.library_id);
-  await refreshAffected(changed, libraryIds);
+  const removed = before.filter((u) => !userIds.includes(u));
+  const added = userIds.filter((u) => !before.includes(u));
+  const aggregated = Boolean(db.prepare('SELECT aggregated FROM groups WHERE id = ?').get(id)?.aggregated);
+  if (aggregated) {
+    // El cupo compartido cambia con cualquier alta/baja, en todas las
+    // bibliotecas activas: se recalcula la fila del grupo (que además borra las
+    // filas individuales de los que entran) y quien sale recupera la suya.
+    const libraryIds = enabledLibraryIds();
+    for (const libraryId of libraryIds) await refreshQuotaCache(-Number(id), libraryId);
+    await refreshAffected(removed, libraryIds);
+  } else {
+    // Solo cambia el límite de quien entra o sale, y solo en bibliotecas donde
+    // el grupo tiene override.
+    const libraryIds = groupOverrideLibs.all(id).map((r) => r.library_id);
+    await refreshAffected([...added, ...removed], libraryIds);
+  }
   res.json({ ok: true });
 }));
 
@@ -391,6 +435,12 @@ async function buildQuotaByUser() {
     GROUP BY user_id
   `).all();
   const recentMap = new Map(recentRows.map((r) => [r.user_id, r]));
+  const groupMap = new Map(db.prepare('SELECT id, name FROM groups').all().map((g) => [g.id, g]));
+  const membersByGroup = new Map();
+  for (const m of db.prepare('SELECT user_id, group_id FROM group_members').all()) {
+    if (!membersByGroup.has(m.group_id)) membersByGroup.set(m.group_id, []);
+    membersByGroup.get(m.group_id).push(m.user_id);
+  }
 
   function findAvatar(tautulliUser) {
     if (!tautulliUser) return null;
@@ -400,15 +450,32 @@ async function buildQuotaByUser() {
   const byUser = new Map();
   for (const row of rows) {
     if (!byUser.has(row.user_id)) {
-      const tautulliUser = tautulliUserMap.get(row.user_id);
-      byUser.set(row.user_id, {
-        userId: row.user_id,
-        username: tautulliUser?.username ?? `user#${row.user_id}`,
-        avatar: findAvatar(tautulliUser),
-        approved7d: recentMap.get(row.user_id)?.approved7d ?? 0,
-        blocked7d: recentMap.get(row.user_id)?.blocked7d ?? 0,
-        libraries: [],
-      });
+      // Issue #4: user_id negativo = grupo agregado. Sale como una tarjeta
+      // única con el nombre del grupo; los miembros no tienen fila propia.
+      if (row.user_id < 0) {
+        const groupId = -row.user_id;
+        const memberIds = membersByGroup.get(groupId) ?? [];
+        byUser.set(row.user_id, {
+          userId: row.user_id,
+          username: groupMap.get(groupId)?.name ?? `grupo#${groupId}`,
+          avatar: null,
+          isGroup: true,
+          members: memberIds.map((uid) => tautulliUserMap.get(uid)?.username ?? `user#${uid}`),
+          approved7d: memberIds.reduce((sum, uid) => sum + (recentMap.get(uid)?.approved7d ?? 0), 0),
+          blocked7d: memberIds.reduce((sum, uid) => sum + (recentMap.get(uid)?.blocked7d ?? 0), 0),
+          libraries: [],
+        });
+      } else {
+        const tautulliUser = tautulliUserMap.get(row.user_id);
+        byUser.set(row.user_id, {
+          userId: row.user_id,
+          username: tautulliUser?.username ?? `user#${row.user_id}`,
+          avatar: findAvatar(tautulliUser),
+          approved7d: recentMap.get(row.user_id)?.approved7d ?? 0,
+          blocked7d: recentMap.get(row.user_id)?.blocked7d ?? 0,
+          libraries: [],
+        });
+      }
     }
     let pendingItems = [];
     try {
@@ -663,9 +730,12 @@ function buildPendingSummaryRows() {
 async function hydratePendingSummaryUsers(summaries) {
   const users = await getUsers();
   const userMap = new Map(users.map((u) => [u.id, u]));
+  const groupMap = new Map(db.prepare('SELECT id, name FROM groups').all().map((g) => [g.id, g.name]));
   return summaries.map((summary) => ({
     ...summary,
-    username: userMap.get(summary.userId)?.username ?? summary.link?.label ?? `user#${summary.userId}`,
+    username: summary.userId < 0
+      ? groupMap.get(-summary.userId) ?? `grupo#${-summary.userId}`
+      : userMap.get(summary.userId)?.username ?? summary.link?.label ?? `user#${summary.userId}`,
   }));
 }
 

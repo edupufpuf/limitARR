@@ -39,6 +39,15 @@ const getGroupOverride = db.prepare(`
   JOIN group_overrides go ON go.group_id = gm.group_id
   WHERE gm.user_id = ? AND go.library_id = ?
 `);
+const getAggregatedGroupForUser = db.prepare(`
+  SELECT g.id, g.name FROM group_members gm
+  JOIN groups g ON g.id = gm.group_id
+  WHERE gm.user_id = ? AND g.aggregated = 1
+`);
+const getGroupMemberIdsStmt = db.prepare('SELECT user_id FROM group_members WHERE group_id = ?');
+const getGroupOverrideByGroup = db.prepare(
+  'SELECT limit_override FROM group_overrides WHERE group_id = ? AND library_id = ?'
+);
 const getLibrary = db.prepare('SELECT * FROM libraries WHERE id = ?');
 const getResetAt = db.prepare('SELECT reset_at FROM quota_resets WHERE user_id = ? AND library_id = ?');
 const getApprovedTitles = db.prepare(`
@@ -85,6 +94,26 @@ const deleteQuotaCache = db.prepare('DELETE FROM quota_cache WHERE user_id = ? A
 
 function toSqliteDateTime(isoString) {
   return isoString.replace('T', ' ').replace(/\.\d{3}Z$/, '');
+}
+
+// Issue #4: identidad de cupo de un id. Un usuario de un grupo agregado no tiene
+// cupo propio: comparte el del grupo, que vive en quota_cache/quota_resets con
+// user_id = -group_id (los ids de Tautulli son siempre positivos, no chocan).
+// Acepta también ids negativos (el propio grupo), para que las rutas del panel
+// puedan operar directamente sobre la fila del grupo.
+export function quotaIdentity(id) {
+  const numericId = Number(id);
+  if (numericId < 0) {
+    const groupId = -numericId;
+    const memberIds = getGroupMemberIdsStmt.all(groupId).map((r) => r.user_id);
+    return { cacheId: numericId, groupId, memberIds, aggregated: true };
+  }
+  const group = getAggregatedGroupForUser.get(numericId);
+  if (group) {
+    const memberIds = getGroupMemberIdsStmt.all(group.id).map((r) => r.user_id);
+    return { cacheId: -group.id, groupId: group.id, memberIds, aggregated: true };
+  }
+  return { cacheId: numericId, memberIds: [numericId], aggregated: false };
 }
 
 // Precedencia del límite efectivo. Comparaciones con != null a propósito:
@@ -200,23 +229,42 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes) {
 // Se recalcula siempre en vivo a partir del historial de Tautulli y del propio log de decisiones,
 // así que nunca se desincroniza: no hay contador mutable que decrementar/incrementar a mano.
 export async function getBalance(userId, libraryId) {
+  // Issue #4: en un grupo agregado, las aprobadas de TODOS los miembros restan
+  // del mismo cupo y el visionado de CUALQUIER miembro lo libera (caso familia:
+  // solicita uno, lo ven los demás). El override individual no aplica — el
+  // grupo es un solo usuario: override de grupo > límite de biblioteca.
+  const identity = quotaIdentity(userId);
   const library = getLibrary.get(libraryId);
-  const override = getOverride.get(userId, libraryId);
-  const groupOverride = getGroupOverride.get(userId, libraryId);
-  const limit = resolveLimit(
-    override?.limit_override ?? null,
-    groupOverride?.limit_override ?? null,
-    library.default_limit
-  );
-  const resetAt = getResetAt.get(userId, libraryId)?.reset_at ?? '0000-01-01';
+  let limit;
+  if (identity.aggregated) {
+    const groupOverride = getGroupOverrideByGroup.get(identity.groupId, libraryId);
+    limit = resolveLimit(null, groupOverride?.limit_override ?? null, library.default_limit);
+  } else {
+    const override = getOverride.get(identity.cacheId, libraryId);
+    const groupOverride = getGroupOverride.get(identity.cacheId, libraryId);
+    limit = resolveLimit(
+      override?.limit_override ?? null,
+      groupOverride?.limit_override ?? null,
+      library.default_limit
+    );
+  }
+  const resetAt = getResetAt.get(identity.cacheId, libraryId)?.reset_at ?? '0000-01-01';
 
-  const approved = getApprovedTitles.all(userId, libraryId, resetAt);
+  const approved = identity.memberIds.flatMap((memberId) =>
+    getApprovedTitles.all(memberId, libraryId, resetAt)
+  );
   if (library.section_type === 'show') {
-    const history = await getUserEpisodeHistory(userId, libraryId);
+    const history = [];
+    for (const memberId of identity.memberIds) {
+      history.push(...(await getUserEpisodeHistory(memberId, libraryId)));
+    }
     return computeTvBalance(limit, approved, history);
   }
 
-  const history = await getUserMovieHistory(userId, libraryId);
+  const history = [];
+  for (const memberId of identity.memberIds) {
+    history.push(...(await getUserMovieHistory(memberId, libraryId)));
+  }
   const watchedTitles = new Set(
     history.filter((h) => h.percent >= WATCHED_THRESHOLD).map((h) => normalize(h.title))
   );
@@ -234,7 +282,7 @@ export async function getBalance(userId, libraryId) {
 // "Resetea" el cupo de un usuario+biblioteca: las aprobaciones anteriores a ahora
 // dejan de contar como pendientes, sin borrar el historial del registro.
 export function resetQuota(userId, libraryId) {
-  upsertReset.run(userId, libraryId);
+  upsertReset.run(quotaIdentity(userId).cacheId, libraryId);
 }
 
 // rating_key de Plex para enlazar cada pendiente con su página de estadísticas
@@ -279,16 +327,23 @@ async function lookupRatingKey({ title, mediaType, tmdbId, seasonNumber }) {
 // cambie el resultado de getBalance (override, reset, ...) tiene que llamar esto
 // para que el panel lo refleje al momento en vez de esperar al siguiente sondeo.
 export async function refreshQuotaCache(userId, libraryId) {
+  // Issue #4: la caché de un miembro de grupo agregado es la del grupo — se
+  // escribe bajo -group_id y se borran las filas individuales de los miembros,
+  // que ya no deben aparecer en el panel.
+  const identity = quotaIdentity(userId);
   const library = getLibrary.get(libraryId);
   if (!library?.enabled) {
-    deleteQuotaCache.run(userId, libraryId);
+    deleteQuotaCache.run(identity.cacheId, libraryId);
     return { limit: 0, outstanding: 0, balance: 0, pendingItems: [], disabled: true };
   }
-  const { limit, outstanding, balance, pendingItems } = await getBalance(userId, libraryId);
+  const { limit, outstanding, balance, pendingItems } = await getBalance(identity.cacheId, libraryId);
   for (const item of pendingItems) {
     item.ratingKey = await lookupRatingKey(item);
   }
-  upsertQuotaCache.run(userId, libraryId, limit, outstanding, balance, JSON.stringify(pendingItems));
+  if (identity.aggregated) {
+    for (const memberId of identity.memberIds) deleteQuotaCache.run(memberId, libraryId);
+  }
+  upsertQuotaCache.run(identity.cacheId, libraryId, limit, outstanding, balance, JSON.stringify(pendingItems));
   return { limit, outstanding, balance, pendingItems };
 }
 
@@ -341,8 +396,8 @@ function matchesPendingRow(row, { tmdbId, seasonNumber, title }) {
 // solicitó/aprobó (decisions_log) y quién lo ha visto, cuánto y cuándo
 // (historial de Tautulli del ítem, todas las cuentas, agregado por usuario).
 export async function getPendingItemDetail(userId, libraryId, { tmdbId, seasonNumber, title, ratingKey, mediaType }) {
-  const matching = getPendingApprovedRows
-    .all(userId, libraryId)
+  const matching = quotaIdentity(userId)
+    .memberIds.flatMap((memberId) => getPendingApprovedRows.all(memberId, libraryId))
     .filter((row) => matchesPendingRow(row, { tmdbId, seasonNumber, title }));
   const requestedAt = matching.map((r) => r.created_at).sort()[0] ?? null;
 
@@ -372,10 +427,12 @@ export async function getPendingItemDetail(userId, libraryId, { tmdbId, seasonNu
 // reconciliación automática con las canceladas.
 export function dismissPendingItem(userId, libraryId, { tmdbId, seasonNumber, title }) {
   let dismissed = 0;
-  for (const row of getPendingApprovedRows.all(userId, libraryId)) {
-    if (matchesPendingRow(row, { tmdbId, seasonNumber, title })) {
-      markVoided.run(row.id);
-      dismissed += 1;
+  for (const memberId of quotaIdentity(userId).memberIds) {
+    for (const row of getPendingApprovedRows.all(memberId, libraryId)) {
+      if (matchesPendingRow(row, { tmdbId, seasonNumber, title })) {
+        markVoided.run(row.id);
+        dismissed += 1;
+      }
     }
   }
   return dismissed;
