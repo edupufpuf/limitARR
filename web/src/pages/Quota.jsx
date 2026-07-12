@@ -222,13 +222,16 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss }) 
   const tautulliUrl = statsBase && item.ratingKey ? `${statsBase}/info?rating_key=${item.ratingKey}` : null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
+    // dvh y no vh: en Android/iOS la barra de URL del navegador come parte del
+    // viewport y con 90vh el pie del modal (botones) quedaba cortado.
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
       <div
-        className="card w-full max-w-lg max-h-[90vh] overflow-y-auto p-5"
+        className="card w-full max-w-lg max-h-[85vh] overflow-y-auto p-4 sm:p-5"
+        style={{ maxHeight: '85dvh' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex gap-4">
-          <div className="w-24 h-36 rounded-lg overflow-hidden bg-bg-600 flex-shrink-0">
+        <div className="flex gap-3 sm:gap-4">
+          <div className="w-20 h-[7.5rem] sm:w-24 sm:h-36 rounded-lg overflow-hidden bg-bg-600 flex-shrink-0">
             {item.posterUrl ? (
               <img src={item.posterUrl} alt="" className="w-full h-full object-cover" />
             ) : (
@@ -246,17 +249,17 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss }) 
             {item.unavailable && (
               <div className="text-xs text-amber-300 mt-1">Aún no disponible en Plex — no resta cupo.</div>
             )}
-            <dl className="mt-3 space-y-1.5 text-sm">
+            <dl className="mt-3 space-y-1.5 text-xs sm:text-sm">
               <div className="flex gap-2">
-                <dt className="text-gray-500 w-28 flex-shrink-0">Solicitada</dt>
+                <dt className="text-gray-500 w-[5.5rem] sm:w-28 flex-shrink-0">Solicitada</dt>
                 <dd>{requestedAtMs ? `${fmtDate(requestedAtMs)} · ${daysAgo(requestedAtMs)}` : detail ? 'sin registro' : '…'}</dd>
               </div>
               <div className="flex gap-2">
-                <dt className="text-gray-500 w-28 flex-shrink-0">Último visionado</dt>
+                <dt className="text-gray-500 w-[5.5rem] sm:w-28 flex-shrink-0">Últ. visionado</dt>
                 <dd>{detail ? (lastWatchMs ? `${fmtDate(lastWatchMs)} · ${daysAgo(lastWatchMs)}` : 'nadie la ha empezado') : '…'}</dd>
               </div>
               <div className="flex gap-2">
-                <dt className="text-gray-500 w-28 flex-shrink-0">Avance</dt>
+                <dt className="text-gray-500 w-[5.5rem] sm:w-28 flex-shrink-0">Avance</dt>
                 <dd className={`font-bold tabular-nums ${percentColor(item.watchedPercent ?? 0)}`}>
                   {item.watchedPercent ?? 0}%
                   <span className="text-gray-500 font-normal"> del solicitante</span>
@@ -276,35 +279,39 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss }) 
             </p>
           )}
           {detail && detail.watchers.length > 0 && (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-gray-500">
-                  <th className="font-normal pb-1">Usuario</th>
-                  <th className="font-normal pb-1 text-right">Veces</th>
-                  <th className="font-normal pb-1 text-right">Último visionado</th>
-                  <th className="font-normal pb-1 text-right">%</th>
-                </tr>
-              </thead>
-              <tbody>
-                {detail.watchers.map((w) => (
-                  <tr key={w.userId} className="border-t border-bg-700">
-                    <td className="py-1.5">
-                      {w.username}
-                      {w.userId === user.userId && (
-                        <span className="ml-1.5 text-[9px] uppercase tracking-wide text-accent-400">solicitante</span>
-                      )}
-                    </td>
-                    <td className="py-1.5 text-right tabular-nums">{w.plays}</td>
-                    <td className="py-1.5 text-right text-gray-400">
-                      {w.lastWatchedAt ? daysAgo(w.lastWatchedAt) : '—'}
-                    </td>
-                    <td className={`py-1.5 text-right font-bold tabular-nums ${percentColor(w.maxPercent)}`}>
-                      {w.maxPercent}%
-                    </td>
+            // overflow-x-auto: en pantallas estrechas la tabla scrollea dentro
+            // del modal en vez de aplastar las columnas o desbordar la página.
+            <div className="overflow-x-auto -mx-1 px-1">
+              <table className="w-full text-xs sm:text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-gray-500">
+                    <th className="font-normal pb-1 pr-3">Usuario</th>
+                    <th className="font-normal pb-1 pr-3 text-right">Veces</th>
+                    <th className="font-normal pb-1 pr-3 text-right whitespace-nowrap">Últ. visionado</th>
+                    <th className="font-normal pb-1 text-right">%</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {detail.watchers.map((w) => (
+                    <tr key={w.userId} className="border-t border-bg-700">
+                      <td className="py-1.5 pr-3 whitespace-nowrap">
+                        {w.username}
+                        {w.userId === user.userId && (
+                          <span className="ml-1.5 text-[9px] uppercase tracking-wide text-accent-400">solicitante</span>
+                        )}
+                      </td>
+                      <td className="py-1.5 pr-3 text-right tabular-nums">{w.plays}</td>
+                      <td className="py-1.5 pr-3 text-right text-gray-400 whitespace-nowrap">
+                        {w.lastWatchedAt ? daysAgo(w.lastWatchedAt) : '—'}
+                      </td>
+                      <td className={`py-1.5 text-right font-bold tabular-nums ${percentColor(w.maxPercent)}`}>
+                        {w.maxPercent}%
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
 
