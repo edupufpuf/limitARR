@@ -108,6 +108,8 @@ function QuotaBar({ balance, limit }) {
 // Póster grande con el título en overlay sobre gradiente, estilo Seerr. Si la
 // película ya existe en Plex (hay ratingKey) y hay URL de Tautulli, el póster
 // enlaza a su página de estadísticas; el ✕ (al pasar el ratón) la quita del cupo.
+// Una película "no disponible" en Radarr (sin fichero aún) se enseña apagada y
+// con etiqueta: sigue pendiente pero no resta cupo hasta que se descargue.
 function PendingPoster({ item, statsBase, onDismiss }) {
   const href = statsBase && item.ratingKey ? `${statsBase}/info?rating_key=${item.ratingKey}` : null;
   const Wrapper = href ? 'a' : 'div';
@@ -115,17 +117,22 @@ function PendingPoster({ item, statsBase, onDismiss }) {
     <Wrapper
       {...(href ? { href, target: '_blank', rel: 'noreferrer' } : {})}
       className="relative block w-16 h-24 rounded-lg overflow-hidden shadow-card group flex-shrink-0"
-      title={item.title ?? ''}
+      title={item.unavailable ? `${item.title ?? ''} — no disponible en Radarr, no resta cupo` : item.title ?? ''}
     >
       {item.posterUrl ? (
         <img
           src={item.posterUrl}
           alt=""
           loading="lazy"
-          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
+          className={`w-full h-full object-cover transition-transform duration-300 group-hover:scale-110 ${item.unavailable ? 'grayscale opacity-60' : ''}`}
         />
       ) : (
         <div className="w-full h-full bg-gradient-to-br from-bg-600 to-bg-700 flex items-center justify-center text-xl">🎬</div>
+      )}
+      {item.unavailable && (
+        <span className="absolute top-1 left-1 rounded bg-black/75 px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-amber-300 pointer-events-none">
+          no cuenta
+        </span>
       )}
       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent pt-6 pb-1 px-1.5 pointer-events-none">
         <span className="block text-[9px] leading-tight text-gray-100 font-medium line-clamp-2">

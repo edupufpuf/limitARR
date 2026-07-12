@@ -49,7 +49,8 @@ seerr/tautulli):
 3. Abre el panel en `http://<host>:5150` — como no hay contraseña
    definida, pedirá crearla en el primer acceso.
 4. Pestaña **Configuración**: URL + API key de Seerr y Tautulli (si no
-   se rellenaron por env, ver abajo).
+   se rellenaron por env, ver abajo). Opcionalmente también Radarr, para
+   que las películas aún sin descargar no resten cupo (ver "Cupo").
 5. Pestaña **Bibliotecas**: pulsa "Sincronizar desde Tautulli" para
    descubrirlas, márcalas `standard`/`4k` y ponles el límite por defecto.
 6. Si ya había solicitudes aprobadas antes de instalarlo (o admins
@@ -87,6 +88,12 @@ saldo = límite − (películas aprobadas para ese usuario en esa biblioteca que
   verdad (sin borrar el historial del registro).
 - Para quitar UNA sola película del cupo (sin resetear el resto), ✕ al
   pasar el ratón sobre su carátula en la tarjeta desplegada.
+- **Con Radarr conectado** (Configuración, opcional): una película
+  aprobada que aún no tiene fichero en Radarr — "No disponible":
+  faltante, sin estrenar o no encontrada — no resta cupo hasta que se
+  descarga de verdad. En el panel se enseña igualmente su carátula,
+  apagada y con la etiqueta "no cuenta". Sin Radarr configurado todo
+  funciona como antes (toda aprobada no vista cuenta).
 
 ## Panel
 

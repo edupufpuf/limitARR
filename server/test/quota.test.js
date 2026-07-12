@@ -39,7 +39,7 @@ test('computeBalance: aprobada y no vista resta cupo', () => {
   assert.equal(r.balance, 0);
   assert.equal(r.outstanding, 1);
   assert.deepEqual(r.pendingItems, [
-    { title: 'Matrix', mediaType: 'movie', tmdbId: 603, seasonNumber: null, posterUrl: 'https://img/x.jpg' },
+    { title: 'Matrix', mediaType: 'movie', tmdbId: 603, seasonNumber: null, posterUrl: 'https://img/x.jpg', unavailable: false },
   ]);
 });
 
@@ -77,6 +77,37 @@ test('computeBalance: mismo título aprobado dos veces no duplica pendingItems',
   const r = computeBalance(2, approved, new Set());
   assert.equal(r.outstanding, 2); // sigue restando 2 del cupo
   assert.equal(r.pendingItems.length, 1); // pero solo se muestra una vez
+});
+
+// --- issue #1: no contabilizar películas "No disponible" en Radarr ---
+
+test('computeBalance: no disponible en Radarr no resta cupo pero sigue listada', () => {
+  const approved = [
+    { media_title: 'Matrix', tmdb_id: 603 },
+    { media_title: 'Estreno Futuro', tmdb_id: 999 },
+  ];
+  const r = computeBalance(2, approved, new Set(), new Set([999]));
+  assert.equal(r.outstanding, 1); // solo Matrix cuenta
+  assert.equal(r.balance, 1);
+  assert.deepEqual(
+    r.pendingItems.map((i) => [i.title, i.unavailable]),
+    [['Matrix', false], ['Estreno Futuro', true]]
+  );
+});
+
+test('computeBalance: vista gana a no disponible (no aparece en pendientes)', () => {
+  const approved = [{ media_title: 'Matrix', tmdb_id: 603 }];
+  const r = computeBalance(1, approved, new Set([normalize('Matrix')]), new Set([603]));
+  assert.equal(r.outstanding, 0);
+  assert.equal(r.balance, 1);
+  assert.deepEqual(r.pendingItems, []);
+});
+
+test('computeBalance: fila sin tmdb_id nunca se marca no disponible', () => {
+  const approved = [{ media_title: 'Vieja Importada', tmdb_id: null }];
+  const r = computeBalance(1, approved, new Set(), new Set([999]));
+  assert.equal(r.outstanding, 1);
+  assert.equal(r.pendingItems[0].unavailable, false);
 });
 
 // --- dismissPendingItem (usa la DB en memoria del script de test) ---

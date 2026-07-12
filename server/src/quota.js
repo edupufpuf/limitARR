@@ -13,6 +13,7 @@ import {
   getApprovedRequestsForUser,
   getMediaDetails,
 } from './services/seerr.js';
+import { getUnavailableTmdbIds } from './services/radarr.js';
 import { matchByEmailOrUsername } from './userMatch.js';
 
 // Tautulli's own "watched" threshold; below this a play doesn't free up quota.
@@ -97,9 +98,13 @@ export function resolveLimit(userOverride, groupOverride, defaultLimit) {
 // Tautulli/Seerr: dado el límite ya resuelto, las filas aprobadas y el set de
 // títulos vistos, decide cuántas están pendientes y cuál es el saldo. Nunca
 // negativo: por debajo de 0 se queda en 0 (el bloqueo ya lo gestiona balance < 1).
-export function computeBalance(limit, approvedRows, watchedTitles) {
+export function computeBalance(limit, approvedRows, watchedTitles, unavailableTmdbIds = new Set()) {
   const pending = approvedRows.filter((r) => !watchedTitles.has(normalize(r.media_title)));
-  const outstanding = pending.length;
+  // Issue #1: las "No disponible" en Radarr (sin fichero: faltante, sin estrenar
+  // o no encontrada) no restan cupo, pero sí se listan como pendientes (con
+  // marca) para que se vea que la solicitud existe y aún no cuenta.
+  const isUnavailable = (r) => r.tmdb_id != null && unavailableTmdbIds.has(r.tmdb_id);
+  const outstanding = pending.filter((r) => !isUnavailable(r)).length;
 
   const seenTitles = new Set();
   const pendingItems = [];
@@ -113,6 +118,7 @@ export function computeBalance(limit, approvedRows, watchedTitles) {
       tmdbId: r.tmdb_id,
       seasonNumber: r.season_number ?? null,
       posterUrl: r.poster_url ?? null,
+      unavailable: isUnavailable(r),
     });
   }
 
@@ -206,7 +212,8 @@ export async function getBalance(userId, libraryId) {
     history.filter((h) => h.percent >= WATCHED_THRESHOLD).map((h) => normalize(h.title))
   );
   await hydrateMissingPosters(approved);
-  return computeBalance(limit, approved, watchedTitles);
+  const unavailable = await getUnavailableTmdbIds(approved.map((r) => r.tmdb_id));
+  return computeBalance(limit, approved, watchedTitles, unavailable);
 }
 
 // "Resetea" el cupo de un usuario+biblioteca: las aprobaciones anteriores a ahora
