@@ -1,10 +1,21 @@
 import { db } from './db.js';
 
-const KEYS = ['seerr_url', 'seerr_api_key', 'seerr_public_url', 'tautulli_url', 'tautulli_api_key', 'tautulli_public_url'];
+const KEYS = [
+  'seerr_url',
+  'seerr_api_key',
+  'seerr_public_url',
+  'tautulli_url',
+  'tautulli_api_key',
+  'tautulli_public_url',
+  'tv_season_watched_percent',
+];
 const URL_KEYS = new Set(['seerr_url', 'seerr_public_url', 'tautulli_url', 'tautulli_public_url']);
 // Claves opcionales: enviar cadena vacía las borra (en el resto, vacío = "no cambiar",
 // para poder guardar sin reenviar API keys ya configuradas).
-const CLEARABLE_KEYS = new Set(['seerr_public_url', 'tautulli_public_url']);
+const CLEARABLE_KEYS = new Set(['seerr_public_url', 'tautulli_public_url', 'tv_season_watched_percent']);
+// Issue #9: % de episodios vistos para dar una temporada por vista. Solo se
+// guarda si es un entero 1-100; vacío la borra (vuelve al default del código).
+const PERCENT_KEYS = new Set(['tv_season_watched_percent']);
 
 function normalize(key, value) {
   const trimmed = value.trim();
@@ -52,6 +63,12 @@ export function updateSettings(partial) {
       if (CLEARABLE_KEYS.has(key)) deleteStmt.run(key);
       continue;
     }
+    if (PERCENT_KEYS.has(key)) {
+      const n = Number(value.trim());
+      if (!Number.isInteger(n) || n < 1 || n > 100) continue;
+      upsert.run(key, String(n));
+      continue;
+    }
     upsert.run(key, normalize(key, value));
   }
 }
@@ -82,5 +99,6 @@ export function getSettingsForDisplay() {
     tautulli_api_key_set: Boolean(s.tautulli_api_key),
     tautulli_api_key_masked: mask(s.tautulli_api_key),
     tautulli_public_url: s.tautulli_public_url,
+    tv_season_watched_percent: s.tv_season_watched_percent,
   };
 }

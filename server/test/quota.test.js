@@ -8,7 +8,11 @@ import {
   listStaleOutstandingPairs,
   getPendingItemDetail,
   quotaIdentity,
+  buildWatchedEpisodeIndex,
+  seasonWatchState,
+  getSeasonWatchedPercent,
 } from '../src/quota.js';
+import { setRawSetting } from '../src/settings.js';
 import { db } from '../src/db.js';
 
 test('resolveLimit: individual gana a grupo, grupo gana a biblioteca', () => {
@@ -317,4 +321,75 @@ test('dismissPendingItem: no toca a otros usuarios ni otras bibliotecas', () => 
   assert.equal(dismissed, 1);
   assert.equal(pendingCount.get(13, 2).n, 1);
   assert.equal(pendingCount.get(14, 1).n, 1);
+});
+
+// --- Issue #9: temporadas vistas que no salían del cupo ---
+
+const friendsHistory = [
+  // T1: 3 de 4 episodios vistos, uno de ellos con rating_key muerto (re-escaneo
+  // de Plex) que solo matchea por serie+temporada+episodio.
+  { ratingKey: 'e1', showRatingKey: 'show1', showTitle: 'Friends', seasonNumber: 1, episodeNumber: 1, percent: 95 },
+  { ratingKey: 'muerto', showRatingKey: 'show1', showTitle: 'Friends', seasonNumber: 1, episodeNumber: 2, percent: 97 },
+  { ratingKey: 'e3', showRatingKey: 'show1', showTitle: 'Friends', seasonNumber: 1, episodeNumber: 3, percent: 40 }, // no llega al 85
+  { ratingKey: 'e4', showRatingKey: 'show1', showTitle: 'Friends', seasonNumber: 1, episodeNumber: 4, percent: 90 },
+];
+
+const friendsSeason1 = [
+  { ratingKey: 'e1', episodeNumber: 1 },
+  { ratingKey: 'e2-nuevo', episodeNumber: 2 },
+  { ratingKey: 'e3', episodeNumber: 3 },
+  { ratingKey: 'e4', episodeNumber: 4 },
+];
+
+test('seasonWatchState: episodio con rating_key muerto matchea por serie+temporada+episodio', () => {
+  const index = buildWatchedEpisodeIndex(friendsHistory);
+  const state = seasonWatchState(index, friendsSeason1, { showTitle: 'Friends', showRatingKey: 'show1', seasonNumber: 1 }, 100);
+  assert.equal(state.watchedCount, 3); // e1, e2 (por número), e4 — e3 por debajo del 85
+  assert.equal(state.total, 4);
+  assert.equal(state.percent, 75);
+  assert.equal(state.complete, false); // umbral 100: falta e3
+});
+
+test('seasonWatchState: con umbral 75 la temporada ya cuenta como vista', () => {
+  const index = buildWatchedEpisodeIndex(friendsHistory);
+  const state = seasonWatchState(index, friendsSeason1, { showTitle: 'Friends', showRatingKey: 'show1', seasonNumber: 1 }, 75);
+  assert.equal(state.complete, true);
+});
+
+test('seasonWatchState: matchea por título aunque cambien todos los rating_keys', () => {
+  const index = buildWatchedEpisodeIndex([
+    { ratingKey: 'viejo1', showRatingKey: 'viejoShow', showTitle: 'Friends', seasonNumber: 2, episodeNumber: 1, percent: 95 },
+  ]);
+  const episodes = [{ ratingKey: 'nuevo1', episodeNumber: 1 }];
+  const state = seasonWatchState(index, episodes, { showTitle: 'friends', showRatingKey: 'showNuevo', seasonNumber: 2 }, 85);
+  assert.equal(state.watchedCount, 1);
+  assert.equal(state.complete, true);
+});
+
+test('seasonWatchState: temporada sin episodios en Plex nunca cuenta como vista', () => {
+  const index = buildWatchedEpisodeIndex(friendsHistory);
+  const state = seasonWatchState(index, [], { showTitle: 'Friends', showRatingKey: 'show1', seasonNumber: 9 }, 85);
+  assert.equal(state.complete, false);
+  assert.equal(state.percent, 0);
+});
+
+test('seasonWatchState: un episodio de otra temporada no cuenta', () => {
+  const index = buildWatchedEpisodeIndex([
+    { ratingKey: 'x', showRatingKey: 'show1', showTitle: 'Friends', seasonNumber: 1, episodeNumber: 1, percent: 95 },
+  ]);
+  const episodes = [{ ratingKey: 'otro', episodeNumber: 1 }];
+  const state = seasonWatchState(index, episodes, { showTitle: 'Friends', showRatingKey: 'show1', seasonNumber: 2 }, 85);
+  assert.equal(state.watchedCount, 0);
+});
+
+test('getSeasonWatchedPercent: default 85, respeta el ajuste y descarta basura', () => {
+  assert.equal(getSeasonWatchedPercent(), 85);
+  setRawSetting('tv_season_watched_percent', '70');
+  assert.equal(getSeasonWatchedPercent(), 70);
+  setRawSetting('tv_season_watched_percent', 'patata');
+  assert.equal(getSeasonWatchedPercent(), 85);
+  setRawSetting('tv_season_watched_percent', '0');
+  assert.equal(getSeasonWatchedPercent(), 85);
+  setRawSetting('tv_season_watched_percent', '100');
+  assert.equal(getSeasonWatchedPercent(), 100);
 });

@@ -1,5 +1,6 @@
 import { db } from './db.js';
 import { config } from './config.js';
+import { getRawSetting } from './settings.js';
 import {
   getItemWatchHistory,
   getSeasonEpisodes,
@@ -19,6 +20,17 @@ import { matchByEmailOrUsername } from './userMatch.js';
 
 // Tautulli's own "watched" threshold; below this a play doesn't free up quota.
 const WATCHED_THRESHOLD = 85;
+
+// Issue #9: % de episodios vistos a partir del cual una temporada cuenta como
+// vista y libera cupo (no hace falta el 100%: un episodio suelto sin ver, o un
+// especial, dejaba la temporada ocupando cupo para siempre). Configurable en
+// Configuración; 100 recupera el comportamiento antiguo.
+const DEFAULT_SEASON_WATCHED_PERCENT = 85;
+
+export function getSeasonWatchedPercent() {
+  const value = Number(getRawSetting('tv_season_watched_percent'));
+  return Number.isFinite(value) && value >= 1 && value <= 100 ? value : DEFAULT_SEASON_WATCHED_PERCENT;
+}
 
 // El único enlace entre "aprobada en Seerr" y "vista en Tautulli" es el título en
 // texto, así que hay que ser tolerante con acentos, mayúsculas, puntuación y
@@ -172,14 +184,48 @@ async function hydrateMissingPosters(approvedRows) {
   }
 }
 
-async function computeTvBalance(limit, approvedRows, watchedEpisodes) {
+// Issue #9: índice de episodios vistos con tres llaves. rating_key es la
+// principal, pero muere cuando Plex re-escanea o se sustituye un archivo (el
+// episodio recibe rating_key nuevo y las reproducciones viejas apuntan al
+// muerto). De respaldo: serie+temporada+episodio, tanto por rating_key de la
+// serie como por título normalizado.
+export function buildWatchedEpisodeIndex(watchedEpisodes) {
+  const ratingKeys = new Set();
+  const byShowKey = new Set();
+  const byTitle = new Set();
+  for (const h of watchedEpisodes) {
+    if (h.percent < WATCHED_THRESHOLD) continue;
+    if (h.ratingKey) ratingKeys.add(h.ratingKey);
+    if (Number.isFinite(h.seasonNumber) && Number.isFinite(h.episodeNumber)) {
+      if (h.showRatingKey) byShowKey.add(`${h.showRatingKey}:${h.seasonNumber}:${h.episodeNumber}`);
+      if (h.showTitle) byTitle.add(`${normalize(h.showTitle)}:${h.seasonNumber}:${h.episodeNumber}`);
+    }
+  }
+  return { ratingKeys, byShowKey, byTitle };
+}
+
+// Estado de visionado de una temporada: episodios vistos / totales, % y si ya
+// cuenta como vista según el umbral (issue #9). Pura, para poder testearla.
+export function seasonWatchState(index, episodes, { showTitle, showRatingKey, seasonNumber }, seasonWatchedPercent) {
+  const normalizedTitle = showTitle ? normalize(showTitle) : null;
+  const watchedCount = episodes.filter(
+    (episode) =>
+      index.ratingKeys.has(episode.ratingKey) ||
+      (showRatingKey != null && index.byShowKey.has(`${showRatingKey}:${seasonNumber}:${episode.episodeNumber}`)) ||
+      (normalizedTitle != null && index.byTitle.has(`${normalizedTitle}:${seasonNumber}:${episode.episodeNumber}`))
+  ).length;
+  const percent = episodes.length > 0 ? Math.round((watchedCount / episodes.length) * 100) : 0;
+  return {
+    watchedCount,
+    total: episodes.length,
+    percent,
+    complete: episodes.length > 0 && percent >= seasonWatchedPercent,
+  };
+}
+
+async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatchedPercent = DEFAULT_SEASON_WATCHED_PERCENT) {
   await hydrateMissingPosters(approvedRows);
-  const watchedRatingKeys = new Set(
-    watchedEpisodes
-      .filter((h) => h.percent >= WATCHED_THRESHOLD)
-      .map((h) => h.ratingKey)
-      .filter(Boolean)
-  );
+  const watchedIndex = buildWatchedEpisodeIndex(watchedEpisodes);
 
   const pending = [];
   const showDetailsCache = new Map();
@@ -200,16 +246,27 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes) {
       seasonEpisodesCache.set(cacheKey, await getSeasonEpisodes(showRatingKey, row.season_number));
     }
     const episodes = seasonEpisodesCache.get(cacheKey);
-    const complete = episodes.length > 0 && episodes.every((episode) => watchedRatingKeys.has(episode.ratingKey));
-    if (!complete) {
+    const state = seasonWatchState(
+      watchedIndex,
+      episodes,
+      {
+        showTitle: row.media_title.replace(/ - Temporada \d+$/, ''),
+        showRatingKey,
+        seasonNumber: row.season_number,
+      },
+      seasonWatchedPercent
+    );
+    if (!state.complete) {
       // Mismo criterio que en películas (issue #1): una temporada que Seerr aún
       // no da por disponible (status < 4: nada descargado) no resta cupo, pero
       // se lista con marca. seasonStatuses null = error de red → cuenta.
       const status = details?.seasonStatuses?.[row.season_number];
       row.unavailable = details?.seasonStatuses != null && (status ?? 0) < 4;
       // Issue #7: avance de la temporada = fracción de episodios ya vistos.
-      const watchedCount = episodes.filter((episode) => watchedRatingKeys.has(episode.ratingKey)).length;
-      row.watched_percent = episodes.length > 0 ? Math.round((watchedCount / episodes.length) * 100) : 0;
+      row.watched_percent = state.percent;
+      // Issue #8: "vistos/totales" para la etiqueta de la carátula y el detalle.
+      row.episodes_watched = state.watchedCount;
+      row.episodes_total = state.total;
       pending.push(row);
     }
   }
@@ -223,6 +280,8 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes) {
     posterUrl: r.poster_url ?? null,
     unavailable: r.unavailable ?? false,
     watchedPercent: r.watched_percent ?? 0,
+    episodesWatched: r.episodes_watched ?? null,
+    episodesTotal: r.episodes_total ?? null,
   }));
 
   return {
@@ -266,7 +325,7 @@ export async function getBalance(userId, libraryId) {
     for (const memberId of identity.memberIds) {
       history.push(...(await getUserEpisodeHistory(memberId, libraryId)));
     }
-    return computeTvBalance(limit, approved, history);
+    return computeTvBalance(limit, approved, history, getSeasonWatchedPercent());
   }
 
   const history = [];

@@ -19,6 +19,7 @@ export default function Settings() {
     tautulli_url: '',
     tautulli_api_key: '',
     tautulli_public_url: '',
+    tv_season_watched_percent: '',
   });
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -41,6 +42,7 @@ export default function Settings() {
         seerr_public_url: s.seerr_public_url ?? '',
         tautulli_url: s.tautulli_url ?? '',
         tautulli_public_url: s.tautulli_public_url ?? '',
+        tv_season_watched_percent: s.tv_season_watched_percent ?? '',
       }));
     });
     api.webhookInfo().then((r) => setWebhookUrl(r.url));
@@ -170,6 +172,22 @@ export default function Settings() {
             placeholder="http://192.168.1.10:8181 — vacío = usar la URL de arriba"
             className="input"
           />
+        </fieldset>
+
+        <fieldset>
+          <legend className="text-sm font-semibold text-accent-400 mb-2">Cupo de series</legend>
+          <label className="label">Temporada vista al alcanzar el % de episodios</label>
+          <input
+            value={form.tv_season_watched_percent}
+            onChange={(e) => setForm({ ...form, tv_season_watched_percent: e.target.value })}
+            placeholder="85 — vacío = valor por defecto"
+            inputMode="numeric"
+            className="input w-40"
+          />
+          <p className="text-xs text-gray-500 mt-2">
+            Una temporada libera cupo cuando este % de sus episodios está visto
+            (al 85% cada uno, umbral de Tautulli). 100 exige verla entera.
+          </p>
         </fieldset>
 
         <div className="flex flex-wrap items-center gap-3 pt-2">
