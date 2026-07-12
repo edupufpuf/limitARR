@@ -98,7 +98,7 @@ export function resolveLimit(userOverride, groupOverride, defaultLimit) {
 // Tautulli/Seerr: dado el límite ya resuelto, las filas aprobadas y el set de
 // títulos vistos, decide cuántas están pendientes y cuál es el saldo. Nunca
 // negativo: por debajo de 0 se queda en 0 (el bloqueo ya lo gestiona balance < 1).
-export function computeBalance(limit, approvedRows, watchedTitles, unavailableTmdbIds = new Set()) {
+export function computeBalance(limit, approvedRows, watchedTitles, unavailableTmdbIds = new Set(), percentByTitle = new Map()) {
   const pending = approvedRows.filter((r) => !watchedTitles.has(normalize(r.media_title)));
   // Issue #1: las "No disponible" en Radarr (sin fichero: faltante, sin estrenar
   // o no encontrada) no restan cupo, pero sí se listan como pendientes (con
@@ -119,6 +119,8 @@ export function computeBalance(limit, approvedRows, watchedTitles, unavailableTm
       seasonNumber: r.season_number ?? null,
       posterUrl: r.poster_url ?? null,
       unavailable: isUnavailable(r),
+      // Issue #7: % de avance del solicitante, para la rueda de la carátula.
+      watchedPercent: Math.round(percentByTitle.get(key) ?? 0),
     });
   }
 
@@ -168,7 +170,12 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes) {
     }
     const episodes = seasonEpisodesCache.get(cacheKey);
     const complete = episodes.length > 0 && episodes.every((episode) => watchedRatingKeys.has(episode.ratingKey));
-    if (!complete) pending.push(row);
+    if (!complete) {
+      // Issue #7: avance de la temporada = fracción de episodios ya vistos.
+      const watchedCount = episodes.filter((episode) => watchedRatingKeys.has(episode.ratingKey)).length;
+      row.watched_percent = episodes.length > 0 ? Math.round((watchedCount / episodes.length) * 100) : 0;
+      pending.push(row);
+    }
   }
 
   const pendingItems = pending.map((r) => ({
@@ -177,6 +184,7 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes) {
     tmdbId: r.tmdb_id,
     seasonNumber: r.season_number ?? null,
     posterUrl: r.poster_url ?? null,
+    watchedPercent: r.watched_percent ?? 0,
   }));
 
   return {
@@ -211,9 +219,15 @@ export async function getBalance(userId, libraryId) {
   const watchedTitles = new Set(
     history.filter((h) => h.percent >= WATCHED_THRESHOLD).map((h) => normalize(h.title))
   );
+  // Issue #7: mayor % alcanzado por título (puede haber varias sesiones parciales).
+  const percentByTitle = new Map();
+  for (const h of history) {
+    const key = normalize(h.title);
+    percentByTitle.set(key, Math.max(percentByTitle.get(key) ?? 0, h.percent));
+  }
   await hydrateMissingPosters(approved);
   const unavailable = await getUnavailableTmdbIds(approved.map((r) => r.tmdb_id));
-  return computeBalance(limit, approved, watchedTitles, unavailable);
+  return computeBalance(limit, approved, watchedTitles, unavailable, percentByTitle);
 }
 
 // "Resetea" el cupo de un usuario+biblioteca: las aprobaciones anteriores a ahora

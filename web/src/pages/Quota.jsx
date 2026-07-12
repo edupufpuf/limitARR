@@ -105,6 +105,26 @@ function QuotaBar({ balance, limit }) {
   );
 }
 
+// Rueda de % de avance sobre la carátula (issue #7): cuánto lleva visto el
+// solicitante (películas: % de la reproducción; series: % de episodios de la
+// temporada). Color según cercanía al umbral de "visto" (~85% en Tautulli):
+// rojo lejos, ámbar a medias, verde a punto de liberar cupo. Se oculta al pasar
+// el ratón para no tapar el ✕ de quitar del cupo.
+function WatchProgressRing({ percent }) {
+  const color = percent >= 70 ? '#4ade80' : percent >= 35 ? '#facc15' : '#f87171';
+  const deg = Math.round((Math.min(percent, 100) / 100) * 360);
+  return (
+    <span
+      className="absolute top-1 right-1 w-6 h-6 rounded-full p-[2px] pointer-events-none group-hover:opacity-0 transition-opacity"
+      style={{ background: `conic-gradient(${color} ${deg}deg, rgba(15,20,32,.7) ${deg}deg)` }}
+    >
+      <span className="w-full h-full rounded-full bg-black/80 flex items-center justify-center text-[8px] font-bold tabular-nums text-gray-100">
+        {percent}
+      </span>
+    </span>
+  );
+}
+
 // Póster grande con el título en overlay sobre gradiente, estilo Seerr. Si la
 // película ya existe en Plex (hay ratingKey) y hay URL de Tautulli, el póster
 // enlaza a su página de estadísticas; el ✕ (al pasar el ratón) la quita del cupo.
@@ -117,7 +137,11 @@ function PendingPoster({ item, statsBase, onDismiss }) {
     <Wrapper
       {...(href ? { href, target: '_blank', rel: 'noreferrer' } : {})}
       className="relative block w-16 h-24 rounded-lg overflow-hidden shadow-card group flex-shrink-0"
-      title={item.unavailable ? `${item.title ?? ''} — no disponible en Radarr, no resta cupo` : item.title ?? ''}
+      title={
+        item.unavailable
+          ? `${item.title ?? ''} — no disponible en Radarr, no resta cupo`
+          : `${item.title ?? ''}${(item.watchedPercent ?? 0) > 0 ? ` — ${item.watchedPercent}% visto` : ''}`
+      }
     >
       {item.posterUrl ? (
         <img
@@ -133,6 +157,9 @@ function PendingPoster({ item, statsBase, onDismiss }) {
         <span className="absolute top-1 left-1 rounded bg-black/75 px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-amber-300 pointer-events-none">
           no cuenta
         </span>
+      )}
+      {!item.unavailable && (item.watchedPercent ?? 0) > 0 && (
+        <WatchProgressRing percent={item.watchedPercent} />
       )}
       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent pt-6 pb-1 px-1.5 pointer-events-none">
         <span className="block text-[9px] leading-tight text-gray-100 font-medium line-clamp-2">

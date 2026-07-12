@@ -39,7 +39,7 @@ test('computeBalance: aprobada y no vista resta cupo', () => {
   assert.equal(r.balance, 0);
   assert.equal(r.outstanding, 1);
   assert.deepEqual(r.pendingItems, [
-    { title: 'Matrix', mediaType: 'movie', tmdbId: 603, seasonNumber: null, posterUrl: 'https://img/x.jpg', unavailable: false },
+    { title: 'Matrix', mediaType: 'movie', tmdbId: 603, seasonNumber: null, posterUrl: 'https://img/x.jpg', unavailable: false, watchedPercent: 0 },
   ]);
 });
 
@@ -108,6 +108,22 @@ test('computeBalance: fila sin tmdb_id nunca se marca no disponible', () => {
   const r = computeBalance(1, approved, new Set(), new Set([999]));
   assert.equal(r.outstanding, 1);
   assert.equal(r.pendingItems[0].unavailable, false);
+});
+
+// --- issue #7: % de avance del solicitante en cada pendiente ---
+
+test('computeBalance: pendiente lleva el mayor % de avance del historial', () => {
+  const approved = [{ media_title: 'Dune', tmdb_id: 438631 }];
+  const percents = new Map([[normalize('Dune'), 62.4]]);
+  const r = computeBalance(2, approved, new Set(), new Set(), percents);
+  assert.equal(r.outstanding, 1); // 62% < umbral de visto, sigue contando
+  assert.equal(r.pendingItems[0].watchedPercent, 62);
+});
+
+test('computeBalance: sin historial el avance es 0', () => {
+  const approved = [{ media_title: 'Heat', tmdb_id: 949 }];
+  const r = computeBalance(2, approved, new Set());
+  assert.equal(r.pendingItems[0].watchedPercent, 0);
 });
 
 // --- dismissPendingItem (usa la DB en memoria del script de test) ---
