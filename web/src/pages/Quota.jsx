@@ -293,13 +293,13 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss, on
             <dl className="mt-3 space-y-1.5 text-xs sm:text-sm">
               <div className="flex gap-2">
                 <dt className="text-gray-500 w-[5.5rem] sm:w-28 flex-shrink-0">Solicitada</dt>
-                <dd>{requestedAtMs ? `${fmtDate(requestedAtMs)} · ${daysAgo(requestedAtMs)}` : detail ? 'sin registro' : '…'}</dd>
+                <dd>{requestedAtMs ? <>{fmtDate(requestedAtMs)} · <span className="whitespace-nowrap">{daysAgo(requestedAtMs)}</span></> : detail ? 'sin registro' : '…'}</dd>
               </div>
               {/* Issue #14: desde cuándo se puede ver en Plex (según Seerr). */}
               {item.availableSince != null && (
                 <div className="flex gap-2">
                   <dt className="text-gray-500 w-[5.5rem] sm:w-28 flex-shrink-0">Disponible</dt>
-                  <dd>{fmtDate(item.availableSince)} · {daysAgo(item.availableSince)}</dd>
+                  <dd>{fmtDate(item.availableSince)} · <span className="whitespace-nowrap">{daysAgo(item.availableSince)}</span></dd>
                 </div>
               )}
               {/* Issue #16: saldo cacheado del solicitante, para decidir a mano. */}
@@ -312,14 +312,14 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss, on
               {!item.pendingApproval && (
               <div className="flex gap-2">
                 <dt className="text-gray-500 w-[5.5rem] sm:w-28 flex-shrink-0">Últ. visionado</dt>
-                <dd>{detail ? (lastWatchMs ? `${fmtDate(lastWatchMs)} · ${daysAgo(lastWatchMs)}` : 'nadie la ha empezado') : '…'}</dd>
+                <dd>{detail ? (lastWatchMs ? <>{fmtDate(lastWatchMs)} · <span className="whitespace-nowrap">{daysAgo(lastWatchMs)}</span></> : 'nadie la ha empezado') : '…'}</dd>
               </div>
               )}
               {item.expiresAt != null && (
                 <div className="flex gap-2">
                   <dt className="text-gray-500 w-[5.5rem] sm:w-28 flex-shrink-0">Caduca</dt>
                   <dd>
-                    {fmtDate(item.expiresAt)} · {daysLeft(item.expiresAt)}
+                    {fmtDate(item.expiresAt)} · <span className="whitespace-nowrap">{daysLeft(item.expiresAt)}</span>
                     <span className="text-gray-500"> — al caducar deja de restar cupo</span>
                   </dd>
                 </div>
@@ -409,7 +409,10 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss, on
           )}
         </div>
 
-        <div className="flex flex-wrap gap-2 mt-5">
+        {/* Issue #15: en móvil los botones van en cuadrícula 2×2 (caben los 4
+            posibles); en pantallas anchas se mantiene la fila con la acción
+            destructiva empujada a la derecha. */}
+        <div className="grid grid-cols-2 gap-2 mt-5 sm:flex sm:flex-wrap">
           {tautulliUrl && (
             <a href={tautulliUrl} target="_blank" rel="noreferrer" className="btn btn-ghost">Ver en Tautulli</a>
           )}
@@ -420,7 +423,7 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss, on
               fila de cupo que quitar. */}
           {item.pendingApproval ? (
             <>
-              <button onClick={() => onApprove(item)} className="btn btn-primary ml-auto">
+              <button onClick={() => onApprove(item)} className="btn btn-primary sm:ml-auto">
                 Aprobar
               </button>
               <button onClick={() => onDecline(item)} className="btn btn-ghost text-accent-400">
@@ -436,7 +439,7 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss, on
                   Rechazar en Seerr
                 </button>
               )}
-              <button onClick={() => onDismiss(item)} className="btn btn-ghost text-accent-400 ml-auto">
+              <button onClick={() => onDismiss(item)} className="btn btn-ghost text-accent-400 sm:ml-auto">
                 Quitar del cupo
               </button>
             </>
