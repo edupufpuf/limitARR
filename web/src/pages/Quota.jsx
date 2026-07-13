@@ -130,6 +130,8 @@ function WatchProgressRing({ percent }) {
 // Seerr viven ahí dentro; el ✕ (al pasar el ratón) la quita del cupo.
 // Una película aún no disponible en Plex (según Seerr) se enseña apagada y
 // con etiqueta: sigue pendiente pero no resta cupo hasta que se descargue.
+// Issue #16: un pendiente de aprobación en Seerr se enseña igual de apagado con
+// "Pdte. Aprobar" — no resta cupo y no se puede quitar (no hay fila que anular).
 function PendingPoster({ item, onDetail, onDismiss }) {
   return (
     <div
@@ -139,7 +141,9 @@ function PendingPoster({ item, onDetail, onDismiss }) {
       onKeyDown={(e) => e.key === 'Enter' && onDetail(item)}
       className="relative block w-16 h-24 rounded-lg overflow-hidden shadow-card group flex-shrink-0 cursor-pointer"
       title={
-        item.unavailable
+        item.pendingApproval
+          ? `${item.title ?? ''} — pendiente de aprobación en Seerr`
+          : item.unavailable
           ? `${item.title ?? ''} — aún no disponible en Plex, no resta cupo`
           : `${item.title ?? ''}${(item.watchedPercent ?? 0) > 0 ? ` — ${item.watchedPercent}% visto` : ''}`
       }
@@ -149,10 +153,15 @@ function PendingPoster({ item, onDetail, onDismiss }) {
           src={item.posterUrl}
           alt=""
           loading="lazy"
-          className={`w-full h-full object-cover transition-transform duration-300 group-hover:scale-110 ${item.unavailable ? 'grayscale opacity-60' : ''}`}
+          className={`w-full h-full object-cover transition-transform duration-300 group-hover:scale-110 ${item.unavailable || item.pendingApproval ? 'grayscale opacity-60' : ''}`}
         />
       ) : (
         <div className="w-full h-full bg-gradient-to-br from-bg-600 to-bg-700 flex items-center justify-center text-xl">🎬</div>
+      )}
+      {item.pendingApproval && (
+        <span className="absolute top-1 left-1 rounded bg-black/75 px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-gray-300 pointer-events-none">
+          Pdte. Aprobar
+        </span>
       )}
       {item.unavailable && (
         <span className="absolute top-1 left-1 rounded bg-black/75 px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-amber-300 pointer-events-none">
@@ -173,17 +182,19 @@ function PendingPoster({ item, onDetail, onDismiss }) {
           {item.title ?? '—'}
         </span>
       </div>
-      <button
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          onDismiss(item);
-        }}
-        className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/70 text-gray-200 hover:bg-accent-500 hover:text-white text-[11px] leading-none hidden group-hover:flex items-center justify-center"
-        title="Quitar del cupo"
-      >
-        ✕
-      </button>
+      {!item.pendingApproval && (
+        <button
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onDismiss(item);
+          }}
+          className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/70 text-gray-200 hover:bg-accent-500 hover:text-white text-[11px] leading-none hidden group-hover:flex items-center justify-center"
+          title="Quitar del cupo"
+        >
+          ✕
+        </button>
+      )}
     </div>
   );
 }
@@ -212,7 +223,7 @@ function percentColor(percent) {
 // Ventana de detalle de un pendiente (issue #6): fecha de solicitud/aprobación,
 // días transcurridos, quién lo ha visto (todas las cuentas, no solo el
 // solicitante) y hasta qué %, enlaces a Tautulli/Seerr y quitar del cupo.
-function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss, onDecline }) {
+function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss, onDecline, onApprove }) {
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState(false);
   // Issue #8: usuario desplegado en la tabla de visualizaciones (series) para
@@ -221,6 +232,12 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss, on
   const isTv = item.mediaType === 'tv';
 
   useEffect(() => {
+    // Issue #16: un pendiente de aprobación no tiene fila aprobada ni visionados
+    // que consultar — la fecha de solicitud ya viene de Seerr en el propio item.
+    if (item.pendingApproval) {
+      setDetail({ requestedAt: null, watchers: [] });
+      return;
+    }
     api
       .pendingDetail(user.userId, lib.libraryId, {
         tmdbId: item.tmdbId,
@@ -234,8 +251,11 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss, on
       .catch(() => setError(true));
   }, []);
 
-  // created_at de SQLite es "YYYY-MM-DD HH:MM:SS" en UTC.
-  const requestedAtMs = detail?.requestedAt ? Date.parse(detail.requestedAt.replace(' ', 'T') + 'Z') : null;
+  // created_at de SQLite es "YYYY-MM-DD HH:MM:SS" en UTC; el createdAt de Seerr
+  // (pendientes de aprobación, issue #16) ya es ISO.
+  const requestedAtMs = item.pendingApproval
+    ? (item.requestedAt ? Date.parse(item.requestedAt) : null)
+    : detail?.requestedAt ? Date.parse(detail.requestedAt.replace(' ', 'T') + 'Z') : null;
   const lastWatchMs = detail?.watchers?.reduce((max, w) => Math.max(max, w.lastWatchedAt ?? 0), 0) || null;
   const tautulliUrl = statsBase && item.ratingKey ? `${statsBase}/info?rating_key=${item.ratingKey}` : null;
 
@@ -267,15 +287,34 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss, on
             {item.unavailable && (
               <div className="text-xs text-amber-300 mt-1">Aún no disponible en Plex — no resta cupo.</div>
             )}
+            {item.pendingApproval && (
+              <div className="text-xs text-gray-400 mt-1">Pendiente de aprobación en Seerr — no resta cupo.</div>
+            )}
             <dl className="mt-3 space-y-1.5 text-xs sm:text-sm">
               <div className="flex gap-2">
                 <dt className="text-gray-500 w-[5.5rem] sm:w-28 flex-shrink-0">Solicitada</dt>
                 <dd>{requestedAtMs ? `${fmtDate(requestedAtMs)} · ${daysAgo(requestedAtMs)}` : detail ? 'sin registro' : '…'}</dd>
               </div>
+              {/* Issue #14: desde cuándo se puede ver en Plex (según Seerr). */}
+              {item.availableSince != null && (
+                <div className="flex gap-2">
+                  <dt className="text-gray-500 w-[5.5rem] sm:w-28 flex-shrink-0">Disponible</dt>
+                  <dd>{fmtDate(item.availableSince)} · {daysAgo(item.availableSince)}</dd>
+                </div>
+              )}
+              {/* Issue #16: saldo cacheado del solicitante, para decidir a mano. */}
+              {item.pendingApproval && item.balance != null && (
+                <div className="flex gap-2">
+                  <dt className="text-gray-500 w-[5.5rem] sm:w-28 flex-shrink-0">Saldo</dt>
+                  <dd className="tabular-nums">{item.balance} / {item.limit}</dd>
+                </div>
+              )}
+              {!item.pendingApproval && (
               <div className="flex gap-2">
                 <dt className="text-gray-500 w-[5.5rem] sm:w-28 flex-shrink-0">Últ. visionado</dt>
                 <dd>{detail ? (lastWatchMs ? `${fmtDate(lastWatchMs)} · ${daysAgo(lastWatchMs)}` : 'nadie la ha empezado') : '…'}</dd>
               </div>
+              )}
               {item.expiresAt != null && (
                 <div className="flex gap-2">
                   <dt className="text-gray-500 w-[5.5rem] sm:w-28 flex-shrink-0">Caduca</dt>
@@ -285,6 +324,7 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss, on
                   </dd>
                 </div>
               )}
+              {!item.pendingApproval && (
               <div className="flex gap-2">
                 <dt className="text-gray-500 w-[5.5rem] sm:w-28 flex-shrink-0">Avance</dt>
                 <dd className={`font-bold tabular-nums ${percentColor(item.watchedPercent ?? 0)}`}>
@@ -295,6 +335,7 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss, on
                   <span className="text-gray-500 font-normal"> del solicitante</span>
                 </dd>
               </div>
+              )}
             </dl>
           </div>
         </div>
@@ -375,24 +416,41 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss, on
           {detail?.seerrUrl && (
             <a href={detail.seerrUrl} target="_blank" rel="noreferrer" className="btn btn-ghost">Ver en Seerr</a>
           )}
-          {/* Issue #11: un pendiente que aún no está en Plex se puede rechazar
-              directamente en Seerr (cancela la descarga y anula la fila). */}
-          {item.unavailable && item.requestId != null && (
-            <button onClick={() => onDecline(item)} className="btn btn-ghost text-accent-400">
-              Rechazar en Seerr
-            </button>
+          {/* Issue #16: un pendiente de aprobación se decide aquí mismo; no hay
+              fila de cupo que quitar. */}
+          {item.pendingApproval ? (
+            <>
+              <button onClick={() => onApprove(item)} className="btn btn-primary ml-auto">
+                Aprobar
+              </button>
+              <button onClick={() => onDecline(item)} className="btn btn-ghost text-accent-400">
+                Rechazar
+              </button>
+            </>
+          ) : (
+            <>
+              {/* Issue #11: un pendiente que aún no está en Plex se puede rechazar
+                  directamente en Seerr (cancela la descarga y anula la fila). */}
+              {item.unavailable && item.requestId != null && (
+                <button onClick={() => onDecline(item)} className="btn btn-ghost text-accent-400">
+                  Rechazar en Seerr
+                </button>
+              )}
+              <button onClick={() => onDismiss(item)} className="btn btn-ghost text-accent-400 ml-auto">
+                Quitar del cupo
+              </button>
+            </>
           )}
-          <button onClick={() => onDismiss(item)} className="btn btn-ghost text-accent-400 ml-auto">
-            Quitar del cupo
-          </button>
         </div>
       </div>
     </div>
   );
 }
 
-// Issue #11: solicitudes que siguen sin aprobar en Seerr (fuera de cupo o sin
-// match de usuario), agrupadas por biblioteca, con aprobar/rechazar directos.
+// Issue #11: solicitudes que siguen sin aprobar en Seerr, agrupadas por
+// biblioteca, con aprobar/rechazar directos. Desde el issue #16 aquí solo
+// llegan las que no tienen tarjeta de usuario donde colgarse (usuario sin
+// match, sin biblioteca o sin cupo calculado); el resto sale en su tarjeta.
 function PendingApprovals({ items, onAction }) {
   const [acting, setActing] = useState({});
   if (items.length === 0) return null;
@@ -421,7 +479,7 @@ function PendingApprovals({ items, onAction }) {
     <div className="card p-4 mb-6 border-amber-400/30">
       <h3 className="font-semibold mb-1">Pendientes de aprobación</h3>
       <p className="text-xs text-gray-500 mb-3">
-        Solicitudes que limitARR no aprobó (sin cupo, o usuario sin match) y siguen esperando en Seerr.
+        Solicitudes esperando en Seerr sin usuario reconocido — las de usuarios conocidos salen en su tarjeta.
       </p>
       {[...byLibrary.entries()].map(([libraryName, libItems]) => (
         <div key={libraryName} className="mb-3 last:mb-0">
@@ -539,7 +597,8 @@ function DebtorBubbles({ debtors, onDetail }) {
           <div className="space-y-2">
             {open.user.libraries.flatMap((lib) =>
               (lib.pendingItems ?? [])
-                .filter((item) => !item.unavailable)
+                // Un pendiente de aprobación (issue #16) aún no es deuda.
+                .filter((item) => !item.unavailable && !item.pendingApproval)
                 .map((item, i) => (
                   <button
                     key={`${lib.libraryId}-${item.tmdbId ?? 'x'}-${item.seasonNumber ?? 0}-${i}`}
@@ -569,7 +628,7 @@ function DebtorBubbles({ debtors, onDetail }) {
 
 // Pila de mini-carátulas solapadas para la cabecera plegada de la tarjeta.
 function PosterStack({ libraries }) {
-  const items = libraries.flatMap((l) => l.pendingItems ?? []).slice(0, 3);
+  const items = libraries.flatMap((l) => (l.pendingItems ?? []).filter((it) => !it.pendingApproval)).slice(0, 3);
   if (items.length === 0) return null;
   return (
     <div className="hidden sm:flex -space-x-2.5 flex-shrink-0">
@@ -692,9 +751,48 @@ export default function Quota() {
     return () => clearInterval(timer);
   }, []);
 
+  // Issue #16: un pendiente de aprobación con usuario y biblioteca conocidos se
+  // cuelga de la tarjeta de ese usuario (gris, "Pdte. Aprobar", no resta cupo);
+  // en el banner de arriba quedan solo los que no tienen tarjeta donde salir
+  // (usuario sin match en Tautulli, sin biblioteca o aún sin cupo calculado).
+  const { mergedUsers, unmatchedApprovals } = useMemo(() => {
+    const cardKeys = new Set(users.flatMap((u) => u.libraries.map((l) => `${u.userId}-${l.libraryId}`)));
+    const byCard = new Map();
+    const unmatched = [];
+    for (const pa of pendingApprovals) {
+      const key = pa.cacheUserId != null && pa.libraryId != null ? `${pa.cacheUserId}-${pa.libraryId}` : null;
+      if (!key || !cardKeys.has(key)) {
+        unmatched.push(pa);
+        continue;
+      }
+      if (!byCard.has(key)) byCard.set(key, []);
+      byCard.get(key).push({
+        title: pa.title,
+        mediaType: pa.mediaType || 'movie',
+        tmdbId: pa.tmdbId,
+        seasonNumber: pa.seasons?.[0] ?? null,
+        posterUrl: pa.posterUrl,
+        pendingApproval: true,
+        requestId: pa.requestId,
+        requestedAt: pa.requestedAt,
+        balance: pa.balance,
+        limit: pa.limit,
+      });
+    }
+    if (byCard.size === 0) return { mergedUsers: users, unmatchedApprovals: unmatched };
+    const merged = users.map((u) => ({
+      ...u,
+      libraries: u.libraries.map((lib) => {
+        const extra = byCard.get(`${u.userId}-${lib.libraryId}`);
+        return extra ? { ...lib, pendingItems: [...(lib.pendingItems ?? []), ...extra] } : lib;
+      }),
+    }));
+    return { mergedUsers: merged, unmatchedApprovals: unmatched };
+  }, [users, pendingApprovals]);
+
   const visibleUsers = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return users
+    return mergedUsers
       .filter((u) => !q || u.username.toLowerCase().includes(q))
       .filter((u) => {
         if (activeFilter === 'pending') return totalOutstanding(u.libraries) > 0;
@@ -704,14 +802,14 @@ export default function Quota() {
         return true;
       })
       .sort((a, b) => worstLib(a.libraries).balance - worstLib(b.libraries).balance);
-  }, [users, query, activeFilter]);
+  }, [mergedUsers, query, activeFilter]);
 
   // Deudores para las burbujas: los 4 con más pendientes de ver, de más a
   // menos deuda (a igualdad, peor proporción sin ver / pedido primero).
   // ratio ∈ (0,1] dimensiona el anillo (requested puede quedarse corto si el
   // historial no está importado — se acota con el propio owed para no pasar de 1).
   const debtors = useMemo(() => {
-    return users
+    return mergedUsers
       .map((u) => {
         const owed = totalOutstanding(u.libraries);
         const requested = Math.max(u.requestedTotal ?? 0, owed);
@@ -720,7 +818,7 @@ export default function Quota() {
       .filter((d) => d.owed > 0)
       .sort((a, b) => b.owed - a.owed || b.ratio - a.ratio)
       .slice(0, 4);
-  }, [users]);
+  }, [mergedUsers]);
 
   function selectFilter(filter) {
     setActiveFilter((current) => (current === filter && filter !== 'all' ? 'all' : filter));
@@ -792,7 +890,7 @@ export default function Quota() {
 
       {debtors.length > 0 && <DebtorBubbles debtors={debtors} onDetail={(user, lib, item) => setDetailTarget({ user, lib, item })} />}
 
-      <PendingApprovals items={pendingApprovals} onAction={load} />
+      <PendingApprovals items={unmatchedApprovals} onAction={load} />
 
       {stats && (
         <>
@@ -890,6 +988,12 @@ export default function Quota() {
           onDecline={async (item) => {
             if (!confirm(`¿Rechazar "${item.title ?? 'esta solicitud'}" en Seerr? Se cancela la solicitud y deja de contar.`)) return;
             await api.declineRequest(item.requestId);
+            load();
+            setDetailTarget(null);
+          }}
+          onApprove={async (item) => {
+            if (!confirm(`¿Aprobar "${item.title ?? 'esta solicitud'}" en Seerr?`)) return;
+            await api.approveRequest(item.requestId);
             load();
             setDetailTarget(null);
           }}

@@ -625,8 +625,11 @@ router.get('/requests/pending-approval', ah(async (req, res) => {
     const tautulliUser = matchByEmailOrUsername(tautulliUsers, request.requestedBy || {});
     const seasonNumber = request.seasons[0] ?? null;
     const details = await getMediaDetails(request.mediaType, request.tmdbId, seasonNumber);
-    const cached = library && tautulliUser
-      ? getCachedBalance.get(quotaIdentity(tautulliUser.id).cacheId, library.id)
+    // Issue #16: cacheUserId es la identidad de cupo (el grupo si es agregado),
+    // para colgar el pendiente de la tarjeta de usuario correcta del panel.
+    const cacheUserId = tautulliUser ? quotaIdentity(tautulliUser.id).cacheId : null;
+    const cached = library && cacheUserId != null
+      ? getCachedBalance.get(cacheUserId, library.id)
       : null;
     items.push({
       requestId: request.id,
@@ -638,7 +641,9 @@ router.get('/requests/pending-approval', ah(async (req, res) => {
       libraryId: library?.id ?? null,
       libraryName: library?.name ?? null,
       userId: tautulliUser?.id ?? null,
+      cacheUserId,
       username: tautulliUser?.username ?? request.requestedBy?.username ?? 'unknown',
+      requestedAt: request.createdAt ?? null,
       balance: cached?.balance ?? null,
       limit: cached?.limit_applied ?? null,
     });
