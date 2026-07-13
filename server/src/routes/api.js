@@ -436,6 +436,16 @@ async function buildQuotaByUser() {
     GROUP BY user_id
   `).all();
   const recentMap = new Map(recentRows.map((r) => [r.user_id, r]));
+  // Total histórico de solicitudes aprobadas por usuario — denominador del
+  // "déficit" del círculo destacado del panel (pendiente de ver / pedido).
+  const requestedRows = db.prepare(`
+    SELECT user_id, COUNT(*) AS requested
+    FROM decisions_log
+    JOIN libraries l ON l.id = decisions_log.library_id
+    WHERE decision = 'approved' AND user_id IS NOT NULL AND l.enabled = 1
+    GROUP BY user_id
+  `).all();
+  const requestedMap = new Map(requestedRows.map((r) => [r.user_id, r.requested]));
   const groupMap = new Map(db.prepare('SELECT id, name FROM groups').all().map((g) => [g.id, g]));
   const membersByGroup = new Map();
   for (const m of db.prepare('SELECT user_id, group_id FROM group_members').all()) {
@@ -464,6 +474,7 @@ async function buildQuotaByUser() {
           members: memberIds.map((uid) => tautulliUserMap.get(uid)?.username ?? `user#${uid}`),
           approved7d: memberIds.reduce((sum, uid) => sum + (recentMap.get(uid)?.approved7d ?? 0), 0),
           blocked7d: memberIds.reduce((sum, uid) => sum + (recentMap.get(uid)?.blocked7d ?? 0), 0),
+          requestedTotal: memberIds.reduce((sum, uid) => sum + (requestedMap.get(uid) ?? 0), 0),
           libraries: [],
         });
       } else {
@@ -474,6 +485,7 @@ async function buildQuotaByUser() {
           avatar: findAvatar(tautulliUser),
           approved7d: recentMap.get(row.user_id)?.approved7d ?? 0,
           blocked7d: recentMap.get(row.user_id)?.blocked7d ?? 0,
+          requestedTotal: requestedMap.get(row.user_id) ?? 0,
           libraries: [],
         });
       }

@@ -49,3 +49,15 @@
     @apply py-2 pr-4 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-500;
   }
 }
+
+/* Temblor sutil del círculo del "deudor" destacado (pestaña Cupo) al tocarlo. */
+@keyframes debtor-wobble {
+  0% { transform: scale(1) rotate(0deg); }
+  25% { transform: scale(1.06) rotate(-2.5deg); }
+  50% { transform: scale(0.97) rotate(2deg); }
+  75% { transform: scale(1.02) rotate(-1deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+.animate-debtor-wobble {
+  animation: debtor-wobble 0.5s ease;
+}

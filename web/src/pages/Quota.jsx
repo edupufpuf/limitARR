@@ -463,6 +463,85 @@ function PendingApprovals({ items, onAction }) {
   );
 }
 
+// "Deudor" destacado estilo Tricount: el usuario con más pendientes de ver, en
+// un círculo cuyo tamaño crece con su déficit (pendiente de ver / pedido
+// histórico). Tiembla sutilmente al tocarlo y al pulsarlo se despliega el
+// detalle de lo que "debe"; cada línea abre la ventana de detalle normal.
+function DebtorHero({ debtor, onDetail }) {
+  const [open, setOpen] = useState(false);
+  const [wobble, setWobble] = useState(false);
+  const { user, owed, requested, ratio } = debtor;
+  // 96–160 px según el déficit: quien lo debe todo sale a tamaño completo.
+  const size = Math.round(96 + ratio * 64);
+  const deg = Math.round(ratio * 360);
+
+  return (
+    <div className="flex flex-col items-center mb-6">
+      <button
+        type="button"
+        onPointerDown={() => setWobble(true)}
+        onAnimationEnd={() => setWobble(false)}
+        onClick={() => setOpen((o) => !o)}
+        title={`${user.username} debe ${owed} de ${requested} pedidas`}
+        className={`rounded-full p-[4px] select-none shadow-glow transition-transform hover:scale-[1.03] active:scale-[0.97] ${wobble ? 'animate-debtor-wobble' : ''}`}
+        style={{
+          width: size,
+          height: size,
+          background: `conic-gradient(#ef4444 ${deg}deg, #34445f ${deg}deg)`,
+        }}
+      >
+        <div className="w-full h-full rounded-full bg-bg-800 flex flex-col items-center justify-center gap-0.5 overflow-hidden px-2">
+          <span className="rounded-full overflow-hidden bg-bg-600 flex items-center justify-center" style={{ width: size * 0.38, height: size * 0.38 }}>
+            {user.isGroup ? (
+              <IconUsers className="w-1/2 h-1/2 text-gray-300" />
+            ) : user.avatar ? (
+              <img src={user.avatar} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+            ) : (
+              <span className="text-sm font-bold">{user.username.slice(0, 2).toUpperCase()}</span>
+            )}
+          </span>
+          <span className="text-xs font-bold text-white leading-tight truncate max-w-full">{user.username}</span>
+          <span className="text-[10px] text-accent-300 font-semibold tabular-nums leading-none">debe {owed}</span>
+        </div>
+      </button>
+      <div className="text-[11px] text-gray-500 mt-2">
+        Mayor déficit: {owed} sin ver de {requested} pedidas · {Math.round(ratio * 100)}%
+      </div>
+
+      {open && (
+        <div className="card w-full max-w-md mt-3 p-4">
+          <div className="text-xs uppercase tracking-wider text-gray-500 mb-2">Lo que debe {user.username}</div>
+          <div className="space-y-2">
+            {user.libraries.flatMap((lib) =>
+              (lib.pendingItems ?? [])
+                .filter((item) => !item.unavailable)
+                .map((item, i) => (
+                  <button
+                    key={`${lib.libraryId}-${item.tmdbId ?? 'x'}-${item.seasonNumber ?? 0}-${i}`}
+                    type="button"
+                    onClick={() => onDetail(user, lib, item)}
+                    className="w-full flex items-center gap-3 text-sm text-left hover:bg-bg-700/40 rounded-lg p-1 -m-1 transition-colors"
+                  >
+                    <span className="w-8 h-12 rounded overflow-hidden bg-bg-600 flex-shrink-0">
+                      {item.posterUrl && <img src={item.posterUrl} alt="" loading="lazy" className="w-full h-full object-cover" />}
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block truncate font-medium">{item.title ?? '—'}</span>
+                      <span className="block text-xs text-gray-500 truncate">{lib.libraryName}</span>
+                    </span>
+                    <span className={`font-bold tabular-nums text-xs ${percentColor(item.watchedPercent ?? 0)}`}>
+                      {item.watchedPercent ?? 0}%
+                    </span>
+                  </button>
+                ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Pila de mini-carátulas solapadas para la cabecera plegada de la tarjeta.
 function PosterStack({ libraries }) {
   const items = libraries.flatMap((l) => l.pendingItems ?? []).slice(0, 3);
@@ -602,6 +681,24 @@ export default function Quota() {
       .sort((a, b) => worstLib(a.libraries).balance - worstLib(b.libraries).balance);
   }, [users, query, activeFilter]);
 
+  // Candidato al círculo destacado: quien más tiene sin ver; a igualdad, el
+  // de peor proporción sin ver / pedido. ratio ∈ (0,1] dimensiona el círculo
+  // (requested puede quedarse corto si el historial no está importado — se
+  // acota con el propio owed para no pasar de 1).
+  const debtor = useMemo(() => {
+    let best = null;
+    for (const u of users) {
+      const owed = totalOutstanding(u.libraries);
+      if (owed <= 0) continue;
+      const requested = Math.max(u.requestedTotal ?? 0, owed);
+      const ratio = owed / requested;
+      if (!best || owed > best.owed || (owed === best.owed && ratio > best.ratio)) {
+        best = { user: u, owed, requested, ratio };
+      }
+    }
+    return best;
+  }, [users]);
+
   function selectFilter(filter) {
     setActiveFilter((current) => (current === filter && filter !== 'all' ? 'all' : filter));
   }
@@ -669,6 +766,8 @@ export default function Quota() {
           </button>
         </div>
       </div>
+
+      {debtor && <DebtorHero debtor={debtor} onDetail={(user, lib, item) => setDetailTarget({ user, lib, item })} />}
 
       <PendingApprovals items={pendingApprovals} onAction={load} />
 
