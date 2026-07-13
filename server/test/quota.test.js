@@ -53,7 +53,7 @@ test('computeBalance: aprobada y no vista resta cupo', () => {
   assert.equal(r.balance, 0);
   assert.equal(r.outstanding, 1);
   assert.deepEqual(r.pendingItems, [
-    { title: 'Matrix', mediaType: 'movie', tmdbId: 603, seasonNumber: null, posterUrl: 'https://img/x.jpg', unavailable: false, watchedPercent: 0, availableSince: null, expiresAt: null, requestId: null },
+    { title: 'Matrix', mediaType: 'movie', tmdbId: 603, seasonNumber: null, posterUrl: 'https://img/x.jpg', unavailable: false, mediaStatus: null, watchedPercent: 0, availableSince: null, expiresAt: null, requestId: null },
   ]);
 });
 
@@ -462,8 +462,10 @@ test('computeBalance: expiresAt y availableSince salen de la disponibilidad', ()
 
 test('computeBalance: una no disponible no lleva fecha de caducidad', () => {
   const approved = [{ media_title: 'Estreno Futuro', tmdb_id: 999, created_at: '2026-06-01 00:00:00' }];
-  const r = computeBalance(2, approved, new Set(), new Set([999]), new Map(), 30);
+  const availability = new Map([[999, { unavailable: true, status: 3, availableSince: null }]]);
+  const r = computeBalance(2, approved, new Set(), new Set([999]), new Map(), 30, availability);
   assert.equal(r.pendingItems[0].unavailable, true);
+  assert.equal(r.pendingItems[0].mediaStatus, 3);
   assert.equal(r.pendingItems[0].expiresAt, null);
   assert.equal(r.pendingItems[0].availableSince, null);
 });

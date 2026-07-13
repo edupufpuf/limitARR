@@ -59,6 +59,25 @@ test('auth Plex: usuario normal solo ve su cupo y gestiona su propio chat', asyn
     if (url.startsWith('http://tautulli.test')) {
       return new Response(JSON.stringify({ response: { result: 'success', data: [{ user_id: '1880', username: 'ana', friendly_name: 'Ana', email: 'ana@example.test', is_admin: '0' }] } }), { status: 200 });
     }
+    if (url.startsWith('http://seerr.test/api/v1/request?filter=pending') && url.includes('mediaType=movie')) {
+      return new Response(JSON.stringify({
+        results: [{
+          id: 991,
+          status: 1,
+          type: 'movie',
+          media: { mediaType: 'movie', tmdbId: 603 },
+          createdAt: '2026-07-13T08:00:00Z',
+          requestedBy: { id: 44, email: 'ana@example.test', plexUsername: 'ana' },
+        }],
+        pageInfo: { results: 1 },
+      }), { status: 200 });
+    }
+    if (url.startsWith('http://seerr.test/api/v1/request?filter=pending')) {
+      return new Response(JSON.stringify({ results: [], pageInfo: { results: 0 } }), { status: 200 });
+    }
+    if (url === 'http://seerr.test/api/v1/movie/603') {
+      return new Response(JSON.stringify({ title: 'Matrix', posterPath: '/matrix.jpg' }), { status: 200 });
+    }
     if (url.startsWith('http://seerr.test')) {
       return new Response(JSON.stringify({ results: [] }), { status: 200 });
     }
@@ -76,6 +95,16 @@ test('auth Plex: usuario normal solo ve su cupo y gestiona su propio chat', asyn
     const quota = (await plexAgent.get('/api/me/quota').expect(200)).body;
     assert.equal(quota.userId, 1880);
     assert.equal(quota.libraries[0].balance, 3);
+    assert.deepEqual(quota.libraries[0].pendingItems, [{
+      title: 'Matrix',
+      mediaType: 'movie',
+      tmdbId: 603,
+      seasonNumber: null,
+      posterUrl: 'https://image.tmdb.org/t/p/w185/matrix.jpg',
+      pendingApproval: true,
+      requestId: 991,
+      requestedAt: '2026-07-13T08:00:00Z',
+    }]);
 
     await plexAgent.put('/api/me/notifications').send({ chatId: '123456' }).expect(200);
     assert.equal(db.prepare('SELECT chat_id FROM telegram_links WHERE user_id = 1880').get().chat_id, '123456');

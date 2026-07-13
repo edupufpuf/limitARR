@@ -24,9 +24,33 @@ function LibraryCard({ library }) {
         <div className="grid grid-cols-3 sm:grid-cols-5 gap-3 mt-5">
           {library.pendingItems.map((item, index) => (
             <div key={`${item.tmdbId ?? item.title}-${index}`}>
-              {item.posterUrl ? (
-                <img src={item.posterUrl} alt="" className="aspect-[2/3] w-full object-cover rounded-lg bg-bg-950" />
-              ) : <div className="aspect-[2/3] rounded-lg bg-bg-950" />}
+              <div
+                className="relative aspect-[2/3] w-full overflow-hidden rounded-lg bg-bg-950"
+                title={item.pendingApproval
+                  ? `${item.title} — pendiente de aprobar, no cuenta`
+                  : item.unavailable
+                    ? `${item.title} — ${downloadStatusLabel(item)}, no cuenta`
+                    : item.title}
+              >
+                {item.posterUrl ? (
+                  <img
+                    src={item.posterUrl}
+                    alt=""
+                    loading="lazy"
+                    className={`h-full w-full object-cover ${item.unavailable || item.pendingApproval ? 'grayscale opacity-60' : ''}`}
+                  />
+                ) : <div className="h-full w-full bg-gradient-to-br from-bg-600 to-bg-800" />}
+                {(item.unavailable || item.pendingApproval) && (
+                  <div className="absolute left-1 top-1 flex max-w-[calc(100%-0.5rem)] flex-col items-start gap-1">
+                    <span className="rounded bg-black/80 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-300">
+                      No cuenta
+                    </span>
+                    <span className="rounded bg-black/80 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-gray-200">
+                      {item.pendingApproval ? 'Pdte. de aprobar' : downloadStatusLabel(item)}
+                    </span>
+                  </div>
+                )}
+              </div>
               <p className="text-[11px] text-gray-400 mt-1 line-clamp-2">{item.title}</p>
             </div>
           ))}
@@ -34,6 +58,12 @@ function LibraryCard({ library }) {
       )}
     </section>
   );
+}
+
+function downloadStatusLabel(item) {
+  if (Number(item.mediaStatus) === 2) return 'Pendiente de descarga';
+  if (Number(item.mediaStatus) === 3) return 'Descargando';
+  return 'Sin descargar';
 }
 
 export default function UserDashboard({ session, onLoggedOut }) {

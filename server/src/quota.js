@@ -203,6 +203,7 @@ export function computeBalance(limit, approvedRows, watchedTitles, unavailableTm
       seasonNumber: r.season_number ?? null,
       posterUrl: r.poster_url ?? null,
       unavailable: isUnavailable(r),
+      mediaStatus: r.tmdb_id != null ? availability?.get(r.tmdb_id)?.status ?? null : null,
       // Issue #7: % de avance del solicitante, para la rueda de la carátula.
       watchedPercent: Math.round(percentByTitle.get(key) ?? 0),
       availableSince,
@@ -313,6 +314,7 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatc
       // se lista con marca. seasonStatuses null = error de red → cuenta.
       const status = details?.seasonStatuses?.[row.season_number];
       row.unavailable = details?.seasonStatuses != null && (status ?? 0) < 4;
+      row.media_status = status ?? null;
       // Issue #14: caducidad desde que la temporada está disponible (si Seerr
       // da la fecha); una no disponible no caduca. Una caducada ni se lista.
       row.available_since = row.unavailable ? null : details?.seasonAvailableSince?.[row.season_number] ?? null;
@@ -337,6 +339,7 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatc
     seasonNumber: r.season_number ?? null,
     posterUrl: r.poster_url ?? null,
     unavailable: r.unavailable ?? false,
+    mediaStatus: r.media_status ?? null,
     watchedPercent: r.watched_percent ?? 0,
     episodesWatched: r.episodes_watched ?? null,
     episodesTotal: r.episodes_total ?? null,

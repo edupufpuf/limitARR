@@ -140,8 +140,35 @@ router.get('/version', ah(async (req, res) => {
 router.get('/me/quota', ah(async (req, res) => {
   if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });
   const cacheId = quotaIdentity(req.session.user.id).cacheId;
-  const card = (await buildQuotaByUser()).find((item) => item.userId === cacheId);
-  res.json(card ?? { userId: cacheId, username: req.session.user.username, libraries: [] });
+  const [quotaCards, pendingApprovals] = await Promise.all([
+    buildQuotaByUser(),
+    buildPendingApprovalItems(),
+  ]);
+  const card = quotaCards.find((item) => item.userId === cacheId)
+    ?? { userId: cacheId, username: req.session.user.username, libraries: [] };
+  const ownPending = pendingApprovals.filter((item) => item.userId === Number(req.session.user.id));
+  const byLibrary = new Map();
+  for (const item of ownPending) {
+    if (item.libraryId == null) continue;
+    if (!byLibrary.has(item.libraryId)) byLibrary.set(item.libraryId, []);
+    byLibrary.get(item.libraryId).push({
+      title: item.title,
+      mediaType: item.mediaType,
+      tmdbId: item.tmdbId,
+      seasonNumber: item.seasons?.[0] ?? null,
+      posterUrl: item.posterUrl,
+      pendingApproval: true,
+      requestId: item.requestId,
+      requestedAt: item.requestedAt,
+    });
+  }
+  res.json({
+    ...card,
+    libraries: card.libraries.map((library) => ({
+      ...library,
+      pendingItems: [...(library.pendingItems ?? []), ...(byLibrary.get(library.libraryId) ?? [])],
+    })),
+  });
 }));
 
 router.get('/me/notifications', (req, res) => {
@@ -703,7 +730,7 @@ function formatRequestTitle(mediaType, title, seasonNumber = null) {
 // Lo que sigue sin aprobar en Seerr (el sondeo solo auto-aprueba dentro de
 // cupo, así que esto es en la práctica lo bloqueado por cupo o sin match),
 // con contexto para decidir: biblioteca, usuario y su saldo cacheado.
-router.get('/requests/pending-approval', ah(async (req, res) => {
+async function buildPendingApprovalItems() {
   const [pending, tautulliUsers] = await Promise.all([listPendingRequests(), getUsers()]);
   const items = [];
   for (const request of pending) {
@@ -735,7 +762,11 @@ router.get('/requests/pending-approval', ah(async (req, res) => {
       limit: cached?.limit_applied ?? null,
     });
   }
-  res.json(items);
+  return items;
+}
+
+router.get('/requests/pending-approval', ah(async (req, res) => {
+  res.json(await buildPendingApprovalItems());
 }));
 
 // Aprueba en Seerr Y lo registra como aprobada (si no, el cupo no lo contaría:

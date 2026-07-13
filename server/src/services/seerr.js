@@ -228,11 +228,11 @@ async function movieAvailability(tmdbId) {
     // Issue #14: cuándo llegó a Plex (mediaAddedAt de Seerr), para mostrarla en
     // el detalle y contar la caducidad desde ahí en vez de desde la aprobación.
     const since = unavailable ? NaN : Date.parse(data.mediaInfo?.mediaAddedAt ?? '');
-    const entry = { unavailable, availableSince: Number.isFinite(since) ? since : null, at: Date.now() };
+    const entry = { unavailable, status, availableSince: Number.isFinite(since) ? since : null, at: Date.now() };
     availabilityCache.set(tmdbId, entry);
     return entry;
   } catch {
-    return { unavailable: false, availableSince: null };
+    return { unavailable: false, status: null, availableSince: null };
   }
 }
 
@@ -241,8 +241,8 @@ async function movieAvailability(tmdbId) {
 export async function getMovieAvailability(tmdbIds) {
   const out = new Map();
   for (const tmdbId of new Set(tmdbIds.filter((id) => id != null))) {
-    const { unavailable, availableSince } = await movieAvailability(tmdbId);
-    out.set(tmdbId, { unavailable, availableSince });
+    const { unavailable, status, availableSince } = await movieAvailability(tmdbId);
+    out.set(tmdbId, { unavailable, status, availableSince });
   }
   return out;
 }
