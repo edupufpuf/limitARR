@@ -706,10 +706,10 @@ export default function Quota() {
       .sort((a, b) => worstLib(a.libraries).balance - worstLib(b.libraries).balance);
   }, [users, query, activeFilter]);
 
-  // Deudores para las burbujas: todos con pendientes de ver, de más a menos
-  // deuda (a igualdad, peor proporción sin ver / pedido primero). ratio ∈ (0,1]
-  // dimensiona el anillo (requested puede quedarse corto si el historial no
-  // está importado — se acota con el propio owed para no pasar de 1).
+  // Deudores para las burbujas: los 4 con más pendientes de ver, de más a
+  // menos deuda (a igualdad, peor proporción sin ver / pedido primero).
+  // ratio ∈ (0,1] dimensiona el anillo (requested puede quedarse corto si el
+  // historial no está importado — se acota con el propio owed para no pasar de 1).
   const debtors = useMemo(() => {
     return users
       .map((u) => {
@@ -718,7 +718,8 @@ export default function Quota() {
         return { user: u, owed, requested, ratio: owed > 0 ? owed / requested : 0 };
       })
       .filter((d) => d.owed > 0)
-      .sort((a, b) => b.owed - a.owed || b.ratio - a.ratio);
+      .sort((a, b) => b.owed - a.owed || b.ratio - a.ratio)
+      .slice(0, 4);
   }, [users]);
 
   function selectFilter(filter) {
