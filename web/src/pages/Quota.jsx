@@ -438,19 +438,19 @@ export function PendingDetailModal({
           )}
         </div>
 
-        {/* Issue #15: en móvil los botones van en cuadrícula 2×2 (caben los 4
-            posibles); en pantallas anchas se mantiene la fila con la acción
-            destructiva empujada a la derecha. */}
-        <div className="grid grid-cols-2 gap-2 mt-5 sm:flex sm:flex-wrap">
-          {tautulliUrl && (
-            <a href={tautulliUrl} target="_blank" rel="noreferrer" className="btn btn-ghost">Ver en Tautulli</a>
-          )}
-          {detail?.seerrUrl && (
-            <a href={detail.seerrUrl} target="_blank" rel="noreferrer" className="btn btn-ghost">Ver en Seerr</a>
-          )}
-          {/* Issue #16: un pendiente de aprobación se decide aquí mismo; no hay
-              fila de cupo que quitar. */}
-          {!readOnly && (item.pendingApproval ? (
+        {/* El detalle del usuario es estrictamente informativo: sin enlaces ni
+            acciones administrativas. El pie completo solo existe en admin. */}
+        {!readOnly && (
+          <div className="grid grid-cols-2 gap-2 mt-5 sm:flex sm:flex-wrap">
+            {tautulliUrl && (
+              <a href={tautulliUrl} target="_blank" rel="noreferrer" className="btn btn-ghost">Ver en Tautulli</a>
+            )}
+            {detail?.seerrUrl && (
+              <a href={detail.seerrUrl} target="_blank" rel="noreferrer" className="btn btn-ghost">Ver en Seerr</a>
+            )}
+            {/* Issue #16: un pendiente de aprobación se decide aquí mismo; no hay
+                fila de cupo que quitar. */}
+            {item.pendingApproval ? (
             <>
               <button onClick={() => onApprove(item)} className="btn btn-primary sm:ml-auto">
                 Aprobar
@@ -472,8 +472,9 @@ export function PendingDetailModal({
                 Quitar del cupo
               </button>
             </>
-          ))}
-        </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
