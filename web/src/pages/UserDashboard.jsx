@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { Wordmark } from '../components/Brand.jsx';
 import { IconBell, IconLogout } from '../icons.jsx';
+import { PendingDetailModal } from './Quota.jsx';
 
-function LibraryCard({ library }) {
+function LibraryCard({ library, onDetail }) {
   const percent = library.limitApplied > 0 ? Math.max(0, Math.min(100, (library.balance / library.limitApplied) * 100)) : 0;
   return (
     <section className="card p-5">
@@ -24,8 +25,11 @@ function LibraryCard({ library }) {
         <div className="grid grid-cols-3 sm:grid-cols-5 gap-3 mt-5">
           {library.pendingItems.map((item, index) => (
             <div key={`${item.tmdbId ?? item.title}-${index}`}>
-              <div
-                className="relative aspect-[2/3] w-full overflow-hidden rounded-lg bg-bg-950"
+              <button
+                type="button"
+                onClick={() => onDetail(item)}
+                aria-label={`Ver detalle de ${item.title}`}
+                className="relative aspect-[2/3] w-full overflow-hidden rounded-lg bg-bg-950 text-left"
                 title={item.pendingApproval
                   ? `${item.title} — pendiente de aprobar, no cuenta`
                   : item.unavailable
@@ -50,7 +54,7 @@ function LibraryCard({ library }) {
                     </span>
                   </div>
                 )}
-              </div>
+              </button>
               <p className="text-[11px] text-gray-400 mt-1 line-clamp-2">{item.title}</p>
             </div>
           ))}
@@ -72,6 +76,11 @@ export default function UserDashboard({ session, onLoggedOut }) {
   const [chatId, setChatId] = useState('');
   const [message, setMessage] = useState(null);
   const [error, setError] = useState(null);
+  const [detailTarget, setDetailTarget] = useState(null);
+  const loadUserDetail = useCallback(
+    (params) => api.myPendingDetail(detailTarget?.lib.libraryId, params),
+    [detailTarget?.lib.libraryId]
+  );
 
   useEffect(() => {
     Promise.all([api.myQuota(), api.myNotifications()])
@@ -128,7 +137,13 @@ export default function UserDashboard({ session, onLoggedOut }) {
         </p>
         {error && <div role="alert" className="card p-4 mb-5 text-accent-400">{error}</div>}
         <div className="grid md:grid-cols-2 gap-4">
-          {quota?.libraries?.map((library) => <LibraryCard key={library.libraryId} library={library} />)}
+          {quota?.libraries?.map((library) => (
+            <LibraryCard
+              key={library.libraryId}
+              library={library}
+              onDetail={(item) => setDetailTarget({ lib: library, item })}
+            />
+          ))}
         </div>
         {quota && quota.libraries?.length === 0 && <div className="card p-6 text-gray-400">Todavía no hay cupo calculado para tu cuenta.</div>}
 
@@ -145,6 +160,17 @@ export default function UserDashboard({ session, onLoggedOut }) {
           {message && <p aria-live="polite" className={`text-sm mt-3 ${message.startsWith('No ') ? 'text-accent-400' : 'text-green-400'}`}>{message}</p>}
         </section>
       </main>
+      {detailTarget && (
+        <PendingDetailModal
+          user={{ userId: session?.id, username: session?.username }}
+          lib={detailTarget.lib}
+          item={detailTarget.item}
+          statsBase=""
+          readOnly
+          loadDetail={loadUserDetail}
+          onClose={() => setDetailTarget(null)}
+        />
+      )}
     </div>
   );
 }

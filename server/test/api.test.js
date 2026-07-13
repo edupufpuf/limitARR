@@ -45,7 +45,21 @@ test('auth Plex: usuario normal solo ve su cupo y gestiona su propio chat', asyn
   `).run();
   db.prepare(`
     INSERT OR REPLACE INTO quota_cache (user_id, library_id, limit_applied, outstanding, balance, pending_items)
-    VALUES (1880, 1777, 4, 1, 3, '[]')
+    VALUES (1880, 1777, 4, 1, 3, ?)
+  `).run(JSON.stringify([{
+    title: 'The Batman',
+    mediaType: 'movie',
+    tmdbId: 414906,
+    seasonNumber: null,
+    posterUrl: null,
+    unavailable: false,
+    watchedPercent: 25,
+    ratingKey: null,
+  }]));
+  db.prepare(`
+    INSERT INTO decisions_log
+      (request_id, user_id, username, library_id, media_title, media_type, tmdb_id, decision, created_at)
+    VALUES (990, 1880, 'ana', 1777, 'The Batman', 'movie', 414906, 'approved', '2026-07-01 12:00:00')
   `).run();
 
   const originalFetch = global.fetch;
@@ -95,7 +109,8 @@ test('auth Plex: usuario normal solo ve su cupo y gestiona su propio chat', asyn
     const quota = (await plexAgent.get('/api/me/quota').expect(200)).body;
     assert.equal(quota.userId, 1880);
     assert.equal(quota.libraries[0].balance, 3);
-    assert.deepEqual(quota.libraries[0].pendingItems, [{
+    assert.equal(quota.libraries[0].pendingItems[0].title, 'The Batman');
+    assert.deepEqual(quota.libraries[0].pendingItems[1], {
       title: 'Matrix',
       mediaType: 'movie',
       tmdbId: 603,
@@ -104,7 +119,16 @@ test('auth Plex: usuario normal solo ve su cupo y gestiona su propio chat', asyn
       pendingApproval: true,
       requestId: 991,
       requestedAt: '2026-07-13T08:00:00Z',
-    }]);
+    });
+
+    const detail = (await plexAgent
+      .get('/api/me/quota/pending-detail/1777?tmdbId=414906&mediaType=movie')
+      .expect(200)).body;
+    assert.equal(detail.requestedAt, '2026-07-01 12:00:00');
+    assert.deepEqual(detail.watchers, []);
+    await plexAgent
+      .get('/api/me/quota/pending-detail/1777?tmdbId=999999&ratingKey=secret')
+      .expect(404);
 
     await plexAgent.put('/api/me/notifications').send({ chatId: '123456' }).expect(200);
     assert.equal(db.prepare('SELECT chat_id FROM telegram_links WHERE user_id = 1880').get().chat_id, '123456');
@@ -113,6 +137,7 @@ test('auth Plex: usuario normal solo ve su cupo y gestiona su propio chat', asyn
     global.fetch = originalFetch;
     db.prepare('DELETE FROM telegram_links WHERE user_id = 1880').run();
     db.prepare('DELETE FROM quota_cache WHERE user_id = 1880 OR library_id = 1777').run();
+    db.prepare('DELETE FROM decisions_log WHERE request_id = 990').run();
     db.prepare('DELETE FROM libraries WHERE id = 1777').run();
     db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
   }

@@ -223,7 +223,18 @@ function percentColor(percent) {
 // Ventana de detalle de un pendiente (issue #6): fecha de solicitud/aprobación,
 // días transcurridos, quién lo ha visto (todas las cuentas, no solo el
 // solicitante) y hasta qué %, enlaces a Tautulli/Seerr y quitar del cupo.
-function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss, onDecline, onApprove }) {
+export function PendingDetailModal({
+  user,
+  lib,
+  item,
+  statsBase,
+  onClose,
+  onDismiss,
+  onDecline,
+  onApprove,
+  loadDetail,
+  readOnly = false,
+}) {
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState(false);
   // Issue #8: usuario desplegado en la tabla de visualizaciones (series) para
@@ -232,24 +243,41 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss, on
   const isTv = item.mediaType === 'tv';
 
   useEffect(() => {
+    setDetail(null);
+    setError(false);
+    setOpenWatcher(null);
     // Issue #16: un pendiente de aprobación no tiene fila aprobada ni visionados
     // que consultar — la fecha de solicitud ya viene de Seerr en el propio item.
     if (item.pendingApproval) {
       setDetail({ requestedAt: null, watchers: [] });
       return;
     }
-    api
-      .pendingDetail(user.userId, lib.libraryId, {
+    const params = {
         tmdbId: item.tmdbId,
         seasonNumber: item.seasonNumber,
         title: item.title,
         ratingKey: item.ratingKey,
         mediaType: item.mediaType,
         episodesTotal: item.episodesTotal,
-      })
+      };
+    const request = loadDetail
+      ? loadDetail(params)
+      : api.pendingDetail(user.userId, lib.libraryId, params);
+    request
       .then(setDetail)
       .catch(() => setError(true));
-  }, []);
+  }, [
+    item.pendingApproval,
+    item.tmdbId,
+    item.seasonNumber,
+    item.title,
+    item.ratingKey,
+    item.mediaType,
+    item.episodesTotal,
+    loadDetail,
+    user.userId,
+    lib.libraryId,
+  ]);
 
   // created_at de SQLite es "YYYY-MM-DD HH:MM:SS" en UTC; el createdAt de Seerr
   // (pendientes de aprobación, issue #16) ya es ISO.
@@ -257,7 +285,8 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss, on
     ? (item.requestedAt ? Date.parse(item.requestedAt) : null)
     : detail?.requestedAt ? Date.parse(detail.requestedAt.replace(' ', 'T') + 'Z') : null;
   const lastWatchMs = detail?.watchers?.reduce((max, w) => Math.max(max, w.lastWatchedAt ?? 0), 0) || null;
-  const tautulliUrl = statsBase && item.ratingKey ? `${statsBase}/info?rating_key=${item.ratingKey}` : null;
+  const tautulliUrl = detail?.tautulliUrl
+    ?? (statsBase && item.ratingKey ? `${statsBase}/info?rating_key=${item.ratingKey}` : null);
 
   return (
     // dvh y no vh: en Android/iOS la barra de URL del navegador come parte del
@@ -421,7 +450,7 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss, on
           )}
           {/* Issue #16: un pendiente de aprobación se decide aquí mismo; no hay
               fila de cupo que quitar. */}
-          {item.pendingApproval ? (
+          {!readOnly && (item.pendingApproval ? (
             <>
               <button onClick={() => onApprove(item)} className="btn btn-primary sm:ml-auto">
                 Aprobar
@@ -443,7 +472,7 @@ function PendingDetailModal({ user, lib, item, statsBase, onClose, onDismiss, on
                 Quitar del cupo
               </button>
             </>
-          )}
+          ))}
         </div>
       </div>
     </div>

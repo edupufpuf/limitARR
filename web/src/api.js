@@ -26,6 +26,12 @@ export const api = {
 
   users: () => request('/users'),
   myQuota: () => request('/me/quota'),
+  myPendingDetail: (libraryId, params) => {
+    const query = new URLSearchParams(
+      Object.fromEntries(Object.entries(params).filter(([, value]) => value != null && value !== ''))
+    );
+    return request(`/me/quota/pending-detail/${libraryId}?${query}`);
+  },
   myNotifications: () => request('/me/notifications'),
   updateMyNotifications: (body) => request('/me/notifications', { method: 'PUT', body: JSON.stringify(body) }),
   deleteMyNotifications: () => request('/me/notifications', { method: 'DELETE' }),

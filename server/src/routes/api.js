@@ -171,6 +171,62 @@ router.get('/me/quota', ah(async (req, res) => {
   });
 }));
 
+// El usuario puede abrir el mismo detalle visual que el administrador, pero
+// solo para una carátula presente en su propia caché de cupo. Los parámetros
+// sensibles (ratingKey, tipo, título...) se toman de esa caché, no de la URL.
+router.get('/me/quota/pending-detail/:libraryId', ah(async (req, res) => {
+  if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });
+  const libraryId = Number(req.params.libraryId);
+  const cacheId = quotaIdentity(req.session.user.id).cacheId;
+  const cached = db.prepare(
+    'SELECT pending_items FROM quota_cache WHERE user_id = ? AND library_id = ?'
+  ).get(cacheId, libraryId);
+  if (!cached) return res.status(404).json({ error: 'pending_not_found' });
+
+  let pendingItems = [];
+  try {
+    pendingItems = JSON.parse(cached.pending_items || '[]');
+  } catch { /* una caché inválida no concede acceso al detalle */ }
+  const requestedTmdbId = req.query.tmdbId != null ? Number(req.query.tmdbId) : null;
+  const requestedSeason = req.query.seasonNumber != null ? Number(req.query.seasonNumber) : null;
+  const requestedTitle = String(req.query.title || '').trim().toLocaleLowerCase('es');
+  const item = pendingItems.find((candidate) => {
+    if (candidate.pendingApproval) return false;
+    const sameSeason = Number(candidate.seasonNumber ?? 0) === Number(requestedSeason ?? 0);
+    if (!sameSeason) return false;
+    if (requestedTmdbId != null) return Number(candidate.tmdbId) === requestedTmdbId;
+    return requestedTitle && String(candidate.title || '').trim().toLocaleLowerCase('es') === requestedTitle;
+  });
+  if (!item) return res.status(404).json({ error: 'pending_not_found' });
+
+  const detail = await getPendingItemDetail(cacheId, libraryId, {
+    tmdbId: item.tmdbId ?? null,
+    seasonNumber: item.seasonNumber ?? null,
+    title: item.title || '',
+    ratingKey: item.ratingKey ?? null,
+    mediaType: item.mediaType || 'movie',
+    episodesTotal: item.episodesTotal ?? null,
+  });
+  const settings = getSettings();
+  const seerrBase = settings.seerr_public_url || settings.seerr_url;
+  const tautulliBase = settings.tautulli_public_url || settings.tautulli_url;
+  const seerrUrl = seerrBase && item.tmdbId != null
+    ? `${seerrBase}/${item.mediaType === 'tv' ? 'tv' : 'movie'}/${item.tmdbId}`
+    : null;
+  const tautulliUrl = tautulliBase && item.ratingKey
+    ? `${tautulliBase}/info?rating_key=${item.ratingKey}`
+    : null;
+  // Una cuenta Plex normal ve su propio historial; los visionados de las demás
+  // cuentas siguen reservados al panel administrativo.
+  const ownUserId = Number(req.session.user.id);
+  res.json({
+    ...detail,
+    watchers: detail.watchers.filter((watcher) => Number(watcher.userId) === ownUserId),
+    seerrUrl,
+    tautulliUrl,
+  });
+}));
+
 router.get('/me/notifications', (req, res) => {
   if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });
   const link = db.prepare('SELECT chat_id, label, linked_at FROM telegram_links WHERE user_id = ?').get(req.session.user.id);
