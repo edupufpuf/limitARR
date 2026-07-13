@@ -178,17 +178,27 @@ export async function getShowDetails(tmdbId, seasonNumber = null) {
     // → status 0 → no disponible. seasonStatuses null solo en error de red
     // (catch), que se trata como disponible para no regalar cupo.
     const seasonStatuses = {};
+    // Issue #14: fecha aproximada de disponibilidad por temporada. Seerr no la
+    // guarda por temporada, así que se usa el updatedAt de la fila de temporada
+    // (cambia al pasar a disponible) y de respaldo el mediaAddedAt de la serie.
+    const seasonAvailableSince = {};
     for (const s of data.mediaInfo?.seasons || []) {
-      seasonStatuses[Number(s.seasonNumber)] = Number(s.status ?? 0);
+      const status = Number(s.status ?? 0);
+      seasonStatuses[Number(s.seasonNumber)] = status;
+      if (status >= 4) {
+        const since = Date.parse(s.updatedAt ?? data.mediaInfo?.mediaAddedAt ?? '');
+        seasonAvailableSince[Number(s.seasonNumber)] = Number.isFinite(since) ? since : null;
+      }
     }
     return {
       title: data.name || null,
       posterUrl: posterPath ? `https://image.tmdb.org/t/p/w185${posterPath}` : null,
       showRatingKey: data.mediaInfo?.ratingKey ? String(data.mediaInfo.ratingKey) : null,
       seasonStatuses,
+      seasonAvailableSince,
     };
   } catch {
-    return { title: null, posterUrl: null, showRatingKey: null, seasonStatuses: null };
+    return { title: null, posterUrl: null, showRatingKey: null, seasonStatuses: null, seasonAvailableSince: null };
   }
 }
 
@@ -205,28 +215,34 @@ export async function getMediaDetails(mediaType, tmdbId, seasonNumber = null) {
 // TTL corto: lo justo para no repetir la misma consulta por cada usuario dentro
 // de un ciclo de sondeo, sin retrasar apenas el "ya está en Plex".
 const AVAILABILITY_TTL_MS = 60_000;
-const availabilityCache = new Map(); // tmdbId -> { unavailable, at }
+const availabilityCache = new Map(); // tmdbId -> { unavailable, availableSince, at }
 
-async function isUnavailable(tmdbId) {
+async function movieAvailability(tmdbId) {
   const cached = availabilityCache.get(tmdbId);
-  if (cached && Date.now() - cached.at < AVAILABILITY_TTL_MS) return cached.unavailable;
+  if (cached && Date.now() - cached.at < AVAILABILITY_TTL_MS) return cached;
 
   try {
     const data = await call(`/movie/${tmdbId}`);
     const status = Number(data.mediaInfo?.status ?? 0);
     const unavailable = status < 4; // 4 parcial / 5 disponible = ya se puede ver
-    availabilityCache.set(tmdbId, { unavailable, at: Date.now() });
-    return unavailable;
+    // Issue #14: cuándo llegó a Plex (mediaAddedAt de Seerr), para mostrarla en
+    // el detalle y contar la caducidad desde ahí en vez de desde la aprobación.
+    const since = unavailable ? NaN : Date.parse(data.mediaInfo?.mediaAddedAt ?? '');
+    const entry = { unavailable, availableSince: Number.isFinite(since) ? since : null, at: Date.now() };
+    availabilityCache.set(tmdbId, entry);
+    return entry;
   } catch {
-    return false;
+    return { unavailable: false, availableSince: null };
   }
 }
 
-// Subconjunto de `tmdbIds` que aún no están disponibles en Plex según Seerr.
-export async function getUnavailableTmdbIds(tmdbIds) {
-  const out = new Set();
+// Disponibilidad de cada tmdbId según Seerr: si aún no está en Plex y, si ya
+// está, desde cuándo. Map tmdbId -> { unavailable, availableSince (ms|null) }.
+export async function getMovieAvailability(tmdbIds) {
+  const out = new Map();
   for (const tmdbId of new Set(tmdbIds.filter((id) => id != null))) {
-    if (await isUnavailable(tmdbId)) out.add(tmdbId);
+    const { unavailable, availableSince } = await movieAvailability(tmdbId);
+    out.set(tmdbId, { unavailable, availableSince });
   }
   return out;
 }

@@ -53,7 +53,7 @@ test('computeBalance: aprobada y no vista resta cupo', () => {
   assert.equal(r.balance, 0);
   assert.equal(r.outstanding, 1);
   assert.deepEqual(r.pendingItems, [
-    { title: 'Matrix', mediaType: 'movie', tmdbId: 603, seasonNumber: null, posterUrl: 'https://img/x.jpg', unavailable: false, watchedPercent: 0, expiresAt: null, requestId: null },
+    { title: 'Matrix', mediaType: 'movie', tmdbId: 603, seasonNumber: null, posterUrl: 'https://img/x.jpg', unavailable: false, watchedPercent: 0, availableSince: null, expiresAt: null, requestId: null },
   ]);
 });
 
@@ -430,4 +430,40 @@ test('computeBalance: el pendiente lleva su fecha de caducidad', () => {
   assert.equal(r.pendingItems[0].expiresAt, expected);
   const sinCaducidad = computeBalance(2, approved, new Set(), new Set(), new Map(), null);
   assert.equal(sinCaducidad.pendingItems[0].expiresAt, null);
+});
+
+// --- Issue #14: la caducidad cuenta desde la disponibilidad en Plex ---
+
+test('dropExpiredRows: el plazo cuenta desde availableSince, no desde la aprobación', () => {
+  const now = Date.parse('2026-07-12T12:00:00Z');
+  // Aprobada hace 41 días pero llegó a Plex hace 11: NO caduca.
+  const rows = [{ media_title: 'Tardona', tmdb_id: 1, created_at: '2026-06-01 12:00:00' }];
+  const availability = new Map([[1, { unavailable: false, availableSince: Date.parse('2026-07-01T12:00:00Z') }]]);
+  assert.equal(dropExpiredRows(rows, 30, now, availability).length, 1);
+  // Sin dato de disponibilidad se cae a created_at: caduca como antes.
+  assert.equal(dropExpiredRows(rows, 30, now, new Map()).length, 0);
+});
+
+test('dropExpiredRows: una no disponible nunca caduca', () => {
+  const now = Date.parse('2026-07-12T12:00:00Z');
+  const rows = [{ media_title: 'Atascada', tmdb_id: 2, created_at: '2026-05-01 12:00:00' }];
+  const availability = new Map([[2, { unavailable: true, availableSince: null }]]);
+  assert.equal(dropExpiredRows(rows, 30, now, availability).length, 1);
+});
+
+test('computeBalance: expiresAt y availableSince salen de la disponibilidad', () => {
+  const since = Date.parse('2026-07-01T00:00:00Z');
+  const approved = [{ media_title: 'Matrix', tmdb_id: 603, created_at: '2026-06-01 00:00:00' }];
+  const availability = new Map([[603, { unavailable: false, availableSince: since }]]);
+  const r = computeBalance(2, approved, new Set(), new Set(), new Map(), 30, availability);
+  assert.equal(r.pendingItems[0].availableSince, since);
+  assert.equal(r.pendingItems[0].expiresAt, since + 30 * 86_400_000);
+});
+
+test('computeBalance: una no disponible no lleva fecha de caducidad', () => {
+  const approved = [{ media_title: 'Estreno Futuro', tmdb_id: 999, created_at: '2026-06-01 00:00:00' }];
+  const r = computeBalance(2, approved, new Set(), new Set([999]), new Map(), 30);
+  assert.equal(r.pendingItems[0].unavailable, true);
+  assert.equal(r.pendingItems[0].expiresAt, null);
+  assert.equal(r.pendingItems[0].availableSince, null);
 });

@@ -14,7 +14,7 @@ import {
   getSeerrUsers,
   getApprovedRequestsForUser,
   getMediaDetails,
-  getUnavailableTmdbIds,
+  getMovieAvailability,
 } from './services/seerr.js';
 import { matchByEmailOrUsername } from './userMatch.js';
 
@@ -123,16 +123,29 @@ export function resolveExpiryDays(userOverride, groupOverride, libraryDays) {
   return days > 0 ? days : null; // null = no caduca
 }
 
-export function dropExpiredRows(rows, expiryDays, nowMs = Date.now()) {
+// Issue #14: el plazo cuenta desde que el título está disponible en Plex, no
+// desde la aprobación (una película que tardó 29 días en descargarse caducaba
+// al día siguiente de llegar). `availability` es el Map de getMovieAvailability;
+// sin él (tests, series) se cae al comportamiento antiguo por created_at. Un
+// pendiente aún no disponible no caduca: no se puede ver todavía, y las
+// solicitudes atascadas ya las anula reconcileVoidedRequests.
+export function dropExpiredRows(rows, expiryDays, nowMs = Date.now(), availability = null) {
   if (!expiryDays) return rows;
   const cutoff = nowMs - expiryDays * DAY_MS;
-  return rows.filter((r) => !r.created_at || rowTimeMs(r) > cutoff);
+  return rows.filter((r) => {
+    const info = r.tmdb_id != null ? availability?.get(r.tmdb_id) : null;
+    if (info?.unavailable) return true;
+    const base = info?.availableSince ?? (r.created_at ? rowTimeMs(r) : null);
+    return base == null || base > cutoff;
+  });
 }
 
-// Fecha de caducidad de un pendiente, para la ventana de detalle.
-function expiresAtMs(row, expiryDays) {
-  if (!expiryDays || !row.created_at) return null;
-  return rowTimeMs(row) + expiryDays * DAY_MS;
+// Fecha de caducidad de un pendiente, para la ventana de detalle. Desde la
+// disponibilidad si se conoce (issue #14), si no desde la aprobación.
+function expiresAtMs(row, expiryDays, availableSinceMs = null) {
+  if (!expiryDays) return null;
+  const base = availableSinceMs ?? (row.created_at ? rowTimeMs(row) : null);
+  return base == null ? null : base + expiryDays * DAY_MS;
 }
 
 // Issue #4: identidad de cupo de un id. Un usuario de un grupo agregado no tiene
@@ -167,7 +180,7 @@ export function resolveLimit(userOverride, groupOverride, defaultLimit) {
 // Tautulli/Seerr: dado el límite ya resuelto, las filas aprobadas y el set de
 // títulos vistos, decide cuántas están pendientes y cuál es el saldo. Nunca
 // negativo: por debajo de 0 se queda en 0 (el bloqueo ya lo gestiona balance < 1).
-export function computeBalance(limit, approvedRows, watchedTitles, unavailableTmdbIds = new Set(), percentByTitle = new Map(), expiryDays = null) {
+export function computeBalance(limit, approvedRows, watchedTitles, unavailableTmdbIds = new Set(), percentByTitle = new Map(), expiryDays = null, availability = null) {
   const pending = approvedRows.filter((r) => !watchedTitles.has(normalize(r.media_title)));
   // Issue #1: las que aún no están disponibles en Plex (según Seerr: faltante,
   // sin estrenar o no encontrada) no restan cupo, pero sí se listan como
@@ -181,6 +194,8 @@ export function computeBalance(limit, approvedRows, watchedTitles, unavailableTm
     const key = normalize(r.media_title);
     if (seenTitles.has(key)) continue;
     seenTitles.add(key);
+    // Issue #14: desde cuándo está en Plex (Seerr), si se sabe.
+    const availableSince = isUnavailable(r) ? null : (r.tmdb_id != null ? availability?.get(r.tmdb_id)?.availableSince ?? null : null);
     pendingItems.push({
       title: r.media_title,
       mediaType: r.media_type || 'movie',
@@ -190,8 +205,10 @@ export function computeBalance(limit, approvedRows, watchedTitles, unavailableTm
       unavailable: isUnavailable(r),
       // Issue #7: % de avance del solicitante, para la rueda de la carátula.
       watchedPercent: Math.round(percentByTitle.get(key) ?? 0),
-      // Issue #10: cuándo caduca (ms epoch) o null si no caduca.
-      expiresAt: expiresAtMs(r, expiryDays),
+      availableSince,
+      // Issue #10: cuándo caduca (ms epoch) o null si no caduca. Una no
+      // disponible no caduca (issue #14): aún no se puede ver.
+      expiresAt: isUnavailable(r) ? null : expiresAtMs(r, expiryDays, availableSince),
       // Issue #11: para poder rechazar la solicitud en Seerr desde el detalle.
       requestId: r.request_id ?? null,
     });
@@ -264,6 +281,9 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatc
 
   for (const row of approvedRows) {
     if (!row.tmdb_id || !row.season_number) {
+      // Fila legada sin tmdb/temporada: sin datos de disponibilidad, caduca
+      // por fecha de aprobación como antes del issue #14.
+      if (expiryDays && row.created_at && rowTimeMs(row) + expiryDays * DAY_MS <= Date.now()) continue;
       pending.push(row);
       continue;
     }
@@ -293,6 +313,13 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatc
       // se lista con marca. seasonStatuses null = error de red → cuenta.
       const status = details?.seasonStatuses?.[row.season_number];
       row.unavailable = details?.seasonStatuses != null && (status ?? 0) < 4;
+      // Issue #14: caducidad desde que la temporada está disponible (si Seerr
+      // da la fecha); una no disponible no caduca. Una caducada ni se lista.
+      row.available_since = row.unavailable ? null : details?.seasonAvailableSince?.[row.season_number] ?? null;
+      if (!row.unavailable && expiryDays) {
+        const base = row.available_since ?? (row.created_at ? rowTimeMs(row) : null);
+        if (base != null && base + expiryDays * DAY_MS <= Date.now()) continue;
+      }
       // Issue #7: avance de la temporada = fracción de episodios ya vistos.
       row.watched_percent = state.percent;
       // Issue #8: "vistos/totales" para la etiqueta de la carátula y el detalle.
@@ -313,7 +340,8 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatc
     watchedPercent: r.watched_percent ?? 0,
     episodesWatched: r.episodes_watched ?? null,
     episodesTotal: r.episodes_total ?? null,
-    expiresAt: expiresAtMs(r, expiryDays),
+    availableSince: r.available_since ?? null,
+    expiresAt: r.unavailable ? null : expiresAtMs(r, expiryDays, r.available_since ?? null),
     requestId: r.request_id ?? null,
   }));
 
@@ -357,19 +385,22 @@ export async function getBalance(userId, libraryId) {
   }
   const resetAt = getResetAt.get(identity.cacheId, libraryId)?.reset_at ?? '0000-01-01';
 
-  // Issue #10: las aprobadas que han caducado sin verse ni se listan ni cuentan.
-  const approved = dropExpiredRows(
-    identity.memberIds.flatMap((memberId) => getApprovedTitles.all(memberId, libraryId, resetAt)),
-    expiryDays
-  );
+  const allApproved = identity.memberIds.flatMap((memberId) => getApprovedTitles.all(memberId, libraryId, resetAt));
   if (library.section_type === 'show') {
+    // Issue #10/#14: la caducidad de series se aplica dentro de computeTvBalance,
+    // donde ya se conoce la disponibilidad por temporada.
     const history = [];
     for (const memberId of identity.memberIds) {
       history.push(...(await getUserEpisodeHistory(memberId, libraryId)));
     }
-    return computeTvBalance(limit, approved, history, getSeasonWatchedPercent(), expiryDays);
+    return computeTvBalance(limit, allApproved, history, getSeasonWatchedPercent(), expiryDays);
   }
 
+  // Issue #14: la disponibilidad se consulta antes de filtrar caducadas porque
+  // el plazo cuenta desde que la película llegó a Plex, no desde la aprobación.
+  const availability = await getMovieAvailability(allApproved.map((r) => r.tmdb_id));
+  // Issue #10: las aprobadas que han caducado sin verse ni se listan ni cuentan.
+  const approved = dropExpiredRows(allApproved, expiryDays, Date.now(), availability);
   const history = [];
   for (const memberId of identity.memberIds) {
     history.push(...(await getUserMovieHistory(memberId, libraryId)));
@@ -384,8 +415,8 @@ export async function getBalance(userId, libraryId) {
     percentByTitle.set(key, Math.max(percentByTitle.get(key) ?? 0, h.percent));
   }
   await hydrateMissingPosters(approved);
-  const unavailable = await getUnavailableTmdbIds(approved.map((r) => r.tmdb_id));
-  return computeBalance(limit, approved, watchedTitles, unavailable, percentByTitle, expiryDays);
+  const unavailable = new Set([...availability].filter(([, v]) => v.unavailable).map(([k]) => k));
+  return computeBalance(limit, approved, watchedTitles, unavailable, percentByTitle, expiryDays, availability);
 }
 
 // "Resetea" el cupo de un usuario+biblioteca: las aprobaciones anteriores a ahora
