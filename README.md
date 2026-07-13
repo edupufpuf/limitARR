@@ -49,7 +49,8 @@ seerr/tautulli):
 3. Abre el panel en `http://<host>:5150` — como no hay contraseña
    definida, pedirá crearla en el primer acceso.
 4. Pestaña **Configuración**: URL + API key de Seerr y Tautulli (si no
-   se rellenaron por env, ver abajo).
+   se rellenaron por env, ver abajo). Para el acceso de usuarios, añade también
+   la URL de Plex y el `X-Plex-Token` del propietario del servidor.
 5. Pestaña **Bibliotecas**: pulsa "Sincronizar desde Tautulli" para
    descubrirlas, márcalas `standard`/`4k` y ponles el límite por defecto.
 6. Si ya había solicitudes aprobadas antes de instalarlo (o admins
@@ -63,6 +64,23 @@ sesión) se puede fijar por variables de entorno la primera vez
 (`.env.example`), pero después vive en la base de datos y se edita desde
 el panel — no hace falta tocar env vars ni reiniciar el contenedor para
 cambiarlo.
+
+## Acceso con Plex y panel de usuario
+
+Además de la contraseña administrativa, la pantalla de acceso ofrece **Entrar
+con Plex**. limitARR crea un PIN temporal y abre el portal oficial de Plex; la
+contraseña de Plex nunca pasa por limitARR.
+
+- El propietario de la cuenta indicada por `PLEX_TOKEN` entra como administrador.
+- Los usuarios compartidos que también existan en Tautulli entran con rol de
+  consulta. No pueden abrir Ajustes, Bibliotecas, Overrides ni el registro.
+- Cada usuario ve únicamente su cupo. Si pertenece a un grupo agregado, ve el
+  cupo compartido y sus miembros.
+- En **Mis avisos** puede vincular o quitar su propio chat de Telegram. No puede
+  editar el bot, el destino global ni los avisos de otros usuarios.
+
+La URL y el token de Plex se pueden sembrar con `PLEX_URL`/`PLEX_TOKEN` o guardar
+desde **Ajustes → Plex**. El botón **Probar conexión** valida también Plex.
 
 ## Cupo
 

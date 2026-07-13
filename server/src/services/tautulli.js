@@ -39,6 +39,7 @@ export async function getUsers() {
     username: u.username,
     email: u.email,
     friendlyName: u.friendly_name,
+    isAdmin: Boolean(Number(u.is_admin)),
   }));
 }
 

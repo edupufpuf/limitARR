@@ -14,6 +14,8 @@ export const api = {
   version: () => request('/version'),
   setup: (password) => request('/auth/setup', { method: 'POST', body: JSON.stringify({ password }) }),
   login: (password) => request('/auth/login', { method: 'POST', body: JSON.stringify({ password }) }),
+  plexStart: () => request('/auth/plex/start', { method: 'POST' }),
+  plexCheck: () => request('/auth/plex/check', { method: 'POST' }),
   logout: () => request('/auth/logout', { method: 'POST' }),
   changePassword: (currentPassword, newPassword) =>
     request('/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) }),
@@ -23,6 +25,10 @@ export const api = {
   updateLibrary: (id, body) => request(`/libraries/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
 
   users: () => request('/users'),
+  myQuota: () => request('/me/quota'),
+  myNotifications: () => request('/me/notifications'),
+  updateMyNotifications: (body) => request('/me/notifications', { method: 'PUT', body: JSON.stringify(body) }),
+  deleteMyNotifications: () => request('/me/notifications', { method: 'DELETE' }),
 
   overrides: () => request('/overrides'),
   setOverride: (userId, libraryId, body) =>

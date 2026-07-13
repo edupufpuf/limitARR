@@ -4,7 +4,7 @@ import os from 'node:os';
 import fs from 'node:fs';
 import { db } from '../db.js';
 import { config } from '../config.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { needsSetup, setPassword, checkPassword, getWebhookSecret } from '../auth.js';
 import { getUsers, getLibraries } from '../services/tautulli.js';
@@ -22,6 +22,7 @@ import { resetQuota, importSeerrHistory, refreshQuotaCache, dismissPendingItem, 
 import { matchByEmailOrUsername } from '../userMatch.js';
 import { runPollCycle } from '../scheduler.js';
 import { getVersionInfo } from '../services/version.js';
+import { createPlexPin, claimPlexPin, getPlexAccount, testPlexServer } from '../services/plex.js';
 import {
   getBotTokenForDisplay,
   setBotToken,
@@ -43,6 +44,7 @@ const ah = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 // --- Auth ---
 
 const authRateLimit = rateLimit({ max: 5, windowMs: 15 * 60 * 1000 });
+const plexPollRateLimit = rateLimit({ max: 90, windowMs: 5 * 60 * 1000 });
 
 router.post('/auth/setup', authRateLimit, (req, res) => {
   if (!needsSetup()) return res.status(409).json({ error: 'already_configured' });
@@ -52,6 +54,8 @@ router.post('/auth/setup', authRateLimit, (req, res) => {
   }
   setPassword(password);
   req.session.authed = true;
+  req.session.role = 'admin';
+  req.session.user = null;
   res.json({ ok: true });
 });
 
@@ -62,6 +66,8 @@ router.post('/auth/login', authRateLimit, (req, res) => {
     return res.status(401).json({ error: 'invalid_password' });
   }
   req.session.authed = true;
+  req.session.role = 'admin';
+  req.session.user = null;
   res.json({ ok: true });
 });
 
@@ -71,8 +77,48 @@ router.post('/auth/logout', (req, res) => {
 });
 
 router.get('/auth/me', (req, res) => {
-  res.json({ authed: Boolean(req.session?.authed), needsSetup: needsSetup() });
+  res.json({
+    authed: Boolean(req.session?.authed),
+    needsSetup: needsSetup(),
+    role: req.session?.authed ? (req.session?.role ?? 'admin') : null,
+    user: req.session?.user ?? null,
+  });
 });
+
+router.post('/auth/plex/start', authRateLimit, ah(async (req, res) => {
+  if (needsSetup()) return res.status(409).json({ error: 'needs_setup' });
+  const forwardUrl = `${req.protocol}://${req.get('host')}/?plex=done`;
+  const pin = await createPlexPin(forwardUrl);
+  req.session.plexPinId = pin.id;
+  res.json({ authUrl: pin.authUrl });
+}));
+
+router.post('/auth/plex/check', plexPollRateLimit, ah(async (req, res) => {
+  const pinId = req.session?.plexPinId;
+  if (!pinId) return res.status(400).json({ error: 'plex_flow_missing' });
+  const token = await claimPlexPin(pinId);
+  if (!token) return res.status(202).json({ pending: true });
+
+  const [account, users] = await Promise.all([getPlexAccount(token), getUsers()]);
+  const user = matchByEmailOrUsername(users, account);
+  if (!user) {
+    req.session.plexPinId = null;
+    return res.status(403).json({ error: 'plex_user_not_allowed' });
+  }
+
+  const ownerToken = getSettings().plex_token;
+  let isAdmin = user.isAdmin;
+  if (ownerToken) {
+    const owner = await getPlexAccount(ownerToken);
+    isAdmin = String(owner.id ?? owner.uuid) === String(account.id ?? account.uuid);
+  }
+
+  req.session.authed = true;
+  req.session.role = isAdmin ? 'admin' : 'user';
+  req.session.user = { id: user.id, username: user.friendlyName || user.username };
+  req.session.plexPinId = null;
+  res.json({ ok: true, role: req.session.role, user: req.session.user });
+}));
 
 // Webhook público de Seerr (sin auth de sesión — lo llama Seerr, no un admin
 // logueado). El secreto en la URL es la única protección, ver auth.js. Dispara
@@ -89,6 +135,40 @@ router.use(requireAuth);
 router.get('/version', ah(async (req, res) => {
   res.json(await getVersionInfo());
 }));
+
+// Vista y configuración estrictamente propias para cuentas Plex normales.
+router.get('/me/quota', ah(async (req, res) => {
+  if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });
+  const cacheId = quotaIdentity(req.session.user.id).cacheId;
+  const card = (await buildQuotaByUser()).find((item) => item.userId === cacheId);
+  res.json(card ?? { userId: cacheId, username: req.session.user.username, libraries: [] });
+}));
+
+router.get('/me/notifications', (req, res) => {
+  if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });
+  const link = db.prepare('SELECT chat_id, label, linked_at FROM telegram_links WHERE user_id = ?').get(req.session.user.id);
+  res.json(link ?? null);
+});
+
+router.put('/me/notifications', (req, res) => {
+  if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });
+  const { chatId, label } = req.body || {};
+  if (!chatId) return res.status(400).json({ error: 'chatId_required' });
+  db.prepare(`
+    INSERT INTO telegram_links (user_id, chat_id, label, linked_at)
+    VALUES (?, ?, ?, datetime('now'))
+    ON CONFLICT (user_id) DO UPDATE SET chat_id=excluded.chat_id, label=excluded.label, linked_at=excluded.linked_at
+  `).run(req.session.user.id, String(chatId), label || null);
+  res.json({ ok: true });
+});
+
+router.delete('/me/notifications', (req, res) => {
+  if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });
+  db.prepare('DELETE FROM telegram_links WHERE user_id = ?').run(req.session.user.id);
+  res.status(204).end();
+});
+
+router.use(requireAdmin);
 
 router.post('/auth/change-password', (req, res) => {
   const { currentPassword, newPassword } = req.body || {};
@@ -109,8 +189,8 @@ router.get('/settings', (req, res) => {
 });
 
 router.put('/settings', (req, res) => {
-  const { seerr_url, seerr_api_key, seerr_public_url, tautulli_url, tautulli_api_key, tautulli_public_url } = req.body || {};
-  updateSettings({ seerr_url, seerr_api_key, seerr_public_url, tautulli_url, tautulli_api_key, tautulli_public_url });
+  const { seerr_url, seerr_api_key, seerr_public_url, tautulli_url, tautulli_api_key, tautulli_public_url, plex_url, plex_token } = req.body || {};
+  updateSettings({ seerr_url, seerr_api_key, seerr_public_url, tautulli_url, tautulli_api_key, tautulli_public_url, plex_url, plex_token });
   res.json(getSettingsForDisplay());
 });
 
@@ -121,6 +201,13 @@ router.post('/settings/test', async (req, res) => {
     result.tautulli = { ok: true };
   } catch (err) {
     result.tautulli = { ok: false, error: err.message };
+  }
+  try {
+    const settings = getSettings();
+    await testPlexServer(settings.plex_url, settings.plex_token);
+    result.plex = { ok: true };
+  } catch (err) {
+    result.plex = { ok: false, error: err.message };
   }
   try {
     await listPendingRequests();

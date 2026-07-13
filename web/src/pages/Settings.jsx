@@ -19,6 +19,8 @@ export default function Settings() {
     tautulli_url: '',
     tautulli_api_key: '',
     tautulli_public_url: '',
+    plex_url: '',
+    plex_token: '',
     tv_season_watched_percent: '',
   });
   const [saving, setSaving] = useState(false);
@@ -42,6 +44,7 @@ export default function Settings() {
         seerr_public_url: s.seerr_public_url ?? '',
         tautulli_url: s.tautulli_url ?? '',
         tautulli_public_url: s.tautulli_public_url ?? '',
+        plex_url: s.plex_url ?? '',
         tv_season_watched_percent: s.tv_season_watched_percent ?? '',
       }));
     });
@@ -54,7 +57,7 @@ export default function Settings() {
     e.preventDefault();
     setSaving(true);
     await api.updateSettings(form);
-    setForm((f) => ({ ...f, seerr_api_key: '', tautulli_api_key: '' }));
+    setForm((f) => ({ ...f, seerr_api_key: '', tautulli_api_key: '', plex_token: '' }));
     load();
     setSaving(false);
   }
@@ -110,7 +113,7 @@ export default function Settings() {
     <div className="max-w-xl">
       <h2 className="page-title mb-1">Configuración</h2>
       <p className="text-xs text-gray-500 mb-6">
-        Conexión a Seerr y Tautulli. Deja la clave en blanco para no cambiar la ya guardada.
+        Conexión a Seerr, Tautulli y Plex. Deja las claves en blanco para conservar las guardadas.
       </p>
 
       <form onSubmit={save} className="card p-5 space-y-5">
@@ -142,6 +145,30 @@ export default function Settings() {
             placeholder="http://192.168.1.10:5055 — vacío = usar la URL de arriba"
             className="input"
           />
+        </fieldset>
+
+        <fieldset>
+          <legend className="text-sm font-semibold text-accent-400 mb-2">Plex</legend>
+          <label className="label">URL del servidor</label>
+          <input
+            value={form.plex_url}
+            onChange={(e) => setForm({ ...form, plex_url: e.target.value })}
+            placeholder="http://plex:32400"
+            className="input mb-3"
+          />
+          <label className="label">
+            Token del propietario {settings.plex_token_set && <span className="text-gray-600">(guardado: {settings.plex_token_masked})</span>}
+          </label>
+          <input
+            type="password"
+            value={form.plex_token}
+            onChange={(e) => setForm({ ...form, plex_token: e.target.value })}
+            placeholder={settings.plex_token_set ? '•••• dejar en blanco para no cambiar' : 'X-Plex-Token del propietario'}
+            className="input"
+          />
+          <p className="text-xs text-gray-500 mt-2">
+            Permite comprobar el servidor y reconocer al propietario como administrador al iniciar sesión con Plex.
+          </p>
         </fieldset>
 
         <fieldset>
@@ -212,6 +239,7 @@ export default function Settings() {
           <div className="text-sm space-y-1 pt-1">
             <div>Tautulli <StatusDot result={testResult.tautulli} /></div>
             <div>Seerr <StatusDot result={testResult.seerr} /></div>
+            <div>Plex <StatusDot result={testResult.plex} /></div>
           </div>
         )}
       </form>

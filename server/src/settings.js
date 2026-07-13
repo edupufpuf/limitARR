@@ -7,9 +7,11 @@ const KEYS = [
   'tautulli_url',
   'tautulli_api_key',
   'tautulli_public_url',
+  'plex_url',
+  'plex_token',
   'tv_season_watched_percent',
 ];
-const URL_KEYS = new Set(['seerr_url', 'seerr_public_url', 'tautulli_url', 'tautulli_public_url']);
+const URL_KEYS = new Set(['seerr_url', 'seerr_public_url', 'tautulli_url', 'tautulli_public_url', 'plex_url']);
 // Claves opcionales: enviar cadena vacía las borra (en el resto, vacío = "no cambiar",
 // para poder guardar sin reenviar API keys ya configuradas).
 const CLEARABLE_KEYS = new Set(['seerr_public_url', 'tautulli_public_url', 'tv_season_watched_percent']);
@@ -38,6 +40,8 @@ export function seedSettingsFromEnv() {
     tautulli_url: process.env.TAUTULLI_URL,
     tautulli_api_key: process.env.TAUTULLI_API_KEY,
     tautulli_public_url: process.env.TAUTULLI_PUBLIC_URL,
+    plex_url: process.env.PLEX_URL,
+    plex_token: process.env.PLEX_TOKEN,
   };
   for (const key of KEYS) {
     if (envDefaults[key] && !getStmt.get(key)) upsert.run(key, normalize(key, envDefaults[key]));
@@ -99,6 +103,9 @@ export function getSettingsForDisplay() {
     tautulli_api_key_set: Boolean(s.tautulli_api_key),
     tautulli_api_key_masked: mask(s.tautulli_api_key),
     tautulli_public_url: s.tautulli_public_url,
+    plex_url: s.plex_url,
+    plex_token_set: Boolean(s.plex_token),
+    plex_token_masked: mask(s.plex_token),
     tv_season_watched_percent: s.tv_season_watched_percent,
   };
 }

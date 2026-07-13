@@ -29,6 +29,66 @@ test('auth: un segundo setup se rechaza con 409', async () => {
   await request(app).post('/api/auth/setup').send({ password: 'otra-cosa-123' }).expect(409);
 });
 
+test('auth Plex: usuario normal solo ve su cupo y gestiona su propio chat', async () => {
+  const upsertSetting = db.prepare(`
+    INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+  `);
+  upsertSetting.run('tautulli_url', 'http://tautulli.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
+  upsertSetting.run('seerr_url', 'http://seerr.test');
+  upsertSetting.run('seerr_api_key', 'test-key');
+  db.prepare("DELETE FROM settings WHERE key = 'plex_token'").run();
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (1777, 'Películas', 'movie', 'standard', 1, 4)
+  `).run();
+  db.prepare(`
+    INSERT OR REPLACE INTO quota_cache (user_id, library_id, limit_applied, outstanding, balance, pending_items)
+    VALUES (1880, 1777, 4, 1, 3, '[]')
+  `).run();
+
+  const originalFetch = global.fetch;
+  global.fetch = async (input, options = {}) => {
+    const url = String(input);
+    if (url.includes('/api/v2/pins?')) return new Response(JSON.stringify({ id: 99, code: 'plex-code' }), { status: 200 });
+    if (url.includes('/api/v2/pins/99')) return new Response(JSON.stringify({ authToken: 'user-token' }), { status: 200 });
+    if (url.endsWith('/api/v2/user')) {
+      return new Response(JSON.stringify({ id: 8800, username: 'ana', email: 'ana@example.test' }), { status: 200 });
+    }
+    if (url.startsWith('http://tautulli.test')) {
+      return new Response(JSON.stringify({ response: { result: 'success', data: [{ user_id: '1880', username: 'ana', friendly_name: 'Ana', email: 'ana@example.test', is_admin: '0' }] } }), { status: 200 });
+    }
+    if (url.startsWith('http://seerr.test')) {
+      return new Response(JSON.stringify({ results: [] }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url} ${options.method || 'GET'}`);
+  };
+
+  try {
+    const plexAgent = request.agent(app);
+    const start = await plexAgent.post('/api/auth/plex/start').expect(200);
+    assert.match(start.body.authUrl, /^https:\/\/app\.plex\.tv\/auth/);
+    const login = await plexAgent.post('/api/auth/plex/check').expect(200);
+    assert.equal(login.body.role, 'user');
+
+    await plexAgent.get('/api/settings').expect(403);
+    const quota = (await plexAgent.get('/api/me/quota').expect(200)).body;
+    assert.equal(quota.userId, 1880);
+    assert.equal(quota.libraries[0].balance, 3);
+
+    await plexAgent.put('/api/me/notifications').send({ chatId: '123456' }).expect(200);
+    assert.equal(db.prepare('SELECT chat_id FROM telegram_links WHERE user_id = 1880').get().chat_id, '123456');
+    await plexAgent.delete('/api/me/notifications').expect(204);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM telegram_links WHERE user_id = 1880').run();
+    db.prepare('DELETE FROM quota_cache WHERE user_id = 1880 OR library_id = 1777').run();
+    db.prepare('DELETE FROM libraries WHERE id = 1777').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
+  }
+});
+
 test('grupos: crear con cupo agregado y listarlo', async () => {
   const created = await agent.post('/api/groups').send({ name: 'Familia', aggregated: true }).expect(200);
   const groups = (await agent.get('/api/groups').expect(200)).body;
