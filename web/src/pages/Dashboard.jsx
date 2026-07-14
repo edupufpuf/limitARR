@@ -6,6 +6,7 @@ import Overrides from './Overrides.jsx';
 import DecisionsLog from './DecisionsLog.jsx';
 import Settings from './Settings.jsx';
 import Notifications from './Notifications.jsx';
+import WhatsNewModal from '../components/WhatsNewModal.jsx';
 import { Wordmark } from '../components/Brand.jsx';
 import { IconGauge, IconFilm, IconSliders, IconClock, IconBell, IconGear, IconLogout } from '../icons.jsx';
 
@@ -124,6 +125,8 @@ export default function Dashboard({ onLoggedOut }) {
           </button>
         ))}
       </nav>
+
+      <WhatsNewModal />
     </div>
   );
 }
