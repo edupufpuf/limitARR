@@ -82,6 +82,7 @@ router.get('/auth/me', (req, res) => {
     needsSetup: needsSetup(),
     role: req.session?.authed ? (req.session?.role ?? 'admin') : null,
     user: req.session?.user ?? null,
+    impersonating: Boolean(req.session?.impersonating),
   });
 });
 
@@ -249,6 +250,29 @@ router.delete('/me/notifications', (req, res) => {
   if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });
   db.prepare('DELETE FROM telegram_links WHERE user_id = ?').run(req.session.user.id);
   res.status(204).end();
+});
+
+// Suplantación: el admin ve el panel "Mi cupo" de otro usuario tal cual lo
+// vería él, sin necesitar su contraseña de Plex. `stop` vive antes de
+// requireAdmin porque, mientras se suplanta, la sesión pasa a role='user'.
+router.post('/admin/impersonate/:userId', ah(async (req, res) => {
+  if (req.session.role !== 'admin') return res.status(403).json({ error: 'admin_required' });
+  const userId = Number(req.params.userId);
+  const users = await getUsers();
+  const user = users.find((u) => u.id === userId);
+  if (!user) return res.status(404).json({ error: 'user_not_found' });
+  req.session.impersonating = true;
+  req.session.role = 'user';
+  req.session.user = { id: user.id, username: user.friendlyName || user.username };
+  res.json({ ok: true, role: 'user', user: req.session.user });
+}));
+
+router.post('/admin/impersonate/stop', (req, res) => {
+  if (!req.session.impersonating) return res.status(400).json({ error: 'not_impersonating' });
+  req.session.impersonating = false;
+  req.session.role = 'admin';
+  req.session.user = null;
+  res.json({ ok: true });
 });
 
 router.use(requireAdmin);
@@ -967,13 +991,13 @@ router.get('/notifications/settings', (req, res) => {
 });
 
 router.put('/notifications/settings', (req, res) => {
-  const { botToken, mode, groupChatId, groupTopicId, noQuotaMessage, notifyApproved, notifyFreed } = req.body || {};
+  const { botToken, mode, groupChatId, groupTopicId, noQuotaMessage, notifyNoQuota, notifyApproved, notifyFreed } = req.body || {};
   if (typeof botToken === 'string' && botToken.trim() !== '') setBotToken(botToken);
   if (
     mode || groupChatId !== undefined || groupTopicId !== undefined || noQuotaMessage !== undefined ||
-    notifyApproved !== undefined || notifyFreed !== undefined
+    notifyNoQuota !== undefined || notifyApproved !== undefined || notifyFreed !== undefined
   ) {
-    setNotifyTarget({ mode, groupChatId, groupTopicId, noQuotaMessage, notifyApproved, notifyFreed });
+    setNotifyTarget({ mode, groupChatId, groupTopicId, noQuotaMessage, notifyNoQuota, notifyApproved, notifyFreed });
   }
   res.json({ ...getBotTokenForDisplay(), ...getNotifyTarget() });
 });

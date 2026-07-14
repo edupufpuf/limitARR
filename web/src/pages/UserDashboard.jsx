@@ -70,7 +70,7 @@ function downloadStatusLabel(item) {
   return 'Sin descargar';
 }
 
-export default function UserDashboard({ session, onLoggedOut }) {
+export default function UserDashboard({ session, impersonating, onLoggedOut }) {
   const [quota, setQuota] = useState(null);
   const [link, setLink] = useState(null);
   const [chatId, setChatId] = useState('');
@@ -119,6 +119,11 @@ export default function UserDashboard({ session, onLoggedOut }) {
     onLoggedOut();
   }
 
+  async function stopImpersonating() {
+    await api.stopImpersonating();
+    onLoggedOut();
+  }
+
   return (
     <div className="min-h-screen bg-bg-950 text-gray-100">
       <header className="border-b border-bg-700/60 bg-bg-900/90 sticky top-0 z-10 backdrop-blur">
@@ -126,10 +131,19 @@ export default function UserDashboard({ session, onLoggedOut }) {
           <Wordmark className="text-2xl" />
           <div className="flex items-center gap-3 text-sm text-gray-400">
             <span>{session?.username}</span>
-            <button onClick={logout} aria-label="Cerrar sesión" className="p-2 hover:text-white"><IconLogout className="w-5 h-5" /></button>
+            {impersonating ? (
+              <button onClick={stopImpersonating} className="btn btn-ghost py-1 px-2.5 text-xs">Volver a admin</button>
+            ) : (
+              <button onClick={logout} aria-label="Cerrar sesión" className="p-2 hover:text-white"><IconLogout className="w-5 h-5" /></button>
+            )}
           </div>
         </div>
       </header>
+      {impersonating && (
+        <div className="bg-accent-600/15 border-b border-accent-500/30 text-accent-200 text-xs sm:text-sm text-center py-2 px-4">
+          Estás viendo el panel de <strong>{session?.username}</strong> como administrador.
+        </div>
+      )}
       <main className="max-w-5xl mx-auto p-4 sm:p-8">
         <h1 className="page-title">Mi cupo</h1>
         <p className="text-sm text-gray-500 mt-1 mb-6">

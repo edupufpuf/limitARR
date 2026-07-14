@@ -48,6 +48,7 @@ export default function Notifications() {
   const [groupChatId, setGroupChatId] = useState('');
   const [groupTopicId, setGroupTopicId] = useState('');
   const [noQuotaMessage, setNoQuotaMessage] = useState('');
+  const [notifyNoQuota, setNotifyNoQuota] = useState(true);
   const [notifyApproved, setNotifyApproved] = useState(true);
   const [notifyFreed, setNotifyFreed] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
@@ -74,6 +75,7 @@ export default function Notifications() {
       setGroupChatId(s.groupChatId ?? '');
       setGroupTopicId(s.groupTopicId ?? '');
       setNoQuotaMessage(s.noQuotaMessage ?? '');
+      setNotifyNoQuota(s.notifyNoQuota ?? true);
       setNotifyApproved(s.notifyApproved ?? true);
       setNotifyFreed(s.notifyFreed ?? true);
     });
@@ -84,7 +86,7 @@ export default function Notifications() {
   async function saveSettings(e) {
     e.preventDefault();
     setSavingSettings(true);
-    const s = await api.updateNotificationSettings({ botToken: tokenInput, mode, groupChatId, groupTopicId, noQuotaMessage, notifyApproved, notifyFreed });
+    const s = await api.updateNotificationSettings({ botToken: tokenInput, mode, groupChatId, groupTopicId, noQuotaMessage, notifyNoQuota, notifyApproved, notifyFreed });
     setBotSettings(s);
     setNoQuotaMessage(s.noQuotaMessage ?? '');
     setTokenInput('');
@@ -233,11 +235,18 @@ export default function Notifications() {
           id="no-quota"
           title="Usuario sin cupo"
           description="Se envía cuando una solicitud no puede aprobarse por falta de saldo."
-          status="Activo"
-          tone="active"
+          status={notifyNoQuota ? 'Activo' : 'Desactivado'}
+          tone={notifyNoQuota ? 'active' : 'neutral'}
           open={openSection === 'no-quota'}
           onToggle={toggleSection}
         >
+          <label className="flex items-center justify-between gap-4 rounded-xl border border-bg-600 bg-bg-950/30 p-4 cursor-pointer mb-5">
+            <span>
+              <span className="block font-bold">Enviar esta notificación</span>
+              <span className="block text-xs text-gray-500 mt-1">Avisa al usuario y al grupo cuando se bloquea una solicitud.</span>
+            </span>
+            <input type="checkbox" checked={notifyNoQuota} onChange={(e) => setNotifyNoQuota(e.target.checked)} className="w-5 h-5 accent-red-500" />
+          </label>
           <label className="label">Texto del aviso</label>
           <textarea value={noQuotaMessage} onChange={(e) => setNoQuotaMessage(e.target.value)} rows={5} className="input min-h-32 resize-y" />
           <p className="text-xs text-gray-500 mt-2">

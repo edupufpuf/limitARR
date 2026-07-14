@@ -19,6 +19,8 @@ export const api = {
   logout: () => request('/auth/logout', { method: 'POST' }),
   changePassword: (currentPassword, newPassword) =>
     request('/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) }),
+  impersonate: (userId) => request(`/admin/impersonate/${userId}`, { method: 'POST' }),
+  stopImpersonating: () => request('/admin/impersonate/stop', { method: 'POST' }),
 
   libraries: () => request('/libraries'),
   syncLibraries: () => request('/libraries/sync', { method: 'POST' }),

@@ -45,6 +45,7 @@ async function notifyNoQuota(base) {
   const unit = base.mediaType === 'tv' ? 'una temporada' : 'una película';
 
   const target = getNotifyTarget();
+  if (!target.notifyNoQuota) return;
   try {
     if (target.mode === 'group') {
       if (!target.groupChatId) return;

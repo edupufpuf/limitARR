@@ -20,7 +20,7 @@ export default function App() {
 
   return status.authed ? (
     status.role === 'user'
-      ? <UserDashboard session={status.user} onLoggedOut={refresh} />
+      ? <UserDashboard session={status.user} impersonating={status.impersonating} onLoggedOut={refresh} />
       : <Dashboard onLoggedOut={refresh} />
   ) : (
     <Login onLoggedIn={refresh} />

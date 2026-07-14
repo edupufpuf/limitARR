@@ -9,8 +9,9 @@ const MODE_KEY = 'telegram_notify_mode';         // 'dm' | 'group'
 const GROUP_CHAT_KEY = 'telegram_group_chat_id';
 const GROUP_TOPIC_KEY = 'telegram_group_topic_id'; // message_thread_id, opcional
 const NO_QUOTA_MESSAGE_KEY = 'telegram_no_quota_message';
-// Avisos opcionales (default ON): aprobación de solicitud y cupo liberado.
+// Avisos opcionales (default ON): sin cupo, aprobación de solicitud y cupo liberado.
 // Guardados como '1'/'0'; "no configurado" cuenta como activado.
+const NOTIFY_NO_QUOTA_KEY = 'telegram_notify_no_quota';
 const NOTIFY_APPROVED_KEY = 'telegram_notify_approved';
 const NOTIFY_FREED_KEY = 'telegram_notify_freed';
 
@@ -37,6 +38,7 @@ export function getNotifyTarget() {
     groupChatId: getRawSetting(GROUP_CHAT_KEY),
     groupTopicId: getRawSetting(GROUP_TOPIC_KEY),
     noQuotaMessage: getNoQuotaMessage(),
+    notifyNoQuota: getRawSetting(NOTIFY_NO_QUOTA_KEY) !== '0',
     notifyApproved: getRawSetting(NOTIFY_APPROVED_KEY) !== '0',
     notifyFreed: getRawSetting(NOTIFY_FREED_KEY) !== '0',
   };
@@ -53,7 +55,7 @@ export function normalizeGroupTarget(groupChatId, groupTopicId) {
   };
 }
 
-export function setNotifyTarget({ mode, groupChatId, groupTopicId, noQuotaMessage, notifyApproved, notifyFreed }) {
+export function setNotifyTarget({ mode, groupChatId, groupTopicId, noQuotaMessage, notifyNoQuota, notifyApproved, notifyFreed }) {
   if (mode) setRawSetting(MODE_KEY, mode);
   if (groupChatId !== undefined || groupTopicId !== undefined) {
     const saved = getNotifyTarget();
@@ -65,6 +67,7 @@ export function setNotifyTarget({ mode, groupChatId, groupTopicId, noQuotaMessag
     setRawSetting(GROUP_TOPIC_KEY, normalized.groupTopicId);
   }
   if (noQuotaMessage !== undefined) setNoQuotaMessage(noQuotaMessage);
+  if (notifyNoQuota !== undefined) setRawSetting(NOTIFY_NO_QUOTA_KEY, notifyNoQuota ? '1' : '0');
   if (notifyApproved !== undefined) setRawSetting(NOTIFY_APPROVED_KEY, notifyApproved ? '1' : '0');
   if (notifyFreed !== undefined) setRawSetting(NOTIFY_FREED_KEY, notifyFreed ? '1' : '0');
 }

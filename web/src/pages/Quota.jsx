@@ -2,6 +2,15 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { IconSearch, IconUsers, IconEye, IconBan, IconCheckCircle, IconXCircle } from '../icons.jsx';
 
+// Recarga entera tras suplantar: la sesión (cookie) ya quedó en role='user' en
+// el servidor, y App.jsx solo lee /auth/me al montar — el reload es más simple
+// que subir un callback de refresco por todo Dashboard → Quota.
+async function impersonate(userId, username) {
+  if (!confirm(`¿Ver el panel como ${username}? Tu sesión de admin pasará a la suya hasta que pulses "Volver a admin".`)) return;
+  await api.impersonate(userId);
+  window.location.reload();
+}
+
 const REFRESH_MS = 60_000;
 
 const STATUS = {
@@ -709,6 +718,17 @@ function UserCard({ user, expanded, onToggle, onReset, onDismiss, onDetail, rese
         </div>
         <PosterStack libraries={user.libraries} />
         <span className={`text-xl font-bold tabular-nums ${statusOf(worst.balance).text}`}>{worst.balance}</span>
+        {/* Grupo agregado: sin cuenta Plex propia, no hay quién suplantar. */}
+        {!user.isGroup && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); impersonate(user.userId, user.username); }}
+            title={`Ver el panel como ${user.username}`}
+            className="p-1.5 rounded-lg text-gray-500 hover:text-accent-300 hover:bg-bg-700/60"
+          >
+            <IconEye className="w-4 h-4" />
+          </button>
+        )}
         <span className="text-gray-500 text-xs">{expanded ? '▲' : '▼'}</span>
       </button>
 
