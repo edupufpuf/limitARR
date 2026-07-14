@@ -46,29 +46,30 @@ async function notifyNoQuota(base) {
 
   const target = getNotifyTarget();
   if (!target.notifyNoQuota) return;
-  try {
-    if (target.mode === 'group') {
-      if (!target.groupChatId) return;
-      const text = renderNoQuotaMessage(target.noQuotaMessage, {
-        username: base.username,
-        libraryName,
-        mediaTitle: base.mediaTitle,
-        unit,
-      });
+  const text = renderNoQuotaMessage(target.noQuotaMessage, {
+    username: base.username,
+    libraryName,
+    mediaTitle: base.mediaTitle,
+    unit,
+  });
+
+  if (target.mode === 'group' && target.groupChatId) {
+    try {
       await sendMessage(target.groupChatId, text, { messageThreadId: target.groupTopicId, replyMarkup });
-    } else {
-      const chatId = getChatId.get(base.userId)?.chat_id;
-      if (!chatId) return;
-      const text = renderNoQuotaMessage(target.noQuotaMessage, {
-        username: base.username,
-        libraryName,
-        mediaTitle: base.mediaTitle,
-        unit,
-      });
-      await sendMessage(chatId, text, { replyMarkup });
+    } catch (err) {
+      console.error('[scheduler] telegram notify failed (grupo):', err.message);
     }
-  } catch (err) {
-    console.error('[scheduler] telegram notify failed:', err.message);
+  }
+
+  // Además del grupo (o en su lugar si el modo es DM): aviso personal al que
+  // pidió, si tiene Telegram vinculado.
+  const chatId = getChatId.get(base.userId)?.chat_id;
+  if (chatId) {
+    try {
+      await sendMessage(chatId, text, { replyMarkup });
+    } catch (err) {
+      console.error('[scheduler] telegram notify failed (dm):', err.message);
+    }
   }
 }
 
@@ -127,21 +128,27 @@ async function notifyApproved(base, remaining) {
   const libraryName = getLibraryName.get(base.libraryId)?.name ?? `biblioteca #${base.libraryId}`;
   const holes = remaining === 1 ? '1 hueco' : `${remaining} huecos`;
 
-  try {
-    if (target.mode === 'group') {
-      if (!target.groupChatId) return;
+  if (target.mode === 'group' && target.groupChatId) {
+    try {
       await sendMessage(
         target.groupChatId,
         `✅ Aprobada para ${base.username}: ${base.mediaTitle} (${libraryName}). Le quedan ${holes}.`,
         { messageThreadId: target.groupTopicId }
       );
-    } else {
-      const chatId = getChatId.get(base.userId)?.chat_id;
-      if (!chatId) return;
-      await sendMessage(chatId, `✅ Solicitud aprobada: ${base.mediaTitle} (${libraryName}). Te quedan ${holes}.`);
+    } catch (err) {
+      console.error('[scheduler] telegram notify failed (grupo):', err.message);
     }
-  } catch (err) {
-    console.error('[scheduler] telegram notify failed:', err.message);
+  }
+
+  // Además del grupo (o en su lugar si el modo es DM): aviso personal al que
+  // pidió, si tiene Telegram vinculado.
+  const chatId = getChatId.get(base.userId)?.chat_id;
+  if (chatId) {
+    try {
+      await sendMessage(chatId, `✅ Solicitud aprobada: ${base.mediaTitle} (${libraryName}). Te quedan ${holes}.`);
+    } catch (err) {
+      console.error('[scheduler] telegram notify failed (dm):', err.message);
+    }
   }
 }
 
@@ -186,21 +193,28 @@ async function refreshStaleAndNotify(tautulliUsers) {
       ? getGroupName.get(-user_id)?.name ?? `grupo#${-user_id}`
       : userMap.get(user_id)?.username ?? `user#${user_id}`;
 
-    try {
-      if (target.mode === 'group') {
-        if (!target.groupChatId) continue;
+    if (target.mode === 'group' && target.groupChatId) {
+      try {
         await sendMessage(
           target.groupChatId,
           `🎉 ${username} ha liberado cupo:\n${list}\n${saldo}`,
           { messageThreadId: target.groupTopicId }
         );
-      } else {
-        const chatId = getChatId.get(user_id)?.chat_id;
-        if (!chatId) continue;
-        await sendMessage(chatId, `🎉 Has liberado cupo:\n${list}\n${saldo}`);
+      } catch (err) {
+        console.error('[scheduler] telegram notify failed (grupo):', err.message);
       }
-    } catch (err) {
-      console.error('[scheduler] telegram notify failed:', err.message);
+    }
+
+    // Además del grupo (o en su lugar si el modo es DM): aviso personal al
+    // usuario, si tiene Telegram vinculado. Un grupo agregado (user_id < 0)
+    // no tiene DM propio — solo sale el aviso de grupo.
+    const chatId = getChatId.get(user_id)?.chat_id;
+    if (chatId) {
+      try {
+        await sendMessage(chatId, `🎉 Has liberado cupo:\n${list}\n${saldo}`);
+      } catch (err) {
+        console.error('[scheduler] telegram notify failed (dm):', err.message);
+      }
     }
   }
   return pairs.length;
