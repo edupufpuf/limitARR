@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { db } from '../db.js';
 import { getRawSetting, setRawSetting, mask } from '../settings.js';
 import { getBalance } from '../quota.js';
@@ -130,6 +131,42 @@ export function pendingButton(userId, libraryId) {
   return { inline_keyboard: [[{ text: '📋 Ver pendientes', callback_data: `pending:${userId}:${libraryId}` }]] };
 }
 
+// --- Vinculación con un click (deep link t.me/bot?start=token) ---
+// El usuario pulsa un botón en su panel, Telegram abre el bot con /start
+// precargado y, al enviarlo, el poller de abajo asocia su chat_id sin que
+// tenga que copiar ningún ID a mano ni pasar por el admin.
+
+let botUsernameCache = null;
+const linkTokens = new Map(); // token -> { userId, expiresAt }
+const LINK_TOKEN_TTL_MS = 10 * 60 * 1000;
+
+export async function getBotUsername() {
+  if (botUsernameCache) return botUsernameCache;
+  const me = await api('getMe');
+  botUsernameCache = me.username;
+  return botUsernameCache;
+}
+
+export function createLinkToken(userId) {
+  const token = crypto.randomBytes(12).toString('hex');
+  linkTokens.set(token, { userId, expiresAt: Date.now() + LINK_TOKEN_TTL_MS });
+  return token;
+}
+
+const upsertLink = db.prepare(`
+  INSERT INTO telegram_links (user_id, chat_id, label, linked_at)
+  VALUES (?, ?, ?, datetime('now'))
+  ON CONFLICT (user_id) DO UPDATE SET chat_id=excluded.chat_id, label=excluded.label, linked_at=excluded.linked_at
+`);
+
+function consumeLinkToken(token, chatId, label) {
+  const entry = linkTokens.get(token);
+  linkTokens.delete(token);
+  if (!entry || entry.expiresAt < Date.now()) return false;
+  upsertLink.run(entry.userId, String(chatId), label || null);
+  return true;
+}
+
 // --- Inbox (mensajes normales, para "descubrir" chats desde el panel) ---
 
 const insertInbox = db.prepare(`
@@ -195,6 +232,18 @@ async function processUpdates(updates) {
     }
     if (u.message?.chat) {
       const m = u.message;
+      const startMatch = /^\/start(?:@\w+)?(?:\s+(\S+))?/.exec(m.text || '');
+      if (startMatch?.[1]) {
+        try {
+          const linked = consumeLinkToken(startMatch[1], m.chat.id, m.chat.username || m.chat.first_name);
+          await sendMessage(m.chat.id, linked
+            ? '✅ Avisos activados. Ya te avisaremos por aquí de tu cupo.'
+            : 'Ese enlace ha caducado. Vuelve al panel y pulsa "Vincular con Telegram" de nuevo.');
+        } catch (err) {
+          console.error('[telegram] link token failed:', err.message);
+        }
+        continue;
+      }
       insertInbox.run(
         String(m.chat.id),
         m.chat.type,

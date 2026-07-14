@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Wordmark } from '../components/Brand.jsx';
 import { IconBell, IconLogout } from '../icons.jsx';
@@ -74,9 +74,12 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
   const [quota, setQuota] = useState(null);
   const [link, setLink] = useState(null);
   const [chatId, setChatId] = useState('');
+  const [showManualLink, setShowManualLink] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const [message, setMessage] = useState(null);
   const [error, setError] = useState(null);
   const [detailTarget, setDetailTarget] = useState(null);
+  const connectingRef = useRef(false);
   const loadUserDetail = useCallback(
     (params) => api.myPendingDetail(detailTarget?.lib.libraryId, params),
     [detailTarget?.lib.libraryId]
@@ -90,7 +93,42 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
         setChatId(linkValue?.chat_id ?? '');
       })
       .catch(() => setError('No se pudo cargar tu cupo. Inténtalo de nuevo más tarde.'));
+    return () => { connectingRef.current = false; };
   }, []);
+
+  // Un click: abre Telegram con /start precargado (deep link con token de un
+  // solo uso) y sondea hasta que el bot lo resuelve y guarda el chat — el
+  // usuario no tiene que copiar ningún ID ni pasar por el admin.
+  async function connectTelegram() {
+    setMessage(null);
+    setConnecting(true);
+    connectingRef.current = true;
+    try {
+      const { token, botUsername } = await api.myNotificationLinkToken();
+      window.open(`https://t.me/${botUsername}?start=${token}`, '_blank');
+      for (let i = 0; i < 40 && connectingRef.current; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const linkValue = await api.myNotifications();
+        if (linkValue) {
+          setLink(linkValue);
+          setChatId(linkValue.chat_id);
+          setMessage('Avisos activados');
+          connectingRef.current = false;
+          break;
+        }
+      }
+    } catch {
+      setMessage('No se pudo iniciar la vinculación');
+    } finally {
+      connectingRef.current = false;
+      setConnecting(false);
+    }
+  }
+
+  function cancelConnect() {
+    connectingRef.current = false;
+    setConnecting(false);
+  }
 
   async function saveNotifications(e) {
     e.preventDefault();
@@ -163,14 +201,41 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
 
         <section className="card p-5 mt-8 max-w-xl">
           <div className="flex items-center gap-3 mb-4"><IconBell className="w-6 h-6 text-accent-400" /><h2 className="font-extrabold text-xl">Mis avisos</h2></div>
-          <p className="text-sm text-gray-500 mb-4">Escribe al bot de Telegram y pega aquí el identificador de tu chat para recibir cambios de cupo.</p>
-          <form onSubmit={saveNotifications} className="space-y-3">
-            <input aria-label="ID del chat de Telegram" value={chatId} onChange={(e) => setChatId(e.target.value)} placeholder="ID del chat de Telegram" className="input" required />
-            <div className="flex flex-wrap gap-2">
-              <button className="btn btn-primary">{link ? 'Actualizar avisos' : 'Activar avisos'}</button>
-              {link && <button type="button" onClick={removeNotifications} className="btn btn-ghost">Desactivar</button>}
-            </div>
-          </form>
+
+          {link ? (
+            <>
+              <p className="text-sm text-gray-500 mb-4">
+                Avisos activados por Telegram{link.label ? <> · <span className="text-gray-300">{link.label}</span></> : null}.
+              </p>
+              <button type="button" onClick={removeNotifications} className="btn btn-ghost">Desactivar</button>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-gray-500 mb-4">Un click y te avisamos por Telegram de los cambios en tu cupo.</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={connectTelegram} disabled={connecting} className="btn btn-primary">
+                  {connecting ? 'Esperando confirmación en Telegram…' : 'Vincular con Telegram'}
+                </button>
+                {connecting && <button type="button" onClick={cancelConnect} className="btn btn-ghost">Cancelar</button>}
+              </div>
+              {connecting && (
+                <p className="text-xs text-gray-500 mt-3">Se ha abierto Telegram — pulsa "Iniciar" en el bot y vuelve aquí.</p>
+              )}
+              <button
+                type="button"
+                onClick={() => setShowManualLink((v) => !v)}
+                className="text-xs text-gray-500 hover:text-gray-300 mt-4 underline block"
+              >
+                {showManualLink ? 'Ocultar' : '¿No se abre Telegram? Pega el ID del chat a mano'}
+              </button>
+              {showManualLink && (
+                <form onSubmit={saveNotifications} className="space-y-3 mt-3">
+                  <input aria-label="ID del chat de Telegram" value={chatId} onChange={(e) => setChatId(e.target.value)} placeholder="ID del chat de Telegram" className="input" required />
+                  <button className="btn btn-ghost">Activar avisos</button>
+                </form>
+              )}
+            </>
+          )}
           {message && <p aria-live="polite" className={`text-sm mt-3 ${message.startsWith('No ') ? 'text-accent-400' : 'text-green-400'}`}>{message}</p>}
         </section>
       </main>

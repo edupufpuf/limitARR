@@ -31,6 +31,8 @@ import {
   getNotifyTarget,
   setNotifyTarget,
   normalizeGroupTarget,
+  getBotUsername,
+  createLinkToken,
 } from '../services/telegram.js';
 
 export const router = Router();
@@ -233,6 +235,15 @@ router.get('/me/notifications', (req, res) => {
   const link = db.prepare('SELECT chat_id, label, linked_at FROM telegram_links WHERE user_id = ?').get(req.session.user.id);
   res.json(link ?? null);
 });
+
+// Vinculación con un click: token de un solo uso que el bot resuelve al
+// recibir /start desde el deep link, sin que el usuario copie ningún ID.
+router.post('/me/notifications/link-token', ah(async (req, res) => {
+  if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });
+  const botUsername = await getBotUsername();
+  const token = createLinkToken(req.session.user.id);
+  res.json({ token, botUsername });
+}));
 
 router.put('/me/notifications', (req, res) => {
   if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });

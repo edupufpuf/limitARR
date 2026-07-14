@@ -37,6 +37,7 @@ export const api = {
   myNotifications: () => request('/me/notifications'),
   updateMyNotifications: (body) => request('/me/notifications', { method: 'PUT', body: JSON.stringify(body) }),
   deleteMyNotifications: () => request('/me/notifications', { method: 'DELETE' }),
+  myNotificationLinkToken: () => request('/me/notifications/link-token', { method: 'POST' }),
 
   overrides: () => request('/overrides'),
   setOverride: (userId, libraryId, body) =>
