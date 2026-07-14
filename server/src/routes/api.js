@@ -253,8 +253,18 @@ router.delete('/me/notifications', (req, res) => {
 });
 
 // Suplantación: el admin ve el panel "Mi cupo" de otro usuario tal cual lo
-// vería él, sin necesitar su contraseña de Plex. `stop` vive antes de
+// vería él, sin necesitar su contraseña de Plex. Ambas viven antes de
 // requireAdmin porque, mientras se suplanta, la sesión pasa a role='user'.
+// OJO: 'stop' va antes que ':userId' — si no, Express la trataría como un
+// userId="stop" (NaN) y nunca se resolvería (fue un bug real en producción).
+router.post('/admin/impersonate/stop', (req, res) => {
+  if (!req.session.impersonating) return res.status(400).json({ error: 'not_impersonating' });
+  req.session.impersonating = false;
+  req.session.role = 'admin';
+  req.session.user = null;
+  res.json({ ok: true });
+});
+
 router.post('/admin/impersonate/:userId', ah(async (req, res) => {
   if (req.session.role !== 'admin') return res.status(403).json({ error: 'admin_required' });
   const userId = Number(req.params.userId);
@@ -266,14 +276,6 @@ router.post('/admin/impersonate/:userId', ah(async (req, res) => {
   req.session.user = { id: user.id, username: user.friendlyName || user.username };
   res.json({ ok: true, role: 'user', user: req.session.user });
 }));
-
-router.post('/admin/impersonate/stop', (req, res) => {
-  if (!req.session.impersonating) return res.status(400).json({ error: 'not_impersonating' });
-  req.session.impersonating = false;
-  req.session.role = 'admin';
-  req.session.user = null;
-  res.json({ ok: true });
-});
 
 router.use(requireAdmin);
 
