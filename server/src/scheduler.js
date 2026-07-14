@@ -28,7 +28,6 @@ const getLastDecision = db.prepare(`
 const getLibraryName = db.prepare('SELECT name FROM libraries WHERE id = ?');
 const getChatId = db.prepare('SELECT chat_id FROM telegram_links WHERE user_id = ?');
 const getCacheRow = db.prepare('SELECT outstanding, pending_items FROM quota_cache WHERE user_id = ? AND library_id = ?');
-const getGroupName = db.prepare('SELECT name FROM groups WHERE id = ?');
 
 // Avoids re-logging (and re-notifying) the same still-pending request every poll
 // cycle when nothing about its situation has changed since the last time.
@@ -46,30 +45,21 @@ async function notifyNoQuota(base) {
 
   const target = getNotifyTarget();
   if (!target.notifyNoQuota) return;
+
+  // Aviso personal, solo DM al que pidió — nunca al grupo, aunque el modo
+  // esté en 'group' (ese modo es solo para el resumen manual de pendientes).
+  const chatId = getChatId.get(base.userId)?.chat_id;
+  if (!chatId) return;
   const text = renderNoQuotaMessage(target.noQuotaMessage, {
     username: base.username,
     libraryName,
     mediaTitle: base.mediaTitle,
     unit,
   });
-
-  if (target.mode === 'group' && target.groupChatId) {
-    try {
-      await sendMessage(target.groupChatId, text, { messageThreadId: target.groupTopicId, replyMarkup });
-    } catch (err) {
-      console.error('[scheduler] telegram notify failed (grupo):', err.message);
-    }
-  }
-
-  // Además del grupo (o en su lugar si el modo es DM): aviso personal al que
-  // pidió, si tiene Telegram vinculado.
-  const chatId = getChatId.get(base.userId)?.chat_id;
-  if (chatId) {
-    try {
-      await sendMessage(chatId, text, { replyMarkup });
-    } catch (err) {
-      console.error('[scheduler] telegram notify failed (dm):', err.message);
-    }
+  try {
+    await sendMessage(chatId, text, { replyMarkup });
+  } catch (err) {
+    console.error('[scheduler] telegram notify failed:', err.message);
   }
 }
 
@@ -125,30 +115,16 @@ async function notifySeasonHold(base) {
 async function notifyApproved(base, remaining) {
   const target = getNotifyTarget();
   if (!target.notifyApproved) return;
+
+  // Aviso personal, solo DM al que pidió — nunca al grupo.
+  const chatId = getChatId.get(base.userId)?.chat_id;
+  if (!chatId) return;
   const libraryName = getLibraryName.get(base.libraryId)?.name ?? `biblioteca #${base.libraryId}`;
   const holes = remaining === 1 ? '1 hueco' : `${remaining} huecos`;
-
-  if (target.mode === 'group' && target.groupChatId) {
-    try {
-      await sendMessage(
-        target.groupChatId,
-        `✅ Aprobada para ${base.username}: ${base.mediaTitle} (${libraryName}). Le quedan ${holes}.`,
-        { messageThreadId: target.groupTopicId }
-      );
-    } catch (err) {
-      console.error('[scheduler] telegram notify failed (grupo):', err.message);
-    }
-  }
-
-  // Además del grupo (o en su lugar si el modo es DM): aviso personal al que
-  // pidió, si tiene Telegram vinculado.
-  const chatId = getChatId.get(base.userId)?.chat_id;
-  if (chatId) {
-    try {
-      await sendMessage(chatId, `✅ Solicitud aprobada: ${base.mediaTitle} (${libraryName}). Te quedan ${holes}.`);
-    } catch (err) {
-      console.error('[scheduler] telegram notify failed (dm):', err.message);
-    }
+  try {
+    await sendMessage(chatId, `✅ Solicitud aprobada: ${base.mediaTitle} (${libraryName}). Te quedan ${holes}.`);
+  } catch (err) {
+    console.error('[scheduler] telegram notify failed:', err.message);
   }
 }
 
@@ -162,9 +138,8 @@ function pendingItemKey(item) {
 // compara la caché de antes con la de después — lo que desaparece de la lista
 // con el contador bajando es cupo liberado (visto, o cancelado en Seerr).
 // Los avisos van tras el refresco para no retrasar la caché si Telegram cojea.
-async function refreshStaleAndNotify(tautulliUsers) {
+async function refreshStaleAndNotify() {
   const pairs = listStaleOutstandingPairs();
-  const userMap = new Map(tautulliUsers.map((u) => [u.id, u]));
 
   for (const { user_id, library_id } of pairs) {
     const before = getCacheRow.get(user_id, library_id);
@@ -184,37 +159,18 @@ async function refreshStaleAndNotify(tautulliUsers) {
       .filter(Boolean);
     if (freedTitles.length === 0) continue;
 
+    // Aviso personal, solo DM al usuario — nunca al grupo. Un grupo agregado
+    // (user_id < 0, issue #4) no tiene DM propio, así que no recibe aviso.
+    const chatId = getChatId.get(user_id)?.chat_id;
+    if (!chatId) continue;
+
     const libraryName = getLibraryName.get(library_id)?.name ?? `biblioteca #${library_id}`;
     const list = freedTitles.map((t) => `• ${t}`).join('\n');
     const saldo = `Saldo en ${libraryName}: ${result.balance} de ${result.limit}.`;
-    // user_id negativo = grupo agregado (issue #4): se nombra al grupo y, al no
-    // tener DM propio, el aviso solo sale en modo grupo.
-    const username = user_id < 0
-      ? getGroupName.get(-user_id)?.name ?? `grupo#${-user_id}`
-      : userMap.get(user_id)?.username ?? `user#${user_id}`;
-
-    if (target.mode === 'group' && target.groupChatId) {
-      try {
-        await sendMessage(
-          target.groupChatId,
-          `🎉 ${username} ha liberado cupo:\n${list}\n${saldo}`,
-          { messageThreadId: target.groupTopicId }
-        );
-      } catch (err) {
-        console.error('[scheduler] telegram notify failed (grupo):', err.message);
-      }
-    }
-
-    // Además del grupo (o en su lugar si el modo es DM): aviso personal al
-    // usuario, si tiene Telegram vinculado. Un grupo agregado (user_id < 0)
-    // no tiene DM propio — solo sale el aviso de grupo.
-    const chatId = getChatId.get(user_id)?.chat_id;
-    if (chatId) {
-      try {
-        await sendMessage(chatId, `🎉 Has liberado cupo:\n${list}\n${saldo}`);
-      } catch (err) {
-        console.error('[scheduler] telegram notify failed (dm):', err.message);
-      }
+    try {
+      await sendMessage(chatId, `🎉 Has liberado cupo:\n${list}\n${saldo}`);
+    } catch (err) {
+      console.error('[scheduler] telegram notify failed:', err.message);
     }
   }
   return pairs.length;
@@ -395,7 +351,7 @@ export async function runPollCycle() {
   // Issue #5: detectar visionados sin esperar a un "recalcular todo" manual —
   // los pares recién refrescados arriba quedan excluidos por su computed_at.
   // Además avisa por Telegram del cupo liberado (si está activado).
-  await refreshStaleAndNotify(tautulliUsers);
+  await refreshStaleAndNotify();
 }
 
 function formatMediaTitle(mediaType, title, seasonNumber = null) {
