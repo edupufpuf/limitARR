@@ -379,7 +379,7 @@ export default function Notifications() {
           </div>
         </AccordionSection>
 
-        <div className="sticky bottom-[3.7rem] sm:bottom-4 z-[5] flex justify-end pt-4">
+        <div className="flex justify-end pt-4 pb-4 sm:pb-0">
           <button type="submit" disabled={savingSettings} className="btn btn-primary shadow-glow">
             {savingSettings ? 'Guardando…' : 'Guardar configuración'}
           </button>
