@@ -64,6 +64,7 @@ export default function Notifications() {
   const [mntChatId, setMntChatId] = useState('');
   const [mntTopicId, setMntTopicId] = useState('');
   const [mntSilent, setMntSilent] = useState(false);
+  const [mntSavedMessage, setMntSavedMessage] = useState('');
   const [mntResult, setMntResult] = useState(null);
   const [mntLiveCollections, setMntLiveCollections] = useState(null);
   const [mntPairsMap, setMntPairsMap] = useState({}); // { tituloOrigen: tituloDestino }
@@ -99,6 +100,7 @@ export default function Notifications() {
       setMntChatId(m.chatId ?? '');
       setMntTopicId(m.topicId ?? '');
       setMntSilent(Boolean(m.silent));
+      setMntSavedMessage(m.savedMessage ?? '');
       const map = {};
       (m.pairs ?? []).forEach((p) => { map[p.source] = p.target; });
       setMntPairsMap(map);
@@ -117,8 +119,10 @@ export default function Notifications() {
         topicId: mntTopicId,
         pairs,
         silent: mntSilent,
+        savedMessage: mntSavedMessage,
       });
       setMnt((prev) => ({ ...prev, ...m }));
+      setMntSavedMessage(m.savedMessage ?? mntSavedMessage);
       setMntToken('');
       setMntResult('Guardado.');
     } catch {
@@ -425,6 +429,19 @@ export default function Notifications() {
               </span>
               <input type="checkbox" checked={mntSilent} onChange={(e) => setMntSilent(e.target.checked)} className="w-5 h-5 accent-red-500" />
             </label>
+            <div>
+              <label className="label">Texto al salvar</label>
+              <textarea
+                value={mntSavedMessage}
+                onChange={(e) => setMntSavedMessage(e.target.value)}
+                rows={2}
+                className="input min-h-16 resize-y"
+              />
+              <p className="text-xs text-gray-500 mt-2">
+                Variables: <span className="text-gray-300">{'{usuario}'}</span> y{' '}
+                <span className="text-gray-300">{'{dias}'}</span> (frase con los días extra, vacía si no aplica).
+              </p>
+            </div>
             <div>
               <label className="label">Qué colección va a dónde al salvar</label>
               <ol className="text-xs text-gray-500 mt-1 mb-3 list-decimal list-inside space-y-1">

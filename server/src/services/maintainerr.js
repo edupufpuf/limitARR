@@ -17,6 +17,9 @@ const TOPIC_KEY = 'maintainerr_topic_id';
 const PAIRS_KEY = 'maintainerr_salvados_pairs';
 const SILENT_KEY = 'maintainerr_silent';
 const OFFSET_KEY = 'maintainerr_last_update_id';
+const SAVED_MESSAGE_KEY = 'maintainerr_saved_message';
+
+const DEFAULT_SAVED_MESSAGE = '✅ Salvada por {usuario}{dias}.';
 
 function parsePairs(raw) {
   if (!raw) return [];
@@ -38,6 +41,7 @@ export function getMaintainerrSettings() {
     topicId: getRawSetting(TOPIC_KEY),
     pairs: parsePairs(getRawSetting(PAIRS_KEY)),
     silent: getRawSetting(SILENT_KEY) === '1',
+    savedMessage: getRawSetting(SAVED_MESSAGE_KEY) || DEFAULT_SAVED_MESSAGE,
   };
 }
 
@@ -51,16 +55,18 @@ export function getMaintainerrSettingsForDisplay() {
     topicId: s.topicId,
     pairs: s.pairs,
     silent: s.silent,
+    savedMessage: s.savedMessage,
     enabled: isEnabled(),
   };
 }
 
-export function updateMaintainerrSettings({ url, botToken, chatId, topicId, pairs, silent }) {
+export function updateMaintainerrSettings({ url, botToken, chatId, topicId, pairs, silent, savedMessage }) {
   if (typeof url === 'string' && url.trim()) setRawSetting(URL_KEY, url.trim().replace(/\/$/, ''));
   if (typeof botToken === 'string' && botToken.trim()) setRawSetting(BOT_TOKEN_KEY, botToken.trim());
   if (chatId !== undefined) setRawSetting(CHAT_KEY, String(chatId).trim());
   if (topicId !== undefined) setRawSetting(TOPIC_KEY, String(topicId).trim());
   if (silent !== undefined) setRawSetting(SILENT_KEY, silent ? '1' : '');
+  if (typeof savedMessage === 'string') setRawSetting(SAVED_MESSAGE_KEY, savedMessage.trim() || DEFAULT_SAVED_MESSAGE);
   if (Array.isArray(pairs)) {
     const clean = pairs
       .filter((p) => p && typeof p.source === 'string' && typeof p.target === 'string' && p.target)
@@ -283,7 +289,11 @@ async function handleSaveCallback(query) {
       days ?? 15
     );
 
-    const note = `✅ Salvada por ${displayName(query.from)}${days ? ` — hay ${days} días más para verla` : ''}.`;
+    const { savedMessage } = getMaintainerrSettings();
+    const diasPhrase = days ? ` — hay ${days} días más para verla` : '';
+    const note = savedMessage
+      .replace(/{usuario}/g, displayName(query.from))
+      .replace(/{dias}/g, diasPhrase);
     await botApi('answerCallbackQuery', {
       callback_query_id: query.id,
       text: days ? `Salvada: ${days} días más` : 'Salvada',
