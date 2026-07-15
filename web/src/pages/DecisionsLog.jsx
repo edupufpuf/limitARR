@@ -12,6 +12,7 @@ const decisionBadge = {
   season_hold: 'bg-yellow-400/10 text-yellow-400 ring-yellow-400/25',
   no_library_config: 'bg-bg-700/60 text-gray-400 ring-bg-600',
   unmatched_user: 'bg-bg-700/60 text-gray-400 ring-bg-600',
+  salvado: 'bg-sky-400/10 text-sky-400 ring-sky-400/25',
 };
 
 const decisionLabel = {
@@ -22,6 +23,7 @@ const decisionLabel = {
   season_hold: 'en cola (temporada anterior sin ver)',
   no_library_config: 'sin biblioteca configurada',
   unmatched_user: 'usuario no encontrado en Tautulli',
+  salvado: '💾 salvada',
 };
 
 // created_at viene de SQLite en UTC ('YYYY-MM-DD HH:MM:SS'); se enseña en local.
@@ -113,7 +115,10 @@ export default function DecisionsLog() {
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.id} className="border-b border-bg-700/50 last:border-0 hover:bg-bg-700/20 transition-colors">
+              // 'salvado' sale de una tabla distinta (salvados): el id puede
+              // coincidir con el de una fila de decisions_log, así que la key
+              // va con la decisión delante para no colisionar.
+              <tr key={`${r.decision}-${r.id}`} className="border-b border-bg-700/50 last:border-0 hover:bg-bg-700/20 transition-colors">
                 <td className="py-2 pr-4 text-gray-500 whitespace-nowrap">{formatDate(r.created_at)}</td>
                 <td className="py-2 pr-4 whitespace-nowrap">{r.username}</td>
                 <td className="py-2 pr-4">

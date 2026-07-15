@@ -996,29 +996,65 @@ router.get('/stats', (req, res) => {
 
 // Filtrable y paginado: ?decision=approved&q=texto&limit=50&offset=0.
 // `q` busca por usuario o título; devuelve total para el "cargar más" del panel.
+// 'salvado' es una pseudo-decisión: no vive en decisions_log (no tiene
+// request_id de Seerr ni afecta al cupo), sale de la tabla salvados y se
+// mezcla aquí para que el registro las enseñe juntas ordenadas por fecha.
 router.get('/decisions', (req, res) => {
   const { decision, q } = req.query;
   const limit = Math.min(Number(req.query.limit) || 50, 200);
   const offset = Math.max(Number(req.query.offset) || 0, 0);
 
-  const where = [];
-  const params = [];
-  if (decision) {
-    where.push('decision = ?');
-    params.push(decision);
+  const includeDecisions = decision !== 'salvado';
+  const includeSalvados = !decision || decision === 'salvado';
+
+  const decisionsWhere = [];
+  const decisionsParams = [];
+  if (decision && decision !== 'salvado') {
+    decisionsWhere.push('decision = ?');
+    decisionsParams.push(decision);
   }
   if (q) {
-    where.push('(username LIKE ? OR media_title LIKE ?)');
-    params.push(`%${q}%`, `%${q}%`);
+    decisionsWhere.push('(username LIKE ? OR media_title LIKE ?)');
+    decisionsParams.push(`%${q}%`, `%${q}%`);
   }
-  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const decisionsWhereSql = decisionsWhere.length ? `WHERE ${decisionsWhere.join(' AND ')}` : '';
 
-  const { total } = db
-    .prepare(`SELECT COUNT(*) AS total FROM decisions_log ${whereSql}`)
-    .get(...params);
+  const salvadosWhere = [];
+  const salvadosParams = [];
+  if (q) {
+    salvadosWhere.push('(telegram_name LIKE ? OR title LIKE ?)');
+    salvadosParams.push(`%${q}%`, `%${q}%`);
+  }
+  const salvadosWhereSql = salvadosWhere.length ? `WHERE ${salvadosWhere.join(' AND ')}` : '';
+
+  const decisionsSelect = `SELECT id, created_at, username, media_title, poster_url, balance_before, limit_applied, decision FROM decisions_log ${decisionsWhereSql}`;
+  const salvadosSelect = `SELECT id, saved_at AS created_at, telegram_name AS username, title AS media_title, poster_url, NULL AS balance_before, NULL AS limit_applied, 'salvado' AS decision FROM salvados ${salvadosWhereSql}`;
+
+  let unionSql;
+  let unionParams;
+  let countSql;
+  let countParams;
+  if (includeDecisions && includeSalvados) {
+    unionSql = `${decisionsSelect} UNION ALL ${salvadosSelect}`;
+    unionParams = [...decisionsParams, ...salvadosParams];
+    countSql = `SELECT (SELECT COUNT(*) FROM decisions_log ${decisionsWhereSql}) + (SELECT COUNT(*) FROM salvados ${salvadosWhereSql}) AS total`;
+    countParams = [...decisionsParams, ...salvadosParams];
+  } else if (includeSalvados) {
+    unionSql = salvadosSelect;
+    unionParams = salvadosParams;
+    countSql = `SELECT COUNT(*) AS total FROM salvados ${salvadosWhereSql}`;
+    countParams = salvadosParams;
+  } else {
+    unionSql = decisionsSelect;
+    unionParams = decisionsParams;
+    countSql = `SELECT COUNT(*) AS total FROM decisions_log ${decisionsWhereSql}`;
+    countParams = decisionsParams;
+  }
+
+  const { total } = db.prepare(countSql).get(...countParams);
   const rows = db
-    .prepare(`SELECT * FROM decisions_log ${whereSql} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`)
-    .all(...params, limit, offset);
+    .prepare(`SELECT * FROM (${unionSql}) ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`)
+    .all(...unionParams, limit, offset);
   res.json({ rows, total });
 });
 

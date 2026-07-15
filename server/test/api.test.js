@@ -237,6 +237,34 @@ test('decisions: filtra por decisión y por texto', async () => {
   assert.equal(ana.rows.every((r) => r.username === 'ana'), true);
 });
 
+test('decisions: las salvadas de Maintainerr aparecen mezcladas como pseudo-decisión', async () => {
+  // Nombre distintivo para no mezclar con las filas 'ana' de tests anteriores
+  // (decisions_log no se limpia entre tests de este fichero).
+  db.exec(`
+    INSERT INTO decisions_log (request_id, user_id, username, library_id, media_title, decision, created_at) VALUES
+      (910, 801, 'zzsalvatest', 5, 'Matrix', 'approved', '2026-01-01 10:00:00')
+  `);
+  db.exec(`
+    INSERT INTO salvados (media_server_id, tmdb_id, title, telegram_user_id, telegram_name, user_id, saved_at, expires_at) VALUES
+      ('7001', 603, 'The Matrix', '999', 'zzsalvatest', 801, '2026-01-02 10:00:00', datetime('now', '+15 days'))
+  `);
+
+  const all = (await agent.get('/api/decisions?q=zzsalvatest').expect(200)).body;
+  assert.equal(all.total, 2);
+  // Más reciente primero: la salvada (02 ene) antes que la aprobada (01 ene).
+  assert.equal(all.rows[0].decision, 'salvado');
+  assert.equal(all.rows[0].media_title, 'The Matrix');
+  assert.equal(all.rows[1].decision, 'approved');
+
+  const onlySalvados = (await agent.get('/api/decisions?decision=salvado&q=zzsalvatest').expect(200)).body;
+  assert.equal(onlySalvados.total, 1);
+  assert.equal(onlySalvados.rows[0].media_title, 'The Matrix');
+
+  const onlyApproved = (await agent.get('/api/decisions?decision=approved&q=zzsalvatest').expect(200)).body;
+  assert.equal(onlyApproved.total, 1);
+  assert.equal(onlyApproved.rows.some((r) => r.decision === 'salvado'), false);
+});
+
 test('notifications: los toggles de aviso se guardan y se leen', async () => {
   let s = (await agent.get('/api/notifications/settings').expect(200)).body;
   assert.equal(s.notifyApproved, true); // default ON
