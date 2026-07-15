@@ -250,10 +250,10 @@ router.get('/me/quota/pending-detail/:libraryId', ah(async (req, res) => {
 }));
 
 // Películas que este usuario salvó con el botón de Telegram y siguen a tiempo de ver.
-router.get('/me/salvados', (req, res) => {
+router.get('/me/salvados', ah(async (req, res) => {
   if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });
-  res.json(getSalvadosByUser(Number(req.session.user.id)));
-});
+  res.json(await getSalvadosByUser(Number(req.session.user.id)));
+}));
 
 router.get('/me/notifications', (req, res) => {
   if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });
@@ -1057,9 +1057,9 @@ router.post('/maintainerr/test', ah(async (req, res) => {
 
 // Salvadas vivas de todos los usuarios, para colgarlas de las tarjetas de la
 // pestaña Cupo (agrupa el cliente por user_id / telegram_name).
-router.get('/salvados', (req, res) => {
-  res.json(getAllSalvados());
-});
+router.get('/salvados', ah(async (req, res) => {
+  res.json(await getAllSalvados());
+}));
 
 router.get('/notifications/settings', (req, res) => {
   res.json({ ...getBotTokenForDisplay(), ...getNotifyTarget() });

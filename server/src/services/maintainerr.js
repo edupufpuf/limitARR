@@ -330,18 +330,60 @@ async function handleSaveCallback(query) {
 
 // --- Consultas para el panel ---
 
-export function getSalvadosByUser(userId) {
-  return db
+// TTL corto para no golpear Maintainerr en cada carga del panel (mismo patrón
+// que AVAILABILITY_TTL_MS en seerr.js).
+const COLLECTIONS_LIVE_TTL_MS = 60_000;
+let collectionsCache = { data: null, at: 0 };
+
+async function getCollectionsCached() {
+  if (collectionsCache.data && Date.now() - collectionsCache.at < COLLECTIONS_LIVE_TTL_MS) {
+    return collectionsCache.data;
+  }
+  const data = await listCollections();
+  collectionsCache = { data, at: Date.now() };
+  return data;
+}
+
+// Una salvada puede salir de su colección en Maintainerr a mano (o por otra
+// regla) antes de que expires_at se cumpla — expires_at solo es una cuenta
+// atrás calculada al guardar, no se entera de eso sola. Confirmamos en vivo
+// que el media_server_id siga en ALGUNA colección destino configurada (los
+// pairs no guardan a qué target fue cada fila, y en la práctica no se
+// solapan) y descartamos las que ya no estén. Si Maintainerr no responde,
+// fail-open: se confía solo en expires_at, como hasta ahora — un corte de
+// red no debe vaciar el panel de salvados.
+async function filterStillInCollection(rows) {
+  if (rows.length === 0) return rows;
+  const { pairs } = getMaintainerrSettings();
+  if (pairs.length === 0) return rows;
+  let collections;
+  try {
+    collections = await getCollectionsCached();
+  } catch (err) {
+    console.error('[maintainerr] no se pudo comprobar colección de salvados en vivo, se confía en expires_at:', err.message);
+    return rows;
+  }
+  const targetTitles = new Set(pairs.map((p) => p.target));
+  const targetCollections = collections.filter((c) => targetTitles.has(c.title));
+  return rows.filter((row) =>
+    targetCollections.some((c) => c.media?.some((m) => String(m.mediaServerId) === String(row.media_server_id)))
+  );
+}
+
+export async function getSalvadosByUser(userId) {
+  const rows = db
     .prepare(
       `SELECT * FROM salvados WHERE user_id = ? AND expires_at > datetime('now') ORDER BY saved_at DESC`
     )
     .all(userId);
+  return filterStillInCollection(rows);
 }
 
-export function getAllSalvados() {
-  return db
+export async function getAllSalvados() {
+  const rows = db
     .prepare(`SELECT * FROM salvados WHERE expires_at > datetime('now') ORDER BY saved_at DESC`)
     .all();
+  return filterStillInCollection(rows);
 }
 
 // --- Poller del bot dedicado (long-poll, igual que telegram.js) ---

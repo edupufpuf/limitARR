@@ -115,7 +115,7 @@ test('webhook: alta en la propia colección de salvados se ignora (sin bucle)', 
   assert.equal(fetchCalls.filter((c) => c.url.includes('api.telegram.org')).length, 0);
 });
 
-test('salvados: registro consultable por usuario y en total, caducados fuera', () => {
+test('salvados: registro consultable por usuario y en total, caducados fuera', async () => {
   db.prepare('DELETE FROM salvados').run();
   const insert = db.prepare(`
     INSERT INTO salvados (media_server_id, tmdb_id, title, telegram_user_id, telegram_name, user_id, saved_at, expires_at)
@@ -126,10 +126,34 @@ test('salvados: registro consultable por usuario y en total, caducados fuera', (
   insert.run('9011', 550, 'Fight Club', '222', 'Amparo', 1880, "x");
   db.prepare("UPDATE salvados SET expires_at = datetime('now', '-1 day') WHERE media_server_id = '9011'").run();
 
-  const own = getSalvadosByUser(1880);
+  // Sin mockFetch en este test, la comprobación en vivo contra Maintainerr
+  // falla (host de prueba inexistente) y filterStillInCollection hace
+  // fail-open: se queda solo con el filtro de expires_at, como antes.
+  const own = await getSalvadosByUser(1880);
   assert.equal(own.length, 1);
   assert.equal(own[0].title, 'The Batman');
-  assert.equal(getAllSalvados().length, 1);
+  assert.equal((await getAllSalvados()).length, 1);
+});
+
+test('salvados: se descarta si ya no está en la colección de Maintainerr aunque no haya caducado', async () => {
+  db.prepare('DELETE FROM salvados').run();
+  db.prepare(`
+    INSERT INTO salvados (media_server_id, tmdb_id, title, telegram_user_id, telegram_name, user_id, saved_at, expires_at)
+    VALUES ('9010', 414906, 'The Batman', '111', 'Jesús', 1880, datetime('now'), datetime('now', '+15 days'))
+  `).run();
+
+  // El admin la sacó a mano de la colección de salvados en Maintainerr: la
+  // colección target (id 4, en COLLECTIONS) ya no trae ese mediaServerId en
+  // su media[], aunque expires_at todavía esté lejos.
+  global.fetch = async (url) => {
+    if (String(url).endsWith('/api/collections')) {
+      return new Response(JSON.stringify(COLLECTIONS), { status: 200 });
+    }
+    throw new Error(`fetch inesperado en test: ${url}`);
+  };
+
+  assert.equal((await getSalvadosByUser(1880)).length, 0);
+  assert.equal((await getAllSalvados()).length, 0);
 });
 
 test('endpoints admin: /salvados y settings del módulo responden', async () => {
