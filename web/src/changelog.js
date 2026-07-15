@@ -3,6 +3,15 @@
 // en localStorage para no repetir el aviso una vez visto.
 export const CHANGELOG = [
   {
+    id: '2026-07-15',
+    date: '15 jul 2026',
+    items: [
+      'Módulo Maintainerr: aviso en Telegram con botón 💾 Salvar cuando una película entra en la colección de borrado; al pulsarlo se mueve a la colección de salvados con días extra.',
+      'Sección "Salvadas para ver" en el panel de usuario y en las tarjetas de Cupo del admin, con cuenta atrás y quién la salvó (via vínculo de "Mis avisos").',
+      'Configuración del módulo en Avisos → "Salvar del borrado (Maintainerr)": URL, bot dedicado, chat/topic y colecciones de salvados.',
+    ],
+  },
+  {
     id: '2026-07-14',
     date: '14 jul 2026',
     items: [

@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { Wordmark } from '../components/Brand.jsx';
 import { IconBell, IconLogout } from '../icons.jsx';
 import { PendingDetailModal } from './Quota.jsx';
+import { SalvadosGrid } from '../components/Salvados.jsx';
 
 function LibraryCard({ library, onDetail }) {
   const percent = library.limitApplied > 0 ? Math.max(0, Math.min(100, (library.balance / library.limitApplied) * 100)) : 0;
@@ -72,6 +73,7 @@ function downloadStatusLabel(item) {
 
 export default function UserDashboard({ session, impersonating, onLoggedOut }) {
   const [quota, setQuota] = useState(null);
+  const [salvados, setSalvados] = useState([]);
   const [link, setLink] = useState(null);
   const [chatId, setChatId] = useState('');
   const [showManualLink, setShowManualLink] = useState(false);
@@ -93,6 +95,8 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
         setChatId(linkValue?.chat_id ?? '');
       })
       .catch(() => setError('No se pudo cargar tu cupo. Inténtalo de nuevo más tarde.'));
+    // Las salvadas son un extra: si el módulo Maintainerr no está, no rompe el panel.
+    api.mySalvados().then(setSalvados).catch(() => {});
     return () => { connectingRef.current = false; };
   }, []);
 
@@ -198,6 +202,16 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
           ))}
         </div>
         {quota && quota.libraries?.length === 0 && <div className="card p-6 text-gray-400">Todavía no hay cupo calculado para tu cuenta.</div>}
+
+        {salvados.length > 0 && (
+          <section className="card p-5 mt-8">
+            <h2 className="font-extrabold text-xl mb-1">💾 Salvadas para ver</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Películas que salvaste del borrado con el botón de Telegram. Cuando acabe la cuenta atrás, se borran.
+            </p>
+            <SalvadosGrid items={salvados} />
+          </section>
+        )}
 
         <section className="card p-5 mt-8 max-w-xl">
           <div className="flex items-center gap-3 mb-4"><IconBell className="w-6 h-6 text-accent-400" /><h2 className="font-extrabold text-xl">Mis avisos</h2></div>

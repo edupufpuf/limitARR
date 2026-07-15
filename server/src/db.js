@@ -101,6 +101,23 @@ db.exec(`
     PRIMARY KEY (group_id, library_id)
   );
 
+  -- Módulo Maintainerr: registro de "salvadas" (quién pulsó 💾 Salvar en Telegram
+  -- para sacar una película de la colección de borrado). user_id se resuelve via
+  -- telegram_links si el que pulsa está vinculado en "Mis avisos"; si no, NULL.
+  CREATE TABLE IF NOT EXISTS salvados (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    media_server_id TEXT NOT NULL,
+    tmdb_id INTEGER,
+    title TEXT,
+    poster_url TEXT,
+    telegram_user_id TEXT NOT NULL,
+    telegram_name TEXT,
+    user_id INTEGER,                  -- Tautulli user_id, NULL si no hay vínculo
+    library_id INTEGER,
+    saved_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL
+  );
+
   -- Mensajes normales (no callbacks) recibidos por el bot, para que el panel
   -- pueda "descubrir" chats/topics sin tener que llamar a Telegram en vivo.
   CREATE TABLE IF NOT EXISTS telegram_inbox (

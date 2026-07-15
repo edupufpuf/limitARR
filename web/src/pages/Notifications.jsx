@@ -57,6 +57,16 @@ export default function Notifications() {
   const [sendingPendingSummary, setSendingPendingSummary] = useState(false);
   const [openSection, setOpenSection] = useState('agent');
 
+  // Módulo Maintainerr (botón 💾 Salvar): config propia con bot dedicado.
+  const [mnt, setMnt] = useState(null);
+  const [mntUrl, setMntUrl] = useState('');
+  const [mntToken, setMntToken] = useState('');
+  const [mntChatId, setMntChatId] = useState('');
+  const [mntTopicId, setMntTopicId] = useState('');
+  const [mntCollections, setMntCollections] = useState('');
+  const [mntResult, setMntResult] = useState(null);
+  const [savingMnt, setSavingMnt] = useState(false);
+
   const [links, setLinks] = useState([]);
   const [users, setUsers] = useState([]);
   const [discovered, setDiscovered] = useState([]);
@@ -81,7 +91,49 @@ export default function Notifications() {
     });
     api.users().then(setUsers);
     loadLinks();
+    api.maintainerrSettings().then((m) => {
+      setMnt(m);
+      setMntUrl(m.url ?? '');
+      setMntChatId(m.chatId ?? '');
+      setMntTopicId(m.topicId ?? '');
+      setMntCollections(m.salvadosCollections ?? '');
+    }).catch(() => {});
   }, []);
+
+  async function saveMaintainerr() {
+    setSavingMnt(true);
+    setMntResult(null);
+    try {
+      const m = await api.updateMaintainerrSettings({
+        url: mntUrl,
+        botToken: mntToken,
+        chatId: mntChatId,
+        topicId: mntTopicId,
+        salvadosCollections: mntCollections,
+      });
+      setMnt((prev) => ({ ...prev, ...m }));
+      setMntToken('');
+      setMntResult('Guardado.');
+    } catch {
+      setMntResult('No se pudo guardar.');
+    } finally {
+      setSavingMnt(false);
+    }
+  }
+
+  async function testMaintainerr() {
+    setMntResult('Probando…');
+    try {
+      const { collections } = await api.testMaintainerr();
+      setMntResult(
+        `Conexión OK. Colecciones:\n${collections
+          .map((c) => `· ${c.title} (${c.type}, biblioteca ${c.libraryId}, borra a ${c.deleteAfterDays ?? '—'} días)`)
+          .join('\n')}`
+      );
+    } catch {
+      setMntResult('No se pudo conectar con Maintainerr — revisa la URL.');
+    }
+  }
 
   async function saveSettings(e) {
     e.preventDefault();
@@ -309,6 +361,71 @@ export default function Notifications() {
             </button>
           </div>
           {pendingSummaryResult && <p aria-live="polite" className="text-xs text-gray-500 mt-3">{pendingSummaryResult}</p>}
+        </AccordionSection>
+
+        <AccordionSection
+          id="maintainerr"
+          title="Salvar del borrado (Maintainerr)"
+          description="Aviso con botón 💾 Salvar cuando Maintainerr va a borrar una película."
+          status={mnt?.enabled ? 'Configurado' : 'Pendiente'}
+          tone={mnt?.enabled ? 'active' : 'warning'}
+          open={openSection === 'maintainerr'}
+          onToggle={toggleSection}
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-gray-400">
+              Usa un bot de Telegram <strong>dedicado</strong> (no el de los avisos de cupo: Telegram
+              solo permite un lector de updates por token). Al pulsar 💾 Salvar, la película pasa a la
+              colección de salvados y se registra quién la salvó.
+            </p>
+            <div className="grid sm:grid-cols-2 gap-3">
+              <div>
+                <label className="label">URL de Maintainerr</label>
+                <input value={mntUrl} onChange={(e) => setMntUrl(e.target.value)} placeholder="http://maintainerr:6246" className="input" />
+              </div>
+              <div>
+                <label className="label">
+                  Token del bot dedicado {mnt?.bot_token_set && <span className="text-gray-600">(guardado: {mnt.bot_token_masked})</span>}
+                </label>
+                <input
+                  type="password"
+                  value={mntToken}
+                  onChange={(e) => setMntToken(e.target.value)}
+                  placeholder={mnt?.bot_token_set ? '•••• dejar en blanco para no cambiar' : 'token de @BotFather'}
+                  className="input"
+                />
+              </div>
+              <div>
+                <label className="label">Chat ID del grupo</label>
+                <input value={mntChatId} onChange={(e) => setMntChatId(e.target.value)} placeholder="-1001234567890" className="input" />
+              </div>
+              <div>
+                <label className="label">Topic ID</label>
+                <input value={mntTopicId} onChange={(e) => setMntTopicId(e.target.value)} placeholder="opcional" className="input" />
+              </div>
+            </div>
+            <div>
+              <label className="label">Colecciones de salvados (nombres exactos, separados por coma)</label>
+              <input value={mntCollections} onChange={(e) => setMntCollections(e.target.value)} placeholder="Peliculas Salvadas por 15 días" className="input" />
+              <p className="text-xs text-gray-500 mt-2">
+                Créalas a mano en Maintainerr (misma biblioteca y tipo que la colección de borrado) con
+                los días extra en "delete after days". "Probar" lista las colecciones para copiar el nombre tal cual.
+              </p>
+            </div>
+            {mnt?.webhookUrl && (
+              <div>
+                <label className="label">Webhook para Maintainerr (agente Webhook, payload {'{}'}, evento "Media Added To Collection")</label>
+                <code className="block text-xs bg-bg-950/60 border border-bg-600 rounded-lg p-2 break-all select-all">{mnt.webhookUrl}</code>
+              </div>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" onClick={saveMaintainerr} disabled={savingMnt} className="btn btn-primary">
+                {savingMnt ? 'Guardando…' : 'Guardar módulo'}
+              </button>
+              <button type="button" onClick={testMaintainerr} className="btn btn-ghost">Probar conexión</button>
+            </div>
+            {mntResult && <p aria-live="polite" className="text-xs text-gray-500 whitespace-pre-wrap">{mntResult}</p>}
+          </div>
         </AccordionSection>
 
         <div className="pt-5 pb-1">

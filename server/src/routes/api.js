@@ -34,6 +34,14 @@ import {
   getBotUsername,
   createLinkToken,
 } from '../services/telegram.js';
+import {
+  handleMaintainerrWebhook,
+  getMaintainerrSettingsForDisplay,
+  updateMaintainerrSettings,
+  listCollections as listMaintainerrCollections,
+  getSalvadosByUser,
+  getAllSalvados,
+} from '../services/maintainerr.js';
 
 export const router = Router();
 
@@ -133,6 +141,17 @@ router.post('/webhook/seerr/:secret', (req, res) => {
   runPollCycle().catch((err) => console.error('[webhook] poll cycle failed:', err));
 });
 
+// Webhook público de Maintainerr (mismo esquema que el de Seerr: secreto en URL).
+// Se responde al momento; el trabajo (resolver colecciones, avisar por Telegram)
+// sigue en background para no hacer esperar a Maintainerr.
+router.post('/webhook/maintainerr/:secret', (req, res) => {
+  if (req.params.secret !== getWebhookSecret()) return res.status(404).end();
+  res.status(200).end();
+  handleMaintainerrWebhook(req.body || {}).catch((err) =>
+    console.error('[maintainerr] webhook failed:', err)
+  );
+});
+
 router.use(requireAuth);
 
 router.get('/version', ah(async (req, res) => {
@@ -229,6 +248,12 @@ router.get('/me/quota/pending-detail/:libraryId', ah(async (req, res) => {
     tautulliUrl,
   });
 }));
+
+// Películas que este usuario salvó con el botón de Telegram y siguen a tiempo de ver.
+router.get('/me/salvados', (req, res) => {
+  if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });
+  res.json(getSalvadosByUser(Number(req.session.user.id)));
+});
 
 router.get('/me/notifications', (req, res) => {
   if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });
@@ -998,6 +1023,43 @@ router.get('/decisions', (req, res) => {
 });
 
 // --- Telegram notifications ---
+
+// --- Módulo Maintainerr (admin) ---
+
+router.get('/maintainerr/settings', (req, res) => {
+  res.json({
+    ...getMaintainerrSettingsForDisplay(),
+    webhookUrl: `http://limitarr:${config.port}/api/webhook/maintainerr/${getWebhookSecret()}`,
+  });
+});
+
+router.put('/maintainerr/settings', (req, res) => {
+  const { url, botToken, chatId, topicId, salvadosCollections } = req.body || {};
+  updateMaintainerrSettings({ url, botToken, chatId, topicId, salvadosCollections });
+  res.json(getMaintainerrSettingsForDisplay());
+});
+
+// Prueba de conexión: lista las colecciones de Maintainerr para verificar URL
+// y de paso enseñar los nombres exactos (hay que copiarlos tal cual en config).
+router.post('/maintainerr/test', ah(async (req, res) => {
+  const collections = await listMaintainerrCollections();
+  res.json({
+    ok: true,
+    collections: collections.map((c) => ({
+      id: c.id,
+      title: c.title,
+      type: c.type,
+      libraryId: c.libraryId,
+      deleteAfterDays: c.deleteAfterDays,
+    })),
+  });
+}));
+
+// Salvadas vivas de todos los usuarios, para colgarlas de las tarjetas de la
+// pestaña Cupo (agrupa el cliente por user_id / telegram_name).
+router.get('/salvados', (req, res) => {
+  res.json(getAllSalvados());
+});
 
 router.get('/notifications/settings', (req, res) => {
   res.json({ ...getBotTokenForDisplay(), ...getNotifyTarget() });

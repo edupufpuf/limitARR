@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { IconSearch, IconUsers, IconEye, IconBan, IconCheckCircle, IconXCircle } from '../icons.jsx';
+import { SalvadosGrid } from '../components/Salvados.jsx';
 
 // Recarga entera tras suplantar: la sesión (cookie) ya quedó en role='user' en
 // el servidor, y App.jsx solo lee /auth/me al montar — el reload es más simple
@@ -683,7 +684,7 @@ function PosterStack({ libraries }) {
   );
 }
 
-function UserCard({ user, expanded, onToggle, onReset, onDismiss, onDetail, resetting }) {
+function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss, onDetail, resetting }) {
   const worst = worstLib(user.libraries);
   const pending = totalOutstanding(user.libraries);
   return (
@@ -768,6 +769,12 @@ function UserCard({ user, expanded, onToggle, onReset, onDismiss, onDetail, rese
               </div>
             );
           })}
+          {salvados.length > 0 && (
+            <div>
+              <div className="text-sm font-medium mb-1.5">💾 Salvadas del borrado</div>
+              <SalvadosGrid items={salvados} compact />
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -778,6 +785,7 @@ export default function Quota() {
   const [users, setUsers] = useState([]);
   const [stats, setStats] = useState(null);
   const [pendingApprovals, setPendingApprovals] = useState([]);
+  const [salvados, setSalvados] = useState([]);
   const [query, setQuery] = useState('');
   const [recalculating, setRecalculating] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -795,6 +803,8 @@ export default function Quota() {
     api.quota().then(setUsers);
     api.stats().then(setStats);
     api.pendingApprovals().then(setPendingApprovals).catch(() => {});
+    // Módulo Maintainerr opcional: si no está configurado, la lista queda vacía.
+    api.salvados().then(setSalvados).catch(() => {});
   }
 
   useEffect(() => {
@@ -842,6 +852,18 @@ export default function Quota() {
     }));
     return { mergedUsers: merged, unmatchedApprovals: unmatched };
   }, [users, pendingApprovals]);
+
+  // Salvadas por tarjeta (user_id de Tautulli). Las de gente sin vincular en
+  // "Mis avisos" (user_id NULL) no tienen tarjeta y no se pintan aquí.
+  const salvadosByUser = useMemo(() => {
+    const map = new Map();
+    for (const s of salvados) {
+      if (s.user_id == null) continue;
+      if (!map.has(s.user_id)) map.set(s.user_id, []);
+      map.get(s.user_id).push(s);
+    }
+    return map;
+  }, [salvados]);
 
   const visibleUsers = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -1019,6 +1041,7 @@ export default function Quota() {
           <UserCard
             key={u.userId}
             user={u}
+            salvados={salvadosByUser.get(u.userId) ?? []}
             expanded={expanded.has(u.userId)}
             onToggle={() => toggle(u.userId)}
             onReset={reset}

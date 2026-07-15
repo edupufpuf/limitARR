@@ -95,4 +95,11 @@ export const api = {
     request('/notifications/test-group', { method: 'POST', body: JSON.stringify(body ?? {}) }),
   sendPendingSummary: (target) =>
     request('/notifications/pending-summary', { method: 'POST', body: JSON.stringify(target ? { target } : {}) }),
+
+  mySalvados: () => request('/me/salvados'),
+  salvados: () => request('/salvados'),
+  maintainerrSettings: () => request('/maintainerr/settings'),
+  updateMaintainerrSettings: (body) =>
+    request('/maintainerr/settings', { method: 'PUT', body: JSON.stringify(body) }),
+  testMaintainerr: () => request('/maintainerr/test', { method: 'POST' }),
 };
