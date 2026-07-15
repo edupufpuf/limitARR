@@ -15,6 +15,7 @@ const TOPIC_KEY = 'maintainerr_topic_id';
 // borrado. El admin lo elige a mano en el panel (nada de adivinar por
 // biblioteca/tipo) — guardado como JSON [{source, target}] (títulos exactos).
 const PAIRS_KEY = 'maintainerr_salvados_pairs';
+const SILENT_KEY = 'maintainerr_silent';
 const OFFSET_KEY = 'maintainerr_last_update_id';
 
 function parsePairs(raw) {
@@ -36,6 +37,7 @@ export function getMaintainerrSettings() {
     chatId: getRawSetting(CHAT_KEY),
     topicId: getRawSetting(TOPIC_KEY),
     pairs: parsePairs(getRawSetting(PAIRS_KEY)),
+    silent: getRawSetting(SILENT_KEY) === '1',
   };
 }
 
@@ -48,15 +50,17 @@ export function getMaintainerrSettingsForDisplay() {
     chatId: s.chatId,
     topicId: s.topicId,
     pairs: s.pairs,
+    silent: s.silent,
     enabled: isEnabled(),
   };
 }
 
-export function updateMaintainerrSettings({ url, botToken, chatId, topicId, pairs }) {
+export function updateMaintainerrSettings({ url, botToken, chatId, topicId, pairs, silent }) {
   if (typeof url === 'string' && url.trim()) setRawSetting(URL_KEY, url.trim().replace(/\/$/, ''));
   if (typeof botToken === 'string' && botToken.trim()) setRawSetting(BOT_TOKEN_KEY, botToken.trim());
   if (chatId !== undefined) setRawSetting(CHAT_KEY, String(chatId).trim());
   if (topicId !== undefined) setRawSetting(TOPIC_KEY, String(topicId).trim());
+  if (silent !== undefined) setRawSetting(SILENT_KEY, silent ? '1' : '');
   if (Array.isArray(pairs)) {
     const clean = pairs
       .filter((p) => p && typeof p.source === 'string' && typeof p.target === 'string' && p.target)
@@ -121,9 +125,10 @@ async function botApi(method, params = {}) {
 }
 
 function targetParams() {
-  const { chatId, topicId } = getMaintainerrSettings();
+  const { chatId, topicId, silent } = getMaintainerrSettings();
   const params = { chat_id: chatId };
   if (topicId) params.message_thread_id = Number(topicId);
+  if (silent) params.disable_notification = true;
   return params;
 }
 

@@ -63,6 +63,7 @@ export default function Notifications() {
   const [mntToken, setMntToken] = useState('');
   const [mntChatId, setMntChatId] = useState('');
   const [mntTopicId, setMntTopicId] = useState('');
+  const [mntSilent, setMntSilent] = useState(false);
   const [mntResult, setMntResult] = useState(null);
   const [mntLiveCollections, setMntLiveCollections] = useState(null);
   const [mntPairsMap, setMntPairsMap] = useState({}); // { tituloOrigen: tituloDestino }
@@ -97,6 +98,7 @@ export default function Notifications() {
       setMntUrl(m.url ?? '');
       setMntChatId(m.chatId ?? '');
       setMntTopicId(m.topicId ?? '');
+      setMntSilent(Boolean(m.silent));
       const map = {};
       (m.pairs ?? []).forEach((p) => { map[p.source] = p.target; });
       setMntPairsMap(map);
@@ -114,6 +116,7 @@ export default function Notifications() {
         chatId: mntChatId,
         topicId: mntTopicId,
         pairs,
+        silent: mntSilent,
       });
       setMnt((prev) => ({ ...prev, ...m }));
       setMntToken('');
@@ -415,6 +418,13 @@ export default function Notifications() {
                 <input value={mntTopicId} onChange={(e) => setMntTopicId(e.target.value)} placeholder="opcional" className="input" />
               </div>
             </div>
+            <label className="flex items-center justify-between gap-4 rounded-xl border border-bg-600 bg-bg-950/30 p-4 cursor-pointer">
+              <span>
+                <span className="block font-bold">Enviar sin sonido</span>
+                <span className="block text-xs text-gray-500 mt-1">Avisos de "va a borrarse" y "salvada por…" llegan silenciados al grupo.</span>
+              </span>
+              <input type="checkbox" checked={mntSilent} onChange={(e) => setMntSilent(e.target.checked)} className="w-5 h-5 accent-red-500" />
+            </label>
             <div>
               <label className="label">Qué colección va a dónde al salvar</label>
               <ol className="text-xs text-gray-500 mt-1 mb-3 list-decimal list-inside space-y-1">
