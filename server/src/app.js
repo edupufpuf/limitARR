@@ -6,7 +6,6 @@ import { fileURLToPath } from 'node:url';
 import './db.js';
 import { getSessionSecret } from './auth.js';
 import { router as apiRouter } from './routes/api.js';
-import { router as eliminarrRouter } from './routes/eliminarr.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const webDist = path.join(__dirname, '../../web/dist');
@@ -33,7 +32,6 @@ export function createApp() {
   );
 
   app.use('/api', apiRouter);
-  app.use('/api/eliminarr', eliminarrRouter);
   app.use(express.static(webDist));
   app.get('*', (req, res) => res.sendFile(path.join(webDist, 'index.html')));
 

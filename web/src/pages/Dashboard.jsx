@@ -6,10 +6,9 @@ import Overrides from './Overrides.jsx';
 import DecisionsLog from './DecisionsLog.jsx';
 import Settings from './Settings.jsx';
 import Notifications from './Notifications.jsx';
-import Eliminarr from './Eliminarr.jsx';
 import WhatsNewModal from '../components/WhatsNewModal.jsx';
 import { Wordmark } from '../components/Brand.jsx';
-import { IconGauge, IconFilm, IconSliders, IconClock, IconBell, IconGear, IconLogout, IconTrash } from '../icons.jsx';
+import { IconGauge, IconFilm, IconSliders, IconClock, IconBell, IconGear, IconLogout } from '../icons.jsx';
 
 const TABS = {
   quota: { label: 'Cupo', Icon: IconGauge, Component: Quota },
@@ -17,7 +16,6 @@ const TABS = {
   overrides: { label: 'Overrides', Icon: IconSliders, Component: Overrides },
   log: { label: 'Registro', Icon: IconClock, Component: DecisionsLog },
   notifications: { label: 'Avisos', Icon: IconBell, Component: Notifications },
-  eliminarr: { label: 'Eliminarr', Icon: IconTrash, Component: Eliminarr },
   settings: { label: 'Ajustes', Icon: IconGear, Component: Settings },
 };
 

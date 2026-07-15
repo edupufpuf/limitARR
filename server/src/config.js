@@ -18,7 +18,4 @@ export const config = {
   // (solo filas que ya no afectan al cupo) y nº de backups diarios a conservar.
   decisionsRetentionDays: Number(process.env.DECISIONS_RETENTION_DAYS || 365),
   backupKeep: Number(process.env.BACKUP_KEEP || 7),
-  // Eliminarr (reglas de borrado Radarr/Sonarr): ciclo independiente del sondeo
-  // de Seerr, cadencia mucho más baja porque evalúa borrados, no aprobaciones.
-  eliminarrIntervalMs: Number(process.env.ELIMINARR_INTERVAL_MS || 6 * 60 * 60_000),
 };
