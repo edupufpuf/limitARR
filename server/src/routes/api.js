@@ -36,9 +36,11 @@ import {
 } from '../services/telegram.js';
 import {
   handleMaintainerrWebhook,
+  getMaintainerrSettings,
   getMaintainerrSettingsForDisplay,
   updateMaintainerrSettings,
   listCollections as listMaintainerrCollections,
+  pairCollections as pairMaintainerrCollections,
   getSalvadosByUser,
   getAllSalvados,
 } from '../services/maintainerr.js';
@@ -1043,14 +1045,15 @@ router.put('/maintainerr/settings', (req, res) => {
 // y de paso enseñar los nombres exactos (hay que copiarlos tal cual en config).
 router.post('/maintainerr/test', ah(async (req, res) => {
   const collections = await listMaintainerrCollections();
+  const { salvadosCollections } = getMaintainerrSettings();
+  const shape = (c) =>
+    c && { id: c.id, title: c.title, type: c.type, libraryId: c.libraryId, deleteAfterDays: c.deleteAfterDays };
   res.json({
     ok: true,
-    collections: collections.map((c) => ({
-      id: c.id,
-      title: c.title,
-      type: c.type,
-      libraryId: c.libraryId,
-      deleteAfterDays: c.deleteAfterDays,
+    collections: collections.map(shape),
+    pairs: pairMaintainerrCollections(collections, salvadosCollections).map(({ source, target }) => ({
+      source: shape(source),
+      target: shape(target),
     })),
   });
 }));

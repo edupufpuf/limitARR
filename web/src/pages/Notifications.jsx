@@ -65,6 +65,7 @@ export default function Notifications() {
   const [mntTopicId, setMntTopicId] = useState('');
   const [mntCollections, setMntCollections] = useState('');
   const [mntResult, setMntResult] = useState(null);
+  const [mntPairs, setMntPairs] = useState(null);
   const [savingMnt, setSavingMnt] = useState(false);
 
   const [links, setLinks] = useState([]);
@@ -123,13 +124,11 @@ export default function Notifications() {
 
   async function testMaintainerr() {
     setMntResult('Probando…');
+    setMntPairs(null);
     try {
-      const { collections } = await api.testMaintainerr();
-      setMntResult(
-        `Conexión OK. Colecciones:\n${collections
-          .map((c) => `· ${c.title} (${c.type}, biblioteca ${c.libraryId}, borra a ${c.deleteAfterDays ?? '—'} días)`)
-          .join('\n')}`
-      );
+      const { pairs } = await api.testMaintainerr();
+      setMntResult(pairs.length ? null : 'Conexión OK, pero Maintainerr no tiene colecciones.');
+      setMntPairs(pairs);
     } catch {
       setMntResult('No se pudo conectar con Maintainerr — revisa la URL.');
     }
@@ -407,10 +406,12 @@ export default function Notifications() {
             <div>
               <label className="label">Colecciones de salvados (nombres exactos, separados por coma)</label>
               <input value={mntCollections} onChange={(e) => setMntCollections(e.target.value)} placeholder="Peliculas Salvadas por 15 días" className="input" />
-              <p className="text-xs text-gray-500 mt-2">
-                Créalas a mano en Maintainerr (misma biblioteca y tipo que la colección de borrado) con
-                los días extra en "delete after days". "Probar" lista las colecciones para copiar el nombre tal cual.
-              </p>
+              <ol className="text-xs text-gray-500 mt-2 list-decimal list-inside space-y-1">
+                <li>En Maintainerr crea la colección de borrado (regla Radarr/Sonarr) como siempre — su biblioteca y tipo (película/serie) marcan lo que hace falta en el paso 2.</li>
+                <li>Crea otra colección en <strong>esa misma biblioteca y tipo</strong> para "salvados", con los días extra en "delete after days". El nombre es libre.</li>
+                <li>Copia aquí su nombre exacto (varias colecciones = varios nombres separados por coma, una por biblioteca).</li>
+                <li>En Maintainerr añade el webhook de abajo como agente (Settings → Notifications → Webhook Agent), payload <code>{'{}'}</code>, evento "Media Added To Collection".</li>
+              </ol>
             </div>
             {mnt?.webhookUrl && (
               <div>
@@ -425,6 +426,34 @@ export default function Notifications() {
               <button type="button" onClick={testMaintainerr} className="btn btn-ghost">Probar conexión</button>
             </div>
             {mntResult && <p aria-live="polite" className="text-xs text-gray-500 whitespace-pre-wrap">{mntResult}</p>}
+            {mntPairs && mntPairs.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-left text-gray-500">
+                      <th className="pr-3 pb-1 font-medium">Colección detectada</th>
+                      <th className="pr-3 pb-1 font-medium">Biblioteca</th>
+                      <th className="pb-1 font-medium">Al salvar, pasa a</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mntPairs.map(({ source, target }) => (
+                      <tr key={source.id} className="border-t border-bg-700/70">
+                        <td className="pr-3 py-1 text-gray-300">{source.title}</td>
+                        <td className="pr-3 py-1 text-gray-500">{source.type}, biblioteca {source.libraryId}</td>
+                        <td className="py-1">
+                          {target ? (
+                            <span className="text-green-300">{target.title} ({target.deleteAfterDays ?? '—'} días)</span>
+                          ) : (
+                            <span className="text-amber-300">sin colección de salvados para esta biblioteca</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </AccordionSection>
 

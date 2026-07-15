@@ -138,6 +138,14 @@ function findTargetCollection(collections, source, salvadosNames) {
   );
 }
 
+// Mismo emparejamiento que el webhook real, pero para enseñarlo en el panel:
+// por cada colección que no sea ella misma de salvados, qué destino le tocaría.
+export function pairCollections(collections, salvadosNames) {
+  return collections
+    .filter((c) => !salvadosNames.includes(c.title))
+    .map((source) => ({ source, target: findTargetCollection(collections, source, salvadosNames) ?? null }));
+}
+
 export async function handleMaintainerrWebhook(body) {
   if (!isEnabled()) return;
   const mediaItems = parseMediaItems(body);
