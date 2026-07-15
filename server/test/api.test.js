@@ -265,6 +265,61 @@ test('decisions: las salvadas de Maintainerr aparecen mezcladas como pseudo-deci
   assert.equal(onlyApproved.rows.some((r) => r.decision === 'salvado'), false);
 });
 
+test('cupo: cargo manual resta un hueco sin tmdb y se quita con el ✕ normal', async () => {
+  const upsertSetting = db.prepare(`
+    INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+  `);
+  upsertSetting.run('tautulli_url', 'http://tautulli.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (1778, 'Series', 'show', 'standard', 1, 4)
+  `).run();
+
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith('http://tautulli.test')) {
+      return new Response(JSON.stringify({ response: { result: 'success', data: { data: [] } } }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const charge = await agent
+      .post('/api/quota/manual-charge/1880/1778')
+      .send({ title: 'Serie mala bajada a mano', username: 'ana' })
+      .expect(200);
+    assert.equal(charge.body.outstanding, 1);
+    assert.equal(charge.body.balance, 3); // límite 4 - 1
+    assert.equal(charge.body.pendingItems[0].title, 'Serie mala bajada a mano');
+    assert.equal(charge.body.pendingItems[0].tmdbId, null);
+    assert.equal(charge.body.pendingItems[0].unavailable, false);
+
+    const row = db
+      .prepare(`SELECT * FROM decisions_log WHERE user_id = 1880 AND library_id = 1778 AND decision = 'approved'`)
+      .get();
+    assert.equal(row.tmdb_id, null);
+    assert.equal(row.season_number, null);
+    assert.equal(row.media_type, 'tv');
+    assert.ok(row.request_id < 0, 'el request_id manual debe ser negativo para no chocar con ids reales de Seerr');
+
+    const dismissResult = await agent
+      .post('/api/quota/dismiss/1880/1778')
+      .send({ title: 'Serie mala bajada a mano' })
+      .expect(200);
+    assert.equal(dismissResult.body.dismissed, 1);
+    assert.equal(dismissResult.body.balance, 4);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM decisions_log WHERE library_id = 1778').run();
+    db.prepare('DELETE FROM quota_cache WHERE library_id = 1778').run();
+    db.prepare('DELETE FROM libraries WHERE id = 1778').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key')").run();
+  }
+});
+
 test('notifications: los toggles de aviso se guardan y se leen', async () => {
   let s = (await agent.get('/api/notifications/settings').expect(200)).body;
   assert.equal(s.notifyApproved, true); // default ON

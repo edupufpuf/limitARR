@@ -675,7 +675,7 @@ function DebtorBubbles({ debtors, onDetail }) {
   );
 }
 
-function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss, onDetail, resetting }) {
+function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss, onManualCharge, onDetail, resetting, charging }) {
   const worst = worstLib(user.libraries);
   const pending = totalOutstanding(user.libraries);
   return (
@@ -736,6 +736,14 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
                     {' '}/ {lib.limitApplied}
                   </span>
                   <button
+                    onClick={() => onManualCharge(user.userId, lib.libraryId, user.username)}
+                    disabled={charging[key]}
+                    title="Restar un hueco de cupo a mano (contenido bajado/visto fuera de Seerr)"
+                    className="text-gray-400 hover:text-gray-200 text-xs disabled:opacity-50"
+                  >
+                    {charging[key] ? 'cargando…' : 'cargo manual'}
+                  </button>
+                  <button
                     onClick={() => onReset(user.userId, lib.libraryId)}
                     disabled={resetting[key]}
                     className="text-accent-400 hover:text-accent-300 text-xs disabled:opacity-50"
@@ -781,6 +789,7 @@ export default function Quota() {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [resetting, setResetting] = useState({});
+  const [charging, setCharging] = useState({});
   const [expanded, setExpanded] = useState(new Set());
   const [activeFilter, setActiveFilter] = useState('all');
   // Pendiente abierto en la ventana de detalle: { user, lib, item } o null.
@@ -914,6 +923,16 @@ export default function Quota() {
     setResetting((r) => ({ ...r, [key]: false }));
   }
 
+  async function manualCharge(userId, libraryId, username) {
+    const title = prompt('Título de lo que se bajó/vio fuera de Seerr (restará un hueco de cupo):');
+    if (!title?.trim()) return;
+    const key = `${userId}-${libraryId}`;
+    setCharging((c) => ({ ...c, [key]: true }));
+    await api.manualCharge(userId, libraryId, title.trim(), username);
+    load();
+    setCharging((c) => ({ ...c, [key]: false }));
+  }
+
   async function dismiss(userId, libraryId, item) {
     if (!confirm(`¿Quitar "${item.title ?? 'este pendiente'}" del cupo?`)) return false;
     await api.dismissPending(userId, libraryId, {
@@ -1036,8 +1055,10 @@ export default function Quota() {
             onToggle={() => toggle(u.userId)}
             onReset={reset}
             onDismiss={dismiss}
+            onManualCharge={manualCharge}
             onDetail={(user, lib, item) => setDetailTarget({ user, lib, item })}
             resetting={resetting}
+            charging={charging}
           />
         ))}
       </div>

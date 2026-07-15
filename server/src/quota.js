@@ -592,6 +592,32 @@ export async function getPendingItemDetail(userId, libraryId, { tmdbId, seasonNu
   return { requestedAt, watchers };
 }
 
+// Cargo manual: algo que se bajó/vio fuera de Seerr (a mano) y aun así debe
+// restar cupo. Sin tmdb_id/season_number cae en la misma rama de "fila legada
+// sin tmdb" que ya usan las filas antiguas importadas antes del issue #14: no
+// se resuelve sola por visionado (no hay tmdb con el que consultar Seerr ni
+// comparar episodios), solo caduca por fecha (expiry_days de la biblioteca) o
+// se quita a mano con el mismo botón ✕ que un pendiente normal.
+// En grupo agregado se atribuye al primer miembro (el saldo es compartido
+// igualmente, y decisions_log necesita un user_id real, no el -group_id).
+export function addManualCharge(userId, libraryId, title, username = null) {
+  const identity = quotaIdentity(userId);
+  const attributedUserId = identity.memberIds[0];
+  const library = getLibrary.get(libraryId);
+  insertImportedApproval.run({
+    requestId: -Date.now(),
+    userId: attributedUserId,
+    username,
+    libraryId: Number(libraryId),
+    mediaTitle: title,
+    mediaType: library?.section_type === 'show' ? 'tv' : 'movie',
+    tmdbId: null,
+    seasonNumber: null,
+    posterUrl: null,
+    createdAt: toSqliteDateTime(new Date().toISOString()),
+  });
+}
+
 // Quita a mano UN pendiente del cupo de un usuario (botón ✕ del panel), sin
 // resetear todo: anula (voided_at) sus filas aprobadas, igual que hace la
 // reconciliación automática con las canceladas.

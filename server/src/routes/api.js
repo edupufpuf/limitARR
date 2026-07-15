@@ -18,7 +18,7 @@ import {
   getMediaDetails,
 } from '../services/seerr.js';
 import { getSettings, getSettingsForDisplay, updateSettings } from '../settings.js';
-import { resetQuota, importSeerrHistory, refreshQuotaCache, dismissPendingItem, getPendingItemDetail, quotaIdentity, getBalance } from '../quota.js';
+import { resetQuota, importSeerrHistory, refreshQuotaCache, dismissPendingItem, addManualCharge, getPendingItemDetail, quotaIdentity, getBalance } from '../quota.js';
 import { matchByEmailOrUsername } from '../userMatch.js';
 import { runPollCycle } from '../scheduler.js';
 import { getVersionInfo } from '../services/version.js';
@@ -785,6 +785,19 @@ router.post('/quota/dismiss/:userId/:libraryId', ah(async (req, res) => {
   const dismissed = dismissPendingItem(userId, libraryId, { tmdbId, seasonNumber, title });
   const result = await refreshQuotaCache(userId, libraryId);
   res.json({ ok: true, dismissed, ...result });
+}));
+
+// Cargo manual: algo consumido fuera de Seerr (bajado/visto a mano) que aun
+// así debe restar cupo. Sin tmdbId no se resuelve solo por visionado — se
+// queda contando hasta que caduque por fecha o se quite con el ✕ normal.
+router.post('/quota/manual-charge/:userId/:libraryId', ah(async (req, res) => {
+  const { userId, libraryId } = req.params;
+  const title = (req.body?.title || '').trim();
+  const username = (req.body?.username || '').trim() || null;
+  if (!title) return res.status(400).json({ error: 'title_required' });
+  addManualCharge(userId, libraryId, title, username);
+  const result = await refreshQuotaCache(userId, libraryId);
+  res.json({ ok: true, ...result });
 }));
 
 // Detalle de un pendiente para la ventana de detalle (issue #6): fecha de
