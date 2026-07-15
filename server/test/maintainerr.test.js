@@ -59,7 +59,10 @@ before(async () => {
   upsertSetting.run('maintainerr_url', 'http://maintainerr.test:6246');
   upsertSetting.run('maintainerr_bot_token', 'token-de-test');
   upsertSetting.run('maintainerr_chat_id', '-100123');
-  upsertSetting.run('maintainerr_salvados_collections', 'Peliculas Salvadas por 15 días');
+  upsertSetting.run(
+    'maintainerr_salvados_pairs',
+    JSON.stringify([{ source: 'Peliculas eliminadas en 7 días', target: 'Peliculas Salvadas por 15 días' }])
+  );
 });
 
 afterEach(() => {

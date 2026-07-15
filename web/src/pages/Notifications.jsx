@@ -63,9 +63,9 @@ export default function Notifications() {
   const [mntToken, setMntToken] = useState('');
   const [mntChatId, setMntChatId] = useState('');
   const [mntTopicId, setMntTopicId] = useState('');
-  const [mntCollections, setMntCollections] = useState('');
   const [mntResult, setMntResult] = useState(null);
-  const [mntPairs, setMntPairs] = useState(null);
+  const [mntLiveCollections, setMntLiveCollections] = useState(null);
+  const [mntPairsMap, setMntPairsMap] = useState({}); // { tituloOrigen: tituloDestino }
   const [savingMnt, setSavingMnt] = useState(false);
 
   const [links, setLinks] = useState([]);
@@ -97,7 +97,9 @@ export default function Notifications() {
       setMntUrl(m.url ?? '');
       setMntChatId(m.chatId ?? '');
       setMntTopicId(m.topicId ?? '');
-      setMntCollections(m.salvadosCollections ?? '');
+      const map = {};
+      (m.pairs ?? []).forEach((p) => { map[p.source] = p.target; });
+      setMntPairsMap(map);
     }).catch(() => {});
   }, []);
 
@@ -105,12 +107,13 @@ export default function Notifications() {
     setSavingMnt(true);
     setMntResult(null);
     try {
+      const pairs = Object.entries(mntPairsMap).map(([source, target]) => ({ source, target }));
       const m = await api.updateMaintainerrSettings({
         url: mntUrl,
         botToken: mntToken,
         chatId: mntChatId,
         topicId: mntTopicId,
-        salvadosCollections: mntCollections,
+        pairs,
       });
       setMnt((prev) => ({ ...prev, ...m }));
       setMntToken('');
@@ -122,16 +125,25 @@ export default function Notifications() {
     }
   }
 
-  async function testMaintainerr() {
-    setMntResult('Probando…');
-    setMntPairs(null);
+  async function loadMaintainerrCollections() {
+    setMntResult('Cargando…');
+    setMntLiveCollections(null);
     try {
-      const { pairs } = await api.testMaintainerr();
-      setMntResult(pairs.length ? null : 'Conexión OK, pero Maintainerr no tiene colecciones.');
-      setMntPairs(pairs);
+      const { collections } = await api.testMaintainerr();
+      setMntLiveCollections(collections);
+      setMntResult(collections.length ? null : 'Conexión OK, pero Maintainerr no tiene colecciones.');
     } catch {
       setMntResult('No se pudo conectar con Maintainerr — revisa la URL.');
     }
+  }
+
+  function setPairTarget(sourceTitle, targetTitle) {
+    setMntPairsMap((prev) => {
+      const next = { ...prev };
+      if (targetTitle) next[sourceTitle] = targetTitle;
+      else delete next[sourceTitle];
+      return next;
+    });
   }
 
   async function saveSettings(e) {
@@ -404,14 +416,54 @@ export default function Notifications() {
               </div>
             </div>
             <div>
-              <label className="label">Colecciones de salvados (nombres exactos, separados por coma)</label>
-              <input value={mntCollections} onChange={(e) => setMntCollections(e.target.value)} placeholder="Peliculas Salvadas por 15 días" className="input" />
-              <ol className="text-xs text-gray-500 mt-2 list-decimal list-inside space-y-1">
-                <li>En Maintainerr crea la colección de borrado (regla Radarr/Sonarr) como siempre — su biblioteca y tipo (película/serie) marcan lo que hace falta en el paso 2.</li>
-                <li>Crea otra colección en <strong>esa misma biblioteca y tipo</strong> para "salvados", con los días extra en "delete after days". El nombre es libre.</li>
-                <li>Copia aquí su nombre exacto (varias colecciones = varios nombres separados por coma, una por biblioteca).</li>
+              <label className="label">Qué colección va a dónde al salvar</label>
+              <ol className="text-xs text-gray-500 mt-1 mb-3 list-decimal list-inside space-y-1">
+                <li>En Maintainerr crea la colección de borrado (regla Radarr/Sonarr) como siempre.</li>
+                <li>Crea otra colección en la <strong>misma biblioteca y tipo</strong> para "salvados", con los días extra en "delete after days". El nombre es libre — Maintainerr no deja mezclar bibliotecas ni tipos al mover media entre colecciones, por eso solo aparecen como opción las compatibles.</li>
+                <li>Pulsa "Cargar colecciones de Maintainerr" y, para cada colección de borrado, elige a mano a cuál de salvados se mueve la película. Nada se adivina por nombre — si no eliges destino, esa colección se queda sin botón "Salvar".</li>
                 <li>En Maintainerr añade el webhook de abajo como agente (Settings → Notifications → Webhook Agent), payload <code>{'{}'}</code>, evento "Media Added To Collection".</li>
               </ol>
+              <button type="button" onClick={loadMaintainerrCollections} className="btn btn-ghost">Cargar colecciones de Maintainerr</button>
+              {mntLiveCollections && mntLiveCollections.length > 0 && (
+                <div className="overflow-x-auto mt-3">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-left text-gray-500">
+                        <th className="pr-3 pb-1 font-medium">Colección en Maintainerr</th>
+                        <th className="pr-3 pb-1 font-medium">Biblioteca</th>
+                        <th className="pb-1 font-medium">Al salvar, mover a</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {mntLiveCollections.map((c) => {
+                        const compatible = mntLiveCollections.filter(
+                          (o) => o.id !== c.id && o.type === c.type && o.libraryId === c.libraryId
+                        );
+                        return (
+                          <tr key={c.id} className="border-t border-bg-700/70">
+                            <td className="pr-3 py-1 text-gray-300">{c.title}</td>
+                            <td className="pr-3 py-1 text-gray-500">{c.type}, biblioteca {c.libraryId}</td>
+                            <td className="py-1">
+                              <select
+                                value={mntPairsMap[c.title] ?? ''}
+                                onChange={(e) => setPairTarget(c.title, e.target.value)}
+                                className="input py-1"
+                              >
+                                <option value="">— no salvable —</option>
+                                {compatible.map((o) => (
+                                  <option key={o.id} value={o.title}>
+                                    {o.title} ({o.deleteAfterDays ?? '—'} días)
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
             {mnt?.webhookUrl && (
               <div>
@@ -423,37 +475,8 @@ export default function Notifications() {
               <button type="button" onClick={saveMaintainerr} disabled={savingMnt} className="btn btn-primary">
                 {savingMnt ? 'Guardando…' : 'Guardar módulo'}
               </button>
-              <button type="button" onClick={testMaintainerr} className="btn btn-ghost">Probar conexión</button>
             </div>
             {mntResult && <p aria-live="polite" className="text-xs text-gray-500 whitespace-pre-wrap">{mntResult}</p>}
-            {mntPairs && mntPairs.length > 0 && (
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="text-left text-gray-500">
-                      <th className="pr-3 pb-1 font-medium">Colección detectada</th>
-                      <th className="pr-3 pb-1 font-medium">Biblioteca</th>
-                      <th className="pb-1 font-medium">Al salvar, pasa a</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {mntPairs.map(({ source, target }) => (
-                      <tr key={source.id} className="border-t border-bg-700/70">
-                        <td className="pr-3 py-1 text-gray-300">{source.title}</td>
-                        <td className="pr-3 py-1 text-gray-500">{source.type}, biblioteca {source.libraryId}</td>
-                        <td className="py-1">
-                          {target ? (
-                            <span className="text-green-300">{target.title} ({target.deleteAfterDays ?? '—'} días)</span>
-                          ) : (
-                            <span className="text-amber-300">sin colección de salvados para esta biblioteca</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
           </div>
         </AccordionSection>
 

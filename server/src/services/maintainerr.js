@@ -11,8 +11,23 @@ const URL_KEY = 'maintainerr_url';
 const BOT_TOKEN_KEY = 'maintainerr_bot_token';
 const CHAT_KEY = 'maintainerr_chat_id';
 const TOPIC_KEY = 'maintainerr_topic_id';
-const COLLECTIONS_KEY = 'maintainerr_salvados_collections'; // nombres separados por coma
+// Mapeo explícito: qué colección de salvados le toca a cada colección de
+// borrado. El admin lo elige a mano en el panel (nada de adivinar por
+// biblioteca/tipo) — guardado como JSON [{source, target}] (títulos exactos).
+const PAIRS_KEY = 'maintainerr_salvados_pairs';
 const OFFSET_KEY = 'maintainerr_last_update_id';
+
+function parsePairs(raw) {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((p) => p && typeof p.source === 'string' && typeof p.target === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
 
 export function getMaintainerrSettings() {
   return {
@@ -20,10 +35,7 @@ export function getMaintainerrSettings() {
     botToken: getRawSetting(BOT_TOKEN_KEY),
     chatId: getRawSetting(CHAT_KEY),
     topicId: getRawSetting(TOPIC_KEY),
-    salvadosCollections: (getRawSetting(COLLECTIONS_KEY) || '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean),
+    pairs: parsePairs(getRawSetting(PAIRS_KEY)),
   };
 }
 
@@ -35,17 +47,22 @@ export function getMaintainerrSettingsForDisplay() {
     bot_token_masked: mask(s.botToken),
     chatId: s.chatId,
     topicId: s.topicId,
-    salvadosCollections: s.salvadosCollections.join(', '),
+    pairs: s.pairs,
     enabled: isEnabled(),
   };
 }
 
-export function updateMaintainerrSettings({ url, botToken, chatId, topicId, salvadosCollections }) {
+export function updateMaintainerrSettings({ url, botToken, chatId, topicId, pairs }) {
   if (typeof url === 'string' && url.trim()) setRawSetting(URL_KEY, url.trim().replace(/\/$/, ''));
   if (typeof botToken === 'string' && botToken.trim()) setRawSetting(BOT_TOKEN_KEY, botToken.trim());
   if (chatId !== undefined) setRawSetting(CHAT_KEY, String(chatId).trim());
   if (topicId !== undefined) setRawSetting(TOPIC_KEY, String(topicId).trim());
-  if (salvadosCollections !== undefined) setRawSetting(COLLECTIONS_KEY, String(salvadosCollections).trim());
+  if (Array.isArray(pairs)) {
+    const clean = pairs
+      .filter((p) => p && typeof p.source === 'string' && typeof p.target === 'string' && p.target)
+      .map((p) => ({ source: p.source, target: p.target }));
+    setRawSetting(PAIRS_KEY, JSON.stringify(clean));
+  }
 }
 
 // El módulo entero es opcional: sin URL o sin bot, el webhook ignora y el poller duerme.
@@ -130,22 +147,6 @@ function parseMediaItems(body) {
   }
 }
 
-// El destino tiene que casar tipo y biblioteca con la colección de origen
-// (Maintainerr no permite mezclar movie/season ni bibliotecas en una colección).
-function findTargetCollection(collections, source, salvadosNames) {
-  return collections.find(
-    (c) => salvadosNames.includes(c.title) && c.type === source.type && c.libraryId === source.libraryId
-  );
-}
-
-// Mismo emparejamiento que el webhook real, pero para enseñarlo en el panel:
-// por cada colección que no sea ella misma de salvados, qué destino le tocaría.
-export function pairCollections(collections, salvadosNames) {
-  return collections
-    .filter((c) => !salvadosNames.includes(c.title))
-    .map((source) => ({ source, target: findTargetCollection(collections, source, salvadosNames) ?? null }));
-}
-
 export async function handleMaintainerrWebhook(body) {
   if (!isEnabled()) return;
   const mediaItems = parseMediaItems(body);
@@ -154,10 +155,10 @@ export async function handleMaintainerrWebhook(body) {
     return;
   }
 
-  const { salvadosCollections } = getMaintainerrSettings();
+  const { pairs } = getMaintainerrSettings();
   // Ignorar altas en las propias colecciones de salvados (evita bucle:
   // salvar → add → webhook → otro aviso).
-  if (salvadosCollections.includes(body.collectionName)) return;
+  if (pairs.some((p) => p.target === body.collectionName)) return;
 
   const collections = await listCollections();
   const source = collections.find((c) => c.title === body.collectionName);
@@ -165,7 +166,10 @@ export async function handleMaintainerrWebhook(body) {
     console.error(`[maintainerr] colección "${body.collectionName}" no encontrada`);
     return;
   }
-  const target = findTargetCollection(collections, source, salvadosCollections);
+  // Destino elegido a mano por el admin para ESTA colección concreta (panel
+  // Notificaciones → Maintainerr), no adivinado por biblioteca/tipo.
+  const targetTitle = pairs.find((p) => p.source === body.collectionName)?.target;
+  const target = targetTitle ? collections.find((c) => c.title === targetTitle) : null;
 
   // Maintainerr no manda el título suelto, solo embebido en su mensaje:
   // "'Título' has been added to 'Colección'. ..." — el ancla tras la última
@@ -180,7 +184,7 @@ export async function handleMaintainerrWebhook(body) {
     const sourceMedia = source.media?.find((m) => m.mediaServerId === item.mediaServerId);
     const text = target
       ? `${header}\nSi quieres salvarla, pulsa 💾 Salvar y estará ${target.deleteAfterDays} días más.`
-      : `${header}\n\n⚠️ Sin colección de salvados para esta biblioteca — no se puede salvar.`;
+      : `${header}\n\n⚠️ Sin colección de salvados configurada para "${body.collectionName}" — no se puede salvar.`;
     const replyMarkup = target
       ? {
           inline_keyboard: [
