@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { IconSearch, IconUsers, IconEye, IconBan, IconCheckCircle, IconXCircle } from '../icons.jsx';
 import { SalvadosGrid } from '../components/Salvados.jsx';
+import { downloadStatusLabel, downloadStatusColor } from '../mediaStatus.js';
 
 // Recarga entera tras suplantar: la sesión (cookie) ya quedó en role='user' en
 // el servidor, y App.jsx solo lee /auth/me al montar — el reload es más simple
@@ -154,7 +155,7 @@ function PendingPoster({ item, onDetail, onDismiss }) {
         item.pendingApproval
           ? `${item.title ?? ''} — pendiente de aprobación en Seerr`
           : item.unavailable
-          ? `${item.title ?? ''} — aún no disponible en Plex, no resta cupo`
+          ? `${item.title ?? ''} — ${downloadStatusLabel(item)}, no resta cupo`
           : `${item.title ?? ''}${(item.watchedPercent ?? 0) > 0 ? ` — ${item.watchedPercent}% visto` : ''}`
       }
     >
@@ -169,14 +170,19 @@ function PendingPoster({ item, onDetail, onDismiss }) {
         <div className="w-full h-full bg-gradient-to-br from-bg-600 to-bg-700 flex items-center justify-center text-xl">🎬</div>
       )}
       {item.pendingApproval && (
-        <span className="absolute top-1 left-1 rounded bg-black/75 px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-gray-300 pointer-events-none">
+        <span className="absolute top-1 left-1 rounded bg-black/75 px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-violet-300 pointer-events-none">
           Pdte. Aprobar
         </span>
       )}
       {item.unavailable && (
-        <span className="absolute top-1 left-1 rounded bg-black/75 px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-amber-300 pointer-events-none">
-          no cuenta
-        </span>
+        <div className="absolute top-1 left-1 flex flex-col items-start gap-1 pointer-events-none">
+          <span className="rounded bg-black/75 px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-amber-300">
+            no cuenta
+          </span>
+          <span className={`rounded bg-black/75 px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide ${downloadStatusColor(item)}`}>
+            {downloadStatusLabel(item)}
+          </span>
+        </div>
       )}
       {!item.unavailable && (item.watchedPercent ?? 0) > 0 && (
         <WatchProgressRing percent={item.watchedPercent} />
@@ -324,7 +330,7 @@ export function PendingDetailModal({
               {lib.libraryName} · solicitado por {user.username}
             </div>
             {item.unavailable && (
-              <div className="text-xs text-amber-300 mt-1">Aún no disponible en Plex — no resta cupo.</div>
+              <div className={`text-xs mt-1 ${downloadStatusColor(item)}`}>{downloadStatusLabel(item)} — no resta cupo.</div>
             )}
             {item.pendingApproval && (
               <div className="text-xs text-gray-400 mt-1">Pendiente de aprobación en Seerr — no resta cupo.</div>
@@ -669,21 +675,6 @@ function DebtorBubbles({ debtors, onDetail }) {
   );
 }
 
-// Pila de mini-carátulas solapadas para la cabecera plegada de la tarjeta.
-function PosterStack({ libraries }) {
-  const items = libraries.flatMap((l) => (l.pendingItems ?? []).filter((it) => !it.pendingApproval)).slice(0, 3);
-  if (items.length === 0) return null;
-  return (
-    <div className="hidden sm:flex -space-x-2.5 flex-shrink-0">
-      {items.map((item, i) => (
-        <span key={i} className="w-7 h-10 rounded overflow-hidden ring-2 ring-bg-800 bg-bg-600" style={{ zIndex: 3 - i }}>
-          {item.posterUrl && <img src={item.posterUrl} alt="" loading="lazy" className="w-full h-full object-cover" />}
-        </span>
-      ))}
-    </div>
-  );
-}
-
 function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss, onDetail, resetting }) {
   const worst = worstLib(user.libraries);
   const pending = totalOutstanding(user.libraries);
@@ -717,7 +708,6 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
               : `${pending === 0 ? 'sin pendientes' : `${pending} pendiente(s)`} · ${user.libraries.length} biblioteca(s)`}
           </div>
         </div>
-        <PosterStack libraries={user.libraries} />
         <span className={`text-xl font-bold tabular-nums ${statusOf(worst.balance).text}`}>{worst.balance}</span>
         {/* Grupo agregado: sin cuenta Plex propia, no hay quién suplantar. */}
         {!user.isGroup && (

@@ -4,6 +4,7 @@ import { Wordmark } from '../components/Brand.jsx';
 import { IconBell, IconLogout } from '../icons.jsx';
 import { PendingDetailModal } from './Quota.jsx';
 import { SalvadosGrid } from '../components/Salvados.jsx';
+import { downloadStatusLabel, downloadStatusColor } from '../mediaStatus.js';
 
 function LibraryCard({ library, onDetail }) {
   const percent = library.limitApplied > 0 ? Math.max(0, Math.min(100, (library.balance / library.limitApplied) * 100)) : 0;
@@ -50,7 +51,7 @@ function LibraryCard({ library, onDetail }) {
                     <span className="rounded bg-black/80 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-300">
                       No cuenta
                     </span>
-                    <span className="rounded bg-black/80 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-gray-200">
+                    <span className={`rounded bg-black/80 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${item.pendingApproval ? 'text-violet-300' : downloadStatusColor(item)}`}>
                       {item.pendingApproval ? 'Pdte. de aprobar' : downloadStatusLabel(item)}
                     </span>
                   </div>
@@ -63,12 +64,6 @@ function LibraryCard({ library, onDetail }) {
       )}
     </section>
   );
-}
-
-function downloadStatusLabel(item) {
-  if (Number(item.mediaStatus) === 2) return 'Pendiente de descarga';
-  if (Number(item.mediaStatus) === 3) return 'Descargando';
-  return 'Sin descargar';
 }
 
 export default function UserDashboard({ session, impersonating, onLoggedOut }) {
