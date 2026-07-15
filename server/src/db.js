@@ -114,6 +114,44 @@ db.exec(`
     text TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- Eliminarr: reglas de borrado automático contra Radarr/Sonarr, módulo
+  -- autocontenido sin relación con el motor de cupo (quota_cache, decisions_log).
+  -- enabled=0 al crear siempre ("armar" es un PUT explícito posterior) — ver
+  -- routes/eliminarr.js.
+  CREATE TABLE IF NOT EXISTS eliminarr_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    media_type TEXT NOT NULL CHECK (media_type IN ('movie', 'show')),
+    enabled INTEGER NOT NULL DEFAULT 0,
+    tag_ids TEXT,                     -- JSON array de tag ids de Radarr/Sonarr; NULL = todo el catálogo
+    condition_logic TEXT NOT NULL DEFAULT 'all' CHECK (condition_logic IN ('all', 'any')),
+    conditions TEXT NOT NULL,         -- JSON array [{type, ...}]
+    action TEXT NOT NULL CHECK (action IN ('delete', 'tag_notify')),
+    action_options TEXT,              -- JSON {deleteFiles, tagLabel, ...}
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_run_at TEXT,
+    last_run_summary TEXT             -- JSON {matched, deleted, tagged, errors}
+  );
+
+  -- Histórico de ejecuciones, análogo a decisions_log pero para borrados.
+  -- rule_name desnormalizado a propósito: sobrevive a que se edite/borre la regla.
+  CREATE TABLE IF NOT EXISTS eliminarr_executions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule_id INTEGER NOT NULL,
+    rule_name TEXT NOT NULL,
+    run_id TEXT NOT NULL,             -- agrupa las filas de un mismo ciclo de evaluación
+    media_type TEXT NOT NULL,
+    external_id INTEGER,              -- movieId / seriesId en Radarr/Sonarr
+    tmdb_id INTEGER,
+    title TEXT,
+    poster_url TEXT,
+    matched_conditions TEXT,          -- JSON con qué condiciones cumplió y sus valores
+    action_taken TEXT NOT NULL CHECK (action_taken IN ('deleted', 'tagged', 'error')),
+    error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
 
 // Migraciones para bases de datos ya desplegadas antes de que existiera la columna.
@@ -159,4 +197,7 @@ db.exec(`
     WHERE decision = 'approved' AND voided_at IS NULL;
   CREATE INDEX IF NOT EXISTS idx_decisions_created ON decisions_log (created_at);
   CREATE INDEX IF NOT EXISTS idx_decisions_request ON decisions_log (request_id);
+
+  CREATE INDEX IF NOT EXISTS idx_eliminarr_exec_rule ON eliminarr_executions (rule_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_eliminarr_exec_run ON eliminarr_executions (run_id);
 `);

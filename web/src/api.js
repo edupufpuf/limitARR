@@ -95,4 +95,19 @@ export const api = {
     request('/notifications/test-group', { method: 'POST', body: JSON.stringify(body ?? {}) }),
   sendPendingSummary: (target) =>
     request('/notifications/pending-summary', { method: 'POST', body: JSON.stringify(target ? { target } : {}) }),
+
+  eliminarrRules: () => request('/eliminarr/rules'),
+  createEliminarrRule: (body) => request('/eliminarr/rules', { method: 'POST', body: JSON.stringify(body) }),
+  updateEliminarrRule: (id, body) => request(`/eliminarr/rules/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  armEliminarrRule: (id, enabled) =>
+    request(`/eliminarr/rules/${id}`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
+  deleteEliminarrRule: (id) => request(`/eliminarr/rules/${id}`, { method: 'DELETE' }),
+  previewEliminarrRule: (id) => request(`/eliminarr/rules/${id}/preview`, { method: 'POST' }),
+  previewEliminarrDraft: (body) => request('/eliminarr/rules/preview', { method: 'POST', body: JSON.stringify(body) }),
+  runEliminarrRuleNow: (id) => request(`/eliminarr/rules/${id}/run-now`, { method: 'POST' }),
+  eliminarrTags: (mediaType) => request(`/eliminarr/tags?media_type=${mediaType}`),
+  eliminarrHistory: (params = {}) => request(`/eliminarr/history?${new URLSearchParams(params)}`),
+  eliminarrSettings: () => request('/eliminarr/settings'),
+  updateEliminarrSettings: (body) => request('/eliminarr/settings', { method: 'PUT', body: JSON.stringify(body) }),
+  testEliminarrSettings: () => request('/eliminarr/settings/test', { method: 'POST' }),
 };

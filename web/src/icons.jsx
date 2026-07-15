@@ -141,3 +141,13 @@ export function IconMenu({ className }) {
     </svg>
   );
 }
+
+export function IconTrash({ className }) {
+  return (
+    <svg {...base} className={className}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16M9 7V4.8c0-.44.36-.8.8-.8h4.4c.44 0 .8.36.8.8V7" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 7l1 12.2c.05.99.87 1.8 1.86 1.8h6.28c.99 0 1.81-.81 1.86-1.8L18 7" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M10 11v6M14 11v6" />
+    </svg>
+  );
+}
