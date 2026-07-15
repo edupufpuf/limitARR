@@ -794,8 +794,9 @@ router.post('/quota/manual-charge/:userId/:libraryId', ah(async (req, res) => {
   const { userId, libraryId } = req.params;
   const title = (req.body?.title || '').trim();
   const username = (req.body?.username || '').trim() || null;
+  const note = (req.body?.note || '').trim() || null;
   if (!title) return res.status(400).json({ error: 'title_required' });
-  addManualCharge(userId, libraryId, title, username);
+  addManualCharge(userId, libraryId, title, username, note);
   const result = await refreshQuotaCache(userId, libraryId);
   res.json({ ok: true, ...result });
 }));
@@ -1040,8 +1041,8 @@ router.get('/decisions', (req, res) => {
   }
   const salvadosWhereSql = salvadosWhere.length ? `WHERE ${salvadosWhere.join(' AND ')}` : '';
 
-  const decisionsSelect = `SELECT id, created_at, username, media_title, poster_url, balance_before, limit_applied, decision FROM decisions_log ${decisionsWhereSql}`;
-  const salvadosSelect = `SELECT id, saved_at AS created_at, telegram_name AS username, title AS media_title, poster_url, NULL AS balance_before, NULL AS limit_applied, 'salvado' AS decision FROM salvados ${salvadosWhereSql}`;
+  const decisionsSelect = `SELECT id, created_at, username, media_title, poster_url, balance_before, limit_applied, decision, note FROM decisions_log ${decisionsWhereSql}`;
+  const salvadosSelect = `SELECT id, saved_at AS created_at, telegram_name AS username, title AS media_title, poster_url, NULL AS balance_before, NULL AS limit_applied, 'salvado' AS decision, NULL AS note FROM salvados ${salvadosWhereSql}`;
 
   let unionSql;
   let unionParams;

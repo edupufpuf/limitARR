@@ -63,8 +63,8 @@ export const api = {
   resetQuota: (userId, libraryId) => request(`/quota/reset/${userId}/${libraryId}`, { method: 'POST' }),
   dismissPending: (userId, libraryId, body) =>
     request(`/quota/dismiss/${userId}/${libraryId}`, { method: 'POST', body: JSON.stringify(body) }),
-  manualCharge: (userId, libraryId, title, username) =>
-    request(`/quota/manual-charge/${userId}/${libraryId}`, { method: 'POST', body: JSON.stringify({ title, username }) }),
+  manualCharge: (userId, libraryId, title, username, note) =>
+    request(`/quota/manual-charge/${userId}/${libraryId}`, { method: 'POST', body: JSON.stringify({ title, username, note }) }),
   pendingDetail: (userId, libraryId, params) => {
     const query = new URLSearchParams(
       Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))

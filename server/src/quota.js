@@ -63,7 +63,7 @@ const getGroupOverrideByGroup = db.prepare(
 const getLibrary = db.prepare('SELECT * FROM libraries WHERE id = ?');
 const getResetAt = db.prepare('SELECT reset_at FROM quota_resets WHERE user_id = ? AND library_id = ?');
 const getApprovedTitles = db.prepare(`
-  SELECT id, request_id, media_title, media_type, tmdb_id, season_number, poster_url, created_at FROM decisions_log
+  SELECT id, request_id, media_title, media_type, tmdb_id, season_number, poster_url, note, created_at FROM decisions_log
   WHERE user_id = ? AND library_id = ? AND decision = 'approved' AND voided_at IS NULL AND created_at > ?
 `);
 const updateApprovalPoster = db.prepare(`
@@ -89,8 +89,8 @@ const requestUnitAlreadyLogged = db.prepare(`
 `);
 const insertImportedApproval = db.prepare(`
   INSERT INTO decisions_log
-    (request_id, user_id, username, library_id, media_title, media_type, tmdb_id, season_number, poster_url, decision, created_at)
-  VALUES (@requestId, @userId, @username, @libraryId, @mediaTitle, @mediaType, @tmdbId, @seasonNumber, @posterUrl, 'approved', @createdAt)
+    (request_id, user_id, username, library_id, media_title, media_type, tmdb_id, season_number, poster_url, note, decision, created_at)
+  VALUES (@requestId, @userId, @username, @libraryId, @mediaTitle, @mediaType, @tmdbId, @seasonNumber, @posterUrl, @note, 'approved', @createdAt)
 `);
 const upsertQuotaCache = db.prepare(`
   INSERT INTO quota_cache (user_id, library_id, limit_applied, outstanding, balance, pending_items, computed_at)
@@ -212,6 +212,8 @@ export function computeBalance(limit, approvedRows, watchedTitles, unavailableTm
       expiresAt: isUnavailable(r) ? null : expiresAtMs(r, expiryDays, availableSince),
       // Issue #11: para poder rechazar la solicitud en Seerr desde el detalle.
       requestId: r.request_id ?? null,
+      // Cargo manual: motivo puesto por el admin al restar cupo a mano.
+      note: r.note ?? null,
     });
   }
 
@@ -346,6 +348,7 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatc
     availableSince: r.available_since ?? null,
     expiresAt: r.unavailable ? null : expiresAtMs(r, expiryDays, r.available_since ?? null),
     requestId: r.request_id ?? null,
+    note: r.note ?? null,
   }));
 
   return {
@@ -600,7 +603,7 @@ export async function getPendingItemDetail(userId, libraryId, { tmdbId, seasonNu
 // se quita a mano con el mismo botón ✕ que un pendiente normal.
 // En grupo agregado se atribuye al primer miembro (el saldo es compartido
 // igualmente, y decisions_log necesita un user_id real, no el -group_id).
-export function addManualCharge(userId, libraryId, title, username = null) {
+export function addManualCharge(userId, libraryId, title, username = null, note = null) {
   const identity = quotaIdentity(userId);
   const attributedUserId = identity.memberIds[0];
   const library = getLibrary.get(libraryId);
@@ -614,6 +617,7 @@ export function addManualCharge(userId, libraryId, title, username = null) {
     tmdbId: null,
     seasonNumber: null,
     posterUrl: null,
+    note: note || null,
     createdAt: toSqliteDateTime(new Date().toISOString()),
   });
 }
@@ -689,6 +693,7 @@ export async function importSeerrHistory() {
           tmdbId: request.tmdbId ?? null,
           seasonNumber,
           posterUrl,
+          note: null,
           createdAt: toSqliteDateTime(request.createdAt),
         });
         imported += 1;

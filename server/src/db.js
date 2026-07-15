@@ -165,6 +165,9 @@ addColumnIfMissing('ALTER TABLE libraries ADD COLUMN one_season_per_request INTE
 addColumnIfMissing('ALTER TABLE libraries ADD COLUMN sequential_seasons INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('ALTER TABLE overrides ADD COLUMN expiry_override INTEGER');
 addColumnIfMissing('ALTER TABLE group_overrides ADD COLUMN expiry_override INTEGER');
+// Motivo del cargo manual (por qué se resta cupo por algo sin tmdb_id): texto
+// libre puesto por el admin al crearlo, para saber luego por qué está ahí.
+addColumnIfMissing('ALTER TABLE decisions_log ADD COLUMN note TEXT');
 
 // decisions_log se consulta en cada ciclo y crece sin límite; sin índices,
 // todo son full scans. El parcial cubre la consulta caliente (aprobadas

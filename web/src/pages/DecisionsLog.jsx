@@ -126,7 +126,10 @@ export default function DecisionsLog() {
                     {r.poster_url && (
                       <img src={r.poster_url} alt="" loading="lazy" className="w-6 h-9 object-cover rounded flex-shrink-0" />
                     )}
-                    {r.media_title ?? '—'}
+                    <span>
+                      <span className="block">{r.media_title ?? '—'}</span>
+                      {r.note && <span className="block text-xs text-gray-500">📝 {r.note}</span>}
+                    </span>
                   </span>
                 </td>
                 <td className="py-2 pr-4 tabular-nums">{r.balance_before ?? '—'}</td>

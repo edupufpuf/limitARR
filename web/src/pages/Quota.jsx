@@ -156,7 +156,7 @@ function PendingPoster({ item, onDetail, onDismiss }) {
           ? `${item.title ?? ''} — pendiente de aprobación en Seerr`
           : item.unavailable
           ? `${item.title ?? ''} — ${downloadStatusLabel(item)}, no resta cupo`
-          : `${item.title ?? ''}${(item.watchedPercent ?? 0) > 0 ? ` — ${item.watchedPercent}% visto` : ''}`
+          : `${item.title ?? ''}${(item.watchedPercent ?? 0) > 0 ? ` — ${item.watchedPercent}% visto` : ''}${item.note ? ` — nota: ${item.note}` : ''}`
       }
     >
       {item.posterUrl ? (
@@ -334,6 +334,9 @@ export function PendingDetailModal({
             )}
             {item.pendingApproval && (
               <div className="text-xs text-gray-400 mt-1">Pendiente de aprobación en Seerr — no resta cupo.</div>
+            )}
+            {item.note && (
+              <div className="text-xs text-gray-400 mt-1">📝 {item.note}</div>
             )}
             <dl className="mt-3 space-y-1.5 text-xs sm:text-sm">
               <div className="flex gap-2">
@@ -926,9 +929,10 @@ export default function Quota() {
   async function manualCharge(userId, libraryId, username) {
     const title = prompt('Título de lo que se bajó/vio fuera de Seerr (restará un hueco de cupo):');
     if (!title?.trim()) return;
+    const note = prompt('Nota: ¿por qué se usa este cargo manual? (opcional)');
     const key = `${userId}-${libraryId}`;
     setCharging((c) => ({ ...c, [key]: true }));
-    await api.manualCharge(userId, libraryId, title.trim(), username);
+    await api.manualCharge(userId, libraryId, title.trim(), username, note?.trim() || null);
     load();
     setCharging((c) => ({ ...c, [key]: false }));
   }

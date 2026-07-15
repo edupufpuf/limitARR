@@ -289,13 +289,14 @@ test('cupo: cargo manual resta un hueco sin tmdb y se quita con el ✕ normal', 
   try {
     const charge = await agent
       .post('/api/quota/manual-charge/1880/1778')
-      .send({ title: 'Serie mala bajada a mano', username: 'ana' })
+      .send({ title: 'Serie mala bajada a mano', username: 'ana', note: 'Descarga manual, calidad mala en Seerr' })
       .expect(200);
     assert.equal(charge.body.outstanding, 1);
     assert.equal(charge.body.balance, 3); // límite 4 - 1
     assert.equal(charge.body.pendingItems[0].title, 'Serie mala bajada a mano');
     assert.equal(charge.body.pendingItems[0].tmdbId, null);
     assert.equal(charge.body.pendingItems[0].unavailable, false);
+    assert.equal(charge.body.pendingItems[0].note, 'Descarga manual, calidad mala en Seerr');
 
     const row = db
       .prepare(`SELECT * FROM decisions_log WHERE user_id = 1880 AND library_id = 1778 AND decision = 'approved'`)
@@ -303,6 +304,7 @@ test('cupo: cargo manual resta un hueco sin tmdb y se quita con el ✕ normal', 
     assert.equal(row.tmdb_id, null);
     assert.equal(row.season_number, null);
     assert.equal(row.media_type, 'tv');
+    assert.equal(row.note, 'Descarga manual, calidad mala en Seerr');
     assert.ok(row.request_id < 0, 'el request_id manual debe ser negativo para no chocar con ids reales de Seerr');
 
     const dismissResult = await agent
