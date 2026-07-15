@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import Quota from './Quota.jsx';
+import Salvadas from './Salvadas.jsx';
 import Libraries from './Libraries.jsx';
 import Overrides from './Overrides.jsx';
 import DecisionsLog from './DecisionsLog.jsx';
@@ -8,10 +9,11 @@ import Settings from './Settings.jsx';
 import Notifications from './Notifications.jsx';
 import WhatsNewModal from '../components/WhatsNewModal.jsx';
 import { Wordmark } from '../components/Brand.jsx';
-import { IconGauge, IconFilm, IconSliders, IconClock, IconBell, IconGear, IconLogout } from '../icons.jsx';
+import { IconGauge, IconSave, IconFilm, IconSliders, IconClock, IconBell, IconGear, IconLogout } from '../icons.jsx';
 
 const TABS = {
   quota: { label: 'Cupo', Icon: IconGauge, Component: Quota },
+  salvadas: { label: 'Salvadas', Icon: IconSave, Component: Salvadas },
   libraries: { label: 'Bibliotecas', Icon: IconFilm, Component: Libraries },
   overrides: { label: 'Overrides', Icon: IconSliders, Component: Overrides },
   log: { label: 'Registro', Icon: IconClock, Component: DecisionsLog },

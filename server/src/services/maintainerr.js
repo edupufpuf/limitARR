@@ -241,6 +241,15 @@ function resolveTautulliUser(telegramUserId) {
 async function handleSaveCallback(query) {
   const [, mediaServerId, sourceId, targetId] = query.data.split(':');
   try {
+    // Consulta la API en vivo ANTES de mover nada: si el proceso reinició
+    // entre el aviso y el clic, pendingTitles está vacío (era memoria) pero
+    // póster/tmdbId/biblioteca siguen ahí, en la propia colección origen.
+    // El título no viaja en esta API (solo llega embebido en el mensaje del
+    // webhook), así que ese sí depende de la caché y puede faltar.
+    const collectionsBefore = await listCollections().catch(() => []);
+    const sourceCollection = collectionsBefore.find((c) => c.id === Number(sourceId));
+    const liveMedia = sourceCollection?.media?.find((m) => String(m.mediaServerId) === String(mediaServerId));
+
     await removeFromCollection(Number(sourceId), mediaServerId);
     await addToCollection(Number(targetId), mediaServerId);
 
@@ -249,17 +258,23 @@ async function handleSaveCallback(query) {
     const target = (await listCollections().catch(() => [])).find((c) => c.id === Number(targetId));
     const days = target?.deleteAfterDays;
 
-    const meta = pendingTitles.get(String(mediaServerId)) ?? {};
+    const cached = pendingTitles.get(String(mediaServerId)) ?? {};
     pendingTitles.delete(String(mediaServerId));
+    const meta = {
+      title: cached.title ?? null,
+      tmdbId: cached.tmdbId ?? liveMedia?.tmdbId ?? null,
+      posterUrl: cached.posterUrl ?? liveMedia?.image_path ?? null,
+      libraryId: cached.libraryId ?? (sourceCollection?.libraryId != null ? Number(sourceCollection.libraryId) : null),
+    };
     insertSalvado.run(
       String(mediaServerId),
-      meta.tmdbId ?? null,
-      meta.title ?? null,
-      meta.posterUrl ?? null,
+      meta.tmdbId,
+      meta.title,
+      meta.posterUrl,
       String(query.from.id),
       displayName(query.from),
       resolveTautulliUser(query.from.id),
-      meta.libraryId ?? null,
+      meta.libraryId,
       days ?? 15
     );
 

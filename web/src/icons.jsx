@@ -16,6 +16,16 @@ export function IconGauge({ className }) {
   );
 }
 
+export function IconSave({ className }) {
+  return (
+    <svg {...base} className={className}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 4h11l3 3v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 4v5h8V4" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7 14h10v6H7z" />
+    </svg>
+  );
+}
+
 export function IconFilm({ className }) {
   return (
     <svg {...base} className={className}>
