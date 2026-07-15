@@ -18,8 +18,10 @@ const PAIRS_KEY = 'maintainerr_salvados_pairs';
 const SILENT_KEY = 'maintainerr_silent';
 const OFFSET_KEY = 'maintainerr_last_update_id';
 const SAVED_MESSAGE_KEY = 'maintainerr_saved_message';
+const DELETE_MESSAGE_KEY = 'maintainerr_delete_message';
 
 const DEFAULT_SAVED_MESSAGE = '✅ Salvada por {usuario}{dias}.';
+const DEFAULT_DELETE_MESSAGE = '🎬 {titulo} se borrará{dias}.\nSi quieres salvarla, pulsa 💾 Salvar y estará {diasSalvado} días más.';
 
 function parsePairs(raw) {
   if (!raw) return [];
@@ -42,6 +44,7 @@ export function getMaintainerrSettings() {
     pairs: parsePairs(getRawSetting(PAIRS_KEY)),
     silent: getRawSetting(SILENT_KEY) === '1',
     savedMessage: getRawSetting(SAVED_MESSAGE_KEY) || DEFAULT_SAVED_MESSAGE,
+    deleteMessage: getRawSetting(DELETE_MESSAGE_KEY) || DEFAULT_DELETE_MESSAGE,
   };
 }
 
@@ -56,17 +59,19 @@ export function getMaintainerrSettingsForDisplay() {
     pairs: s.pairs,
     silent: s.silent,
     savedMessage: s.savedMessage,
+    deleteMessage: s.deleteMessage,
     enabled: isEnabled(),
   };
 }
 
-export function updateMaintainerrSettings({ url, botToken, chatId, topicId, pairs, silent, savedMessage }) {
+export function updateMaintainerrSettings({ url, botToken, chatId, topicId, pairs, silent, savedMessage, deleteMessage }) {
   if (typeof url === 'string' && url.trim()) setRawSetting(URL_KEY, url.trim().replace(/\/$/, ''));
   if (typeof botToken === 'string' && botToken.trim()) setRawSetting(BOT_TOKEN_KEY, botToken.trim());
   if (chatId !== undefined) setRawSetting(CHAT_KEY, String(chatId).trim());
   if (topicId !== undefined) setRawSetting(TOPIC_KEY, String(topicId).trim());
   if (silent !== undefined) setRawSetting(SILENT_KEY, silent ? '1' : '');
   if (typeof savedMessage === 'string') setRawSetting(SAVED_MESSAGE_KEY, savedMessage.trim() || DEFAULT_SAVED_MESSAGE);
+  if (typeof deleteMessage === 'string') setRawSetting(DELETE_MESSAGE_KEY, deleteMessage.trim() || DEFAULT_DELETE_MESSAGE);
   if (Array.isArray(pairs)) {
     const clean = pairs
       .filter((p) => p && typeof p.source === 'string' && typeof p.target === 'string' && p.target)
@@ -166,7 +171,7 @@ export async function handleMaintainerrWebhook(body) {
     return;
   }
 
-  const { pairs } = getMaintainerrSettings();
+  const { pairs, deleteMessage } = getMaintainerrSettings();
   // Ignorar altas en las propias colecciones de salvados (evita bucle:
   // salvar → add → webhook → otro aviso).
   if (pairs.some((p) => p.target === body.collectionName)) return;
@@ -187,15 +192,17 @@ export async function handleMaintainerrWebhook(body) {
   // comilla aguanta títulos con apóstrofes.
   const title = /'(.+)' has been added to '/.exec(body.message ?? '')?.[1];
   const deleteDays = body.dayAmount ?? source.deleteAfterDays;
-  const header =
-    `🎬 ${title ? `«${title}»` : 'Esta película'} se borrará` +
-    `${deleteDays ? ` en ${deleteDays} días` : ''}.`;
+  const tituloTexto = title ? `«${title}»` : 'Esta película';
+  const diasTexto = deleteDays ? ` en ${deleteDays} días` : '';
 
   for (const item of mediaItems) {
     const sourceMedia = source.media?.find((m) => m.mediaServerId === item.mediaServerId);
     const text = target
-      ? `${header}\nSi quieres salvarla, pulsa 💾 Salvar y estará ${target.deleteAfterDays} días más.`
-      : `${header}\n\n⚠️ Sin colección de salvados configurada para "${body.collectionName}" — no se puede salvar.`;
+      ? deleteMessage
+          .replace(/{titulo}/g, tituloTexto)
+          .replace(/{dias}/g, diasTexto)
+          .replace(/{diasSalvado}/g, String(target.deleteAfterDays ?? ''))
+      : `🎬 ${tituloTexto} se borrará${diasTexto}.\n\n⚠️ Sin colección de salvados configurada para "${body.collectionName}" — no se puede salvar.`;
     const replyMarkup = target
       ? {
           inline_keyboard: [

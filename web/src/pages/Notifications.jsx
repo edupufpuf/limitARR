@@ -65,6 +65,7 @@ export default function Notifications() {
   const [mntTopicId, setMntTopicId] = useState('');
   const [mntSilent, setMntSilent] = useState(false);
   const [mntSavedMessage, setMntSavedMessage] = useState('');
+  const [mntDeleteMessage, setMntDeleteMessage] = useState('');
   const [mntResult, setMntResult] = useState(null);
   const [mntLiveCollections, setMntLiveCollections] = useState(null);
   const [mntPairsMap, setMntPairsMap] = useState({}); // { tituloOrigen: tituloDestino }
@@ -101,6 +102,7 @@ export default function Notifications() {
       setMntTopicId(m.topicId ?? '');
       setMntSilent(Boolean(m.silent));
       setMntSavedMessage(m.savedMessage ?? '');
+      setMntDeleteMessage(m.deleteMessage ?? '');
       const map = {};
       (m.pairs ?? []).forEach((p) => { map[p.source] = p.target; });
       setMntPairsMap(map);
@@ -120,9 +122,11 @@ export default function Notifications() {
         pairs,
         silent: mntSilent,
         savedMessage: mntSavedMessage,
+        deleteMessage: mntDeleteMessage,
       });
       setMnt((prev) => ({ ...prev, ...m }));
       setMntSavedMessage(m.savedMessage ?? mntSavedMessage);
+      setMntDeleteMessage(m.deleteMessage ?? mntDeleteMessage);
       setMntToken('');
       setMntResult('Guardado.');
     } catch {
@@ -429,6 +433,20 @@ export default function Notifications() {
               </span>
               <input type="checkbox" checked={mntSilent} onChange={(e) => setMntSilent(e.target.checked)} className="w-5 h-5 accent-red-500" />
             </label>
+            <div>
+              <label className="label">Texto del aviso de borrado</label>
+              <textarea
+                value={mntDeleteMessage}
+                onChange={(e) => setMntDeleteMessage(e.target.value)}
+                rows={3}
+                className="input min-h-20 resize-y"
+              />
+              <p className="text-xs text-gray-500 mt-2">
+                Variables: <span className="text-gray-300">{'{titulo}'}</span>,{' '}
+                <span className="text-gray-300">{'{dias}'}</span> (frase con los días hasta el borrado) y{' '}
+                <span className="text-gray-300">{'{diasSalvado}'}</span> (número de días extra al salvar).
+              </p>
+            </div>
             <div>
               <label className="label">Texto al salvar</label>
               <textarea

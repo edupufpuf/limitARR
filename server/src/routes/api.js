@@ -1034,8 +1034,8 @@ router.get('/maintainerr/settings', (req, res) => {
 });
 
 router.put('/maintainerr/settings', (req, res) => {
-  const { url, botToken, chatId, topicId, pairs, silent, savedMessage } = req.body || {};
-  updateMaintainerrSettings({ url, botToken, chatId, topicId, pairs, silent, savedMessage });
+  const { url, botToken, chatId, topicId, pairs, silent, savedMessage, deleteMessage } = req.body || {};
+  updateMaintainerrSettings({ url, botToken, chatId, topicId, pairs, silent, savedMessage, deleteMessage });
   res.json(getMaintainerrSettingsForDisplay());
 });
 
