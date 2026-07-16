@@ -423,10 +423,9 @@ export function PendingDetailModal({
                           {isTv && w.episodes?.length > 0 && (
                             <span className="text-gray-500 mr-1 text-[9px]">{openWatcher === w.userId ? '▼' : '▶'}</span>
                           )}
-                          {w.username}
-                          {w.userId === user.userId && (
-                            <span className="ml-1.5 text-[9px] uppercase tracking-wide text-accent-400">solicitante</span>
-                          )}
+                          <span className={w.userId === user.userId ? 'text-accent-400 font-semibold' : ''}>
+                            {w.username}
+                          </span>
                         </td>
                         <td className="py-1.5 pr-3 text-right tabular-nums">
                           {isTv ? `${w.episodesWatched ?? 0}${w.episodesTotal ? `/${w.episodesTotal}` : ''}` : w.plays}
