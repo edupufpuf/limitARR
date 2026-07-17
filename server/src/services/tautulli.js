@@ -90,6 +90,9 @@ export async function getUserEpisodeHistory(userId, sectionId, limit = 1000) {
     section_id: sectionId,
     length: limit,
     media_type: 'episode',
+    // Sin esto Tautulli agrupa episodios vistos seguidos (binge) en una sola
+    // fila, y solo se ve 1 episodio de la temporada aunque se hayan visto varios.
+    grouping: 0,
   });
   return (data.data || []).map((row) => {
     let percent = Number(row.percent_complete);
@@ -119,7 +122,7 @@ export async function getItemWatchHistory(ratingKey, isTv = false) {
     ? [{ parent_rating_key: ratingKey }, { grandparent_rating_key: ratingKey }]
     : [{ rating_key: ratingKey }];
   for (const params of attempts) {
-    const data = await call('get_history', { ...params, length: 500 });
+    const data = await call('get_history', { ...params, length: 500, grouping: 0 });
     const rows = (data.data || []).map((row) => {
       let percent = Number(row.percent_complete);
       if (!Number.isFinite(percent)) {
