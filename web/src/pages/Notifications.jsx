@@ -443,7 +443,8 @@ export default function Notifications() {
               />
               <p className="text-xs text-gray-500 mt-2">
                 Variables: <span className="text-gray-300">{'{titulo}'}</span>,{' '}
-                <span className="text-gray-300">{'{dias}'}</span> (frase con los días hasta el borrado) y{' '}
+                <span className="text-gray-300">{'{dias}'}</span> (frase " en N días", vacía si no aplica),{' '}
+                <span className="text-gray-300">{'{fecha}'}</span> (día concreto del borrado, p.ej. "22 de julio") y{' '}
                 <span className="text-gray-300">{'{diasSalvado}'}</span> (número de días extra al salvar).
               </p>
             </div>

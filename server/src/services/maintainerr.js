@@ -183,6 +183,12 @@ async function notifyDeletionCandidate(source, target, item, { fallbackTitle = n
   const sourceMedia = source.media?.find((m) => m.mediaServerId === item.mediaServerId);
   const deleteDays = deleteDaysOverride ?? source.deleteAfterDays;
   const diasTexto = deleteDays ? ` en ${deleteDays} días` : '';
+  // {fecha}: día concreto del borrado, no solo "en N días" — deleteAfterDays
+  // cuenta desde que Maintainerr mete el ítem en la colección, así que la
+  // fecha es aproximada a partir de ahora (el aviso llega poco después de esa alta).
+  const fechaTexto = deleteDays
+    ? new Date(Date.now() + deleteDays * 86_400_000).toLocaleDateString('es-ES', { day: 'numeric', month: 'long' })
+    : '';
   const isSeason = source.type !== 'movie';
 
   // Issue: Salvadas para series, siempre por temporada. Maintainerr no da
@@ -204,6 +210,7 @@ async function notifyDeletionCandidate(source, target, item, { fallbackTitle = n
     ? deleteMessage
         .replace(/{titulo}/g, tituloTexto)
         .replace(/{dias}/g, diasTexto)
+        .replace(/{fecha}/g, fechaTexto)
         .replace(/{diasSalvado}/g, String(target.deleteAfterDays ?? ''))
     : `🎬 ${tituloTexto} se borrará${diasTexto}.\n\n⚠️ Sin colección de salvados configurada para "${source.title}" — no se puede salvar.`;
   const replyMarkup = target
