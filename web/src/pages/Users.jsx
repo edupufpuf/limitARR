@@ -155,13 +155,13 @@ function GroupCard({ group, users, libraries, onChanged }) {
             String(monthlyLimits[l.id] ?? '') !== String(savedMonthly);
           return (
             <div key={l.id} className="flex items-center gap-2 text-sm">
-              <span className="text-gray-400">{l.name}</span>
+              <span className="text-gray-400 w-28 truncate flex-shrink-0">{l.name}</span>
               <input
                 type="number"
                 min={0}
                 value={limits[l.id] ?? ''}
                 onChange={(e) => setLimits({ ...limits, [l.id]: e.target.value })}
-                className="input w-16 py-1"
+                className="input w-20 py-1"
                 title="Límite"
               />
               <input
@@ -169,7 +169,7 @@ function GroupCard({ group, users, libraries, onChanged }) {
                 min={0}
                 value={expiries[l.id] ?? ''}
                 onChange={(e) => setExpiries({ ...expiries, [l.id]: e.target.value })}
-                className="input w-16 py-1"
+                className="input w-20 py-1"
                 placeholder="cad."
                 title="Caducidad en días (0 = no caduca; vacío = la de la biblioteca)"
               />
@@ -178,7 +178,7 @@ function GroupCard({ group, users, libraries, onChanged }) {
                 min={0}
                 value={monthlyLimits[l.id] ?? ''}
                 onChange={(e) => setMonthlyLimits({ ...monthlyLimits, [l.id]: e.target.value })}
-                className="input w-16 py-1"
+                className="input w-20 py-1"
                 placeholder="mes"
                 title="Cupo mensual (0 = bloquear el mes; vacío = el de la biblioteca)"
               />
@@ -296,13 +296,13 @@ function RoleCard({ role, users, libraries, onChanged }) {
             String(monthlyLimits[l.id] ?? '') !== String(savedMonthly);
           return (
             <div key={l.id} className="flex items-center gap-2 text-sm">
-              <span className="text-gray-400">{l.name}</span>
+              <span className="text-gray-400 w-28 truncate flex-shrink-0">{l.name}</span>
               <input
                 type="number"
                 min={0}
                 value={limits[l.id] ?? ''}
                 onChange={(e) => setLimits({ ...limits, [l.id]: e.target.value })}
-                className="input w-16 py-1"
+                className="input w-20 py-1"
                 title="Límite"
               />
               <input
@@ -310,7 +310,7 @@ function RoleCard({ role, users, libraries, onChanged }) {
                 min={0}
                 value={expiries[l.id] ?? ''}
                 onChange={(e) => setExpiries({ ...expiries, [l.id]: e.target.value })}
-                className="input w-16 py-1"
+                className="input w-20 py-1"
                 placeholder="cad."
                 title="Caducidad en días (0 = no caduca; vacío = la de la biblioteca)"
               />
@@ -319,7 +319,7 @@ function RoleCard({ role, users, libraries, onChanged }) {
                 min={0}
                 value={monthlyLimits[l.id] ?? ''}
                 onChange={(e) => setMonthlyLimits({ ...monthlyLimits, [l.id]: e.target.value })}
-                className="input w-16 py-1"
+                className="input w-20 py-1"
                 placeholder="mes"
                 title="Cupo mensual (0 = bloquear el mes; vacío = el de la biblioteca)"
               />
@@ -701,13 +701,13 @@ function UserFichaModal({ user, group, role, allGroups, allRoles, overrides, lib
                   String(notes[l.id] ?? '') !== String(saved?.note ?? '');
                 return (
                   <div key={l.id} className="flex flex-wrap items-center gap-2 text-sm">
-                    <span className="text-gray-400 w-24 truncate">{l.name}</span>
+                    <span className="text-gray-400 w-28 truncate flex-shrink-0">{l.name}</span>
                     <input
                       type="number"
                       min={0}
                       value={limits[l.id] ?? ''}
                       onChange={(e) => setLimits({ ...limits, [l.id]: e.target.value })}
-                      className="input w-16 py-1"
+                      className="input w-20 py-1"
                       title="Límite"
                     />
                     <input
@@ -715,7 +715,7 @@ function UserFichaModal({ user, group, role, allGroups, allRoles, overrides, lib
                       min={0}
                       value={expiries[l.id] ?? ''}
                       onChange={(e) => setExpiries({ ...expiries, [l.id]: e.target.value })}
-                      className="input w-16 py-1"
+                      className="input w-20 py-1"
                       placeholder="cad."
                       title="Caducidad en días (0 = no caduca; vacío = herencia)"
                     />
@@ -724,7 +724,7 @@ function UserFichaModal({ user, group, role, allGroups, allRoles, overrides, lib
                       min={0}
                       value={monthlyLimits[l.id] ?? ''}
                       onChange={(e) => setMonthlyLimits({ ...monthlyLimits, [l.id]: e.target.value })}
-                      className="input w-16 py-1"
+                      className="input w-20 py-1"
                       placeholder="mes"
                       title="Cupo mensual (0 = bloquear el mes; vacío = herencia)"
                     />
@@ -732,7 +732,7 @@ function UserFichaModal({ user, group, role, allGroups, allRoles, overrides, lib
                       value={notes[l.id] ?? ''}
                       onChange={(e) => setNotes({ ...notes, [l.id]: e.target.value })}
                       placeholder="nota"
-                      className="input w-28 py-1"
+                      className="input w-40 py-1"
                     />
                     {dirty && (
                       <button onClick={() => saveLimit(l.id)} className="btn btn-primary py-1 px-2.5 text-xs">
