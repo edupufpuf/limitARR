@@ -9,6 +9,26 @@ function Chevron({ open }) {
   );
 }
 
+// Sub-desplegable más compacto, para trocear una AccordionSection larga (el
+// módulo Maintainerr tiene conexión + mensajes de dos tipos + colecciones +
+// webhook — todo en un bloque se veía como una pared de campos).
+function MiniSection({ title, defaultOpen = false, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="rounded-xl border border-bg-700 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-bg-700/25 transition-colors"
+      >
+        <span className="font-bold text-sm text-gray-200">{title}</span>
+        <Chevron open={open} />
+      </button>
+      {open && <div className="border-t border-bg-700 px-4 py-4 bg-bg-900/20 space-y-4">{children}</div>}
+    </div>
+  );
+}
+
 function AccordionSection({ id, title, description, status, tone = 'neutral', open, onToggle, children }) {
   const statusClass = tone === 'active'
     ? 'bg-green-500/10 text-green-300 ring-green-500/25'
@@ -66,6 +86,7 @@ export default function Notifications() {
   const [mntSilent, setMntSilent] = useState(false);
   const [mntSavedMessage, setMntSavedMessage] = useState('');
   const [mntDeleteMessage, setMntDeleteMessage] = useState('');
+  const [mntDeleteMessageTv, setMntDeleteMessageTv] = useState('');
   const [mntResult, setMntResult] = useState(null);
   const [mntLiveCollections, setMntLiveCollections] = useState(null);
   const [mntPairsMap, setMntPairsMap] = useState({}); // { tituloOrigen: tituloDestino }
@@ -103,6 +124,7 @@ export default function Notifications() {
       setMntSilent(Boolean(m.silent));
       setMntSavedMessage(m.savedMessage ?? '');
       setMntDeleteMessage(m.deleteMessage ?? '');
+      setMntDeleteMessageTv(m.deleteMessageTv ?? '');
       const map = {};
       (m.pairs ?? []).forEach((p) => { map[p.source] = p.target; });
       setMntPairsMap(map);
@@ -123,10 +145,12 @@ export default function Notifications() {
         silent: mntSilent,
         savedMessage: mntSavedMessage,
         deleteMessage: mntDeleteMessage,
+        deleteMessageTv: mntDeleteMessageTv,
       });
       setMnt((prev) => ({ ...prev, ...m }));
       setMntSavedMessage(m.savedMessage ?? mntSavedMessage);
       setMntDeleteMessage(m.deleteMessage ?? mntDeleteMessage);
+      setMntDeleteMessageTv(m.deleteMessageTv ?? mntDeleteMessageTv);
       setMntToken('');
       setMntResult('Guardado.');
     } catch {
@@ -388,81 +412,101 @@ export default function Notifications() {
         <AccordionSection
           id="maintainerr"
           title="Salvar del borrado (Maintainerr)"
-          description="Aviso con botón 💾 Salvar cuando Maintainerr va a borrar una película."
+          description="Aviso con botón 💾 Salvar cuando Maintainerr va a borrar una película o una temporada."
           status={mnt?.enabled ? 'Configurado' : 'Pendiente'}
           tone={mnt?.enabled ? 'active' : 'warning'}
           open={openSection === 'maintainerr'}
           onToggle={toggleSection}
         >
-          <div className="space-y-4">
+          <div className="space-y-3">
             <p className="text-sm text-gray-400">
               Usa un bot de Telegram <strong>dedicado</strong> (no el de los avisos de cupo: Telegram
-              solo permite un lector de updates por token). Al pulsar 💾 Salvar, la película pasa a la
-              colección de salvados y se registra quién la salvó.
+              solo permite un lector de updates por token). Al pulsar 💾 Salvar, el ítem pasa a la
+              colección de salvados y se registra quién lo salvó.
             </p>
-            <div className="grid sm:grid-cols-2 gap-3">
-              <div>
-                <label className="label">URL de Maintainerr</label>
-                <input value={mntUrl} onChange={(e) => setMntUrl(e.target.value)} placeholder="http://maintainerr:6246" className="input" />
+
+            <MiniSection title="Conexión" defaultOpen={!mnt?.enabled}>
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="label">URL de Maintainerr</label>
+                  <input value={mntUrl} onChange={(e) => setMntUrl(e.target.value)} placeholder="http://maintainerr:6246" className="input" />
+                </div>
+                <div>
+                  <label className="label">
+                    Token del bot dedicado {mnt?.bot_token_set && <span className="text-gray-600">(guardado: {mnt.bot_token_masked})</span>}
+                  </label>
+                  <input
+                    type="password"
+                    value={mntToken}
+                    onChange={(e) => setMntToken(e.target.value)}
+                    placeholder={mnt?.bot_token_set ? '•••• dejar en blanco para no cambiar' : 'token de @BotFather'}
+                    className="input"
+                  />
+                </div>
+                <div>
+                  <label className="label">Chat ID del grupo</label>
+                  <input value={mntChatId} onChange={(e) => setMntChatId(e.target.value)} placeholder="-1001234567890" className="input" />
+                </div>
+                <div>
+                  <label className="label">Topic ID</label>
+                  <input value={mntTopicId} onChange={(e) => setMntTopicId(e.target.value)} placeholder="opcional" className="input" />
+                </div>
               </div>
+              <label className="flex items-center justify-between gap-4 rounded-xl border border-bg-600 bg-bg-950/30 p-4 cursor-pointer">
+                <span>
+                  <span className="block font-bold">Enviar sin sonido</span>
+                  <span className="block text-xs text-gray-500 mt-1">Avisos de "va a borrarse" y "salvada por…" llegan silenciados al grupo.</span>
+                </span>
+                <input type="checkbox" checked={mntSilent} onChange={(e) => setMntSilent(e.target.checked)} className="w-5 h-5 accent-red-500" />
+              </label>
+            </MiniSection>
+
+            <MiniSection title="Mensajes">
               <div>
-                <label className="label">
-                  Token del bot dedicado {mnt?.bot_token_set && <span className="text-gray-600">(guardado: {mnt.bot_token_masked})</span>}
-                </label>
-                <input
-                  type="password"
-                  value={mntToken}
-                  onChange={(e) => setMntToken(e.target.value)}
-                  placeholder={mnt?.bot_token_set ? '•••• dejar en blanco para no cambiar' : 'token de @BotFather'}
-                  className="input"
+                <label className="label">Texto del aviso de borrado — películas</label>
+                <textarea
+                  value={mntDeleteMessage}
+                  onChange={(e) => setMntDeleteMessage(e.target.value)}
+                  rows={3}
+                  className="input min-h-20 resize-y"
                 />
+                <p className="text-xs text-gray-500 mt-2">
+                  Variables: <span className="text-gray-300">{'{titulo}'}</span>,{' '}
+                  <span className="text-gray-300">{'{dias}'}</span> (frase " en N días", vacía si no aplica),{' '}
+                  <span className="text-gray-300">{'{fecha}'}</span> (día concreto del borrado, p.ej. "22 de julio") y{' '}
+                  <span className="text-gray-300">{'{diasSalvado}'}</span> (número de días extra al salvar).
+                </p>
               </div>
               <div>
-                <label className="label">Chat ID del grupo</label>
-                <input value={mntChatId} onChange={(e) => setMntChatId(e.target.value)} placeholder="-1001234567890" className="input" />
+                <label className="label">Texto del aviso de borrado — series</label>
+                <textarea
+                  value={mntDeleteMessageTv}
+                  onChange={(e) => setMntDeleteMessageTv(e.target.value)}
+                  rows={3}
+                  className="input min-h-20 resize-y"
+                />
+                <p className="text-xs text-gray-500 mt-2">
+                  Mismas variables que el de películas. <span className="text-gray-300">{'{titulo}'}</span> ya
+                  nombra serie y temporada ("la serie «X» (temporada N)") — este texto es aparte por si
+                  quieres un tono o emoji distinto para series.
+                </p>
               </div>
               <div>
-                <label className="label">Topic ID</label>
-                <input value={mntTopicId} onChange={(e) => setMntTopicId(e.target.value)} placeholder="opcional" className="input" />
+                <label className="label">Texto al salvar</label>
+                <textarea
+                  value={mntSavedMessage}
+                  onChange={(e) => setMntSavedMessage(e.target.value)}
+                  rows={2}
+                  className="input min-h-16 resize-y"
+                />
+                <p className="text-xs text-gray-500 mt-2">
+                  Variables: <span className="text-gray-300">{'{usuario}'}</span> y{' '}
+                  <span className="text-gray-300">{'{dias}'}</span> (frase con los días extra, vacía si no aplica).
+                </p>
               </div>
-            </div>
-            <label className="flex items-center justify-between gap-4 rounded-xl border border-bg-600 bg-bg-950/30 p-4 cursor-pointer">
-              <span>
-                <span className="block font-bold">Enviar sin sonido</span>
-                <span className="block text-xs text-gray-500 mt-1">Avisos de "va a borrarse" y "salvada por…" llegan silenciados al grupo.</span>
-              </span>
-              <input type="checkbox" checked={mntSilent} onChange={(e) => setMntSilent(e.target.checked)} className="w-5 h-5 accent-red-500" />
-            </label>
-            <div>
-              <label className="label">Texto del aviso de borrado</label>
-              <textarea
-                value={mntDeleteMessage}
-                onChange={(e) => setMntDeleteMessage(e.target.value)}
-                rows={3}
-                className="input min-h-20 resize-y"
-              />
-              <p className="text-xs text-gray-500 mt-2">
-                Variables: <span className="text-gray-300">{'{titulo}'}</span>,{' '}
-                <span className="text-gray-300">{'{dias}'}</span> (frase " en N días", vacía si no aplica),{' '}
-                <span className="text-gray-300">{'{fecha}'}</span> (día concreto del borrado, p.ej. "22 de julio") y{' '}
-                <span className="text-gray-300">{'{diasSalvado}'}</span> (número de días extra al salvar).
-              </p>
-            </div>
-            <div>
-              <label className="label">Texto al salvar</label>
-              <textarea
-                value={mntSavedMessage}
-                onChange={(e) => setMntSavedMessage(e.target.value)}
-                rows={2}
-                className="input min-h-16 resize-y"
-              />
-              <p className="text-xs text-gray-500 mt-2">
-                Variables: <span className="text-gray-300">{'{usuario}'}</span> y{' '}
-                <span className="text-gray-300">{'{dias}'}</span> (frase con los días extra, vacía si no aplica).
-              </p>
-            </div>
-            <div>
-              <label className="label">Qué colección va a dónde al salvar</label>
+            </MiniSection>
+
+            <MiniSection title="Colecciones: qué va a dónde al salvar">
               <ol className="text-xs text-gray-500 mt-1 mb-3 list-decimal list-inside space-y-1">
                 <li>En Maintainerr crea la colección de borrado (regla Radarr/Sonarr) como siempre.</li>
                 <li>Crea otra colección en la <strong>misma biblioteca y tipo</strong> para "salvados", con los días extra en "delete after days". El nombre es libre — Maintainerr no deja mezclar bibliotecas ni tipos al mover media entre colecciones, por eso solo aparecen como opción las compatibles.</li>
@@ -510,14 +554,21 @@ export default function Notifications() {
                   </table>
                 </div>
               )}
-            </div>
+            </MiniSection>
+
             {mnt?.webhookUrl && (
-              <div>
-                <label className="label">Webhook para Maintainerr (agente Webhook, payload {'{}'}, evento "Media Added To Collection")</label>
+              <MiniSection title="Webhook">
+                <label className="label">Agente Webhook, payload {'{}'}, evento "Media Added To Collection"</label>
                 <code className="block text-xs bg-bg-950/60 border border-bg-600 rounded-lg p-2 break-all select-all">{mnt.webhookUrl}</code>
-              </div>
+                <p className="text-xs text-gray-500">
+                  Solo dispara cuando el propio motor de reglas de Maintainerr añade el ítem. Una alta que no
+                  pase por ahí (a mano, u otra vía de su panel) no lo llama — por eso limitARR también revisa
+                  las colecciones cada 5 min por su cuenta, para no depender de eso.
+                </p>
+              </MiniSection>
             )}
-            <div className="flex flex-wrap items-center gap-2">
+
+            <div className="flex flex-wrap items-center gap-2 pt-1">
               <button type="button" onClick={saveMaintainerr} disabled={savingMnt} className="btn btn-primary">
                 {savingMnt ? 'Guardando…' : 'Guardar módulo'}
               </button>

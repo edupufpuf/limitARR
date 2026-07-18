@@ -20,9 +20,14 @@ const SILENT_KEY = 'maintainerr_silent';
 const OFFSET_KEY = 'maintainerr_last_update_id';
 const SAVED_MESSAGE_KEY = 'maintainerr_saved_message';
 const DELETE_MESSAGE_KEY = 'maintainerr_delete_message';
+// Texto de borrado propio para series: {titulo} ya sale distinto para cada
+// tipo ("la serie «X» (temporada N)" vs "«Película»"), pero el admin puede
+// querer un mensaje enteramente distinto (emoji, tono) para series.
+const DELETE_MESSAGE_TV_KEY = 'maintainerr_delete_message_tv';
 
 const DEFAULT_SAVED_MESSAGE = '✅ Salvada por {usuario}{dias}.';
 const DEFAULT_DELETE_MESSAGE = '🎬 {titulo} se borrará{dias}.\nSi quieres salvarla, pulsa 💾 Salvar y estará {diasSalvado} días más.';
+const DEFAULT_DELETE_MESSAGE_TV = '📺 {titulo} se borrará{dias}.\nSi quieres salvarla, pulsa 💾 Salvar y estará {diasSalvado} días más.';
 
 function parsePairs(raw) {
   if (!raw) return [];
@@ -46,6 +51,7 @@ export function getMaintainerrSettings() {
     silent: getRawSetting(SILENT_KEY) === '1',
     savedMessage: getRawSetting(SAVED_MESSAGE_KEY) || DEFAULT_SAVED_MESSAGE,
     deleteMessage: getRawSetting(DELETE_MESSAGE_KEY) || DEFAULT_DELETE_MESSAGE,
+    deleteMessageTv: getRawSetting(DELETE_MESSAGE_TV_KEY) || DEFAULT_DELETE_MESSAGE_TV,
   };
 }
 
@@ -61,11 +67,12 @@ export function getMaintainerrSettingsForDisplay() {
     silent: s.silent,
     savedMessage: s.savedMessage,
     deleteMessage: s.deleteMessage,
+    deleteMessageTv: s.deleteMessageTv,
     enabled: isEnabled(),
   };
 }
 
-export function updateMaintainerrSettings({ url, botToken, chatId, topicId, pairs, silent, savedMessage, deleteMessage }) {
+export function updateMaintainerrSettings({ url, botToken, chatId, topicId, pairs, silent, savedMessage, deleteMessage, deleteMessageTv }) {
   if (typeof url === 'string' && url.trim()) setRawSetting(URL_KEY, url.trim().replace(/\/$/, ''));
   if (typeof botToken === 'string' && botToken.trim()) setRawSetting(BOT_TOKEN_KEY, botToken.trim());
   if (chatId !== undefined) setRawSetting(CHAT_KEY, String(chatId).trim());
@@ -73,6 +80,7 @@ export function updateMaintainerrSettings({ url, botToken, chatId, topicId, pair
   if (silent !== undefined) setRawSetting(SILENT_KEY, silent ? '1' : '');
   if (typeof savedMessage === 'string') setRawSetting(SAVED_MESSAGE_KEY, savedMessage.trim() || DEFAULT_SAVED_MESSAGE);
   if (typeof deleteMessage === 'string') setRawSetting(DELETE_MESSAGE_KEY, deleteMessage.trim() || DEFAULT_DELETE_MESSAGE);
+  if (typeof deleteMessageTv === 'string') setRawSetting(DELETE_MESSAGE_TV_KEY, deleteMessageTv.trim() || DEFAULT_DELETE_MESSAGE_TV);
   if (Array.isArray(pairs)) {
     const clean = pairs
       .filter((p) => p && typeof p.source === 'string' && typeof p.target === 'string' && p.target)
@@ -179,7 +187,7 @@ const deleteNotified = db.prepare(
 // título suelto del mensaje del webhook si lo hay; el sondeo no tiene
 // mensaje, así que siempre resuelve por Plex o se queda sin título.
 async function notifyDeletionCandidate(source, target, item, { fallbackTitle = null, deleteDaysOverride } = {}) {
-  const { deleteMessage } = getMaintainerrSettings();
+  const { deleteMessage, deleteMessageTv } = getMaintainerrSettings();
   const sourceMedia = source.media?.find((m) => m.mediaServerId === item.mediaServerId);
   const deleteDays = deleteDaysOverride ?? source.deleteAfterDays;
   const diasTexto = deleteDays ? ` en ${deleteDays} días` : '';
@@ -190,6 +198,9 @@ async function notifyDeletionCandidate(source, target, item, { fallbackTitle = n
     ? new Date(Date.now() + deleteDays * 86_400_000).toLocaleDateString('es-ES', { day: 'numeric', month: 'long' })
     : '';
   const isSeason = source.type !== 'movie';
+  // Texto propio para series: aparte de {titulo} ya nombrar serie+temporada
+  // explícitas, el admin puede querer un mensaje del todo distinto (emoji, tono).
+  const template = isSeason ? deleteMessageTv : deleteMessage;
 
   // Issue: Salvadas para series, siempre por temporada. Maintainerr no da
   // seasonNumber ni el título de la serie sueltos en su "media" (solo
@@ -217,7 +228,7 @@ async function notifyDeletionCandidate(source, target, item, { fallbackTitle = n
       : isSeason ? 'esta temporada' : 'esta película';
 
   const text = target
-    ? deleteMessage
+    ? template
         .replace(/{titulo}/g, tituloTexto)
         .replace(/{dias}/g, diasTexto)
         .replace(/{fecha}/g, fechaTexto)

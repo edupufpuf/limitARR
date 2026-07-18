@@ -168,6 +168,51 @@ test('webhook: colección de series nombra serie y temporada explícitas contra 
   assert.match(text, /la serie «Breaking Bad» \(temporada 3\) se borrará en 7 días/);
 });
 
+test('webhook: series usa maintainerr_delete_message_tv, no la plantilla de películas', async () => {
+  upsertSetting.run('plex_url', 'http://plex.test:32400');
+  upsertSetting.run('plex_token', 'plex-token-test');
+  upsertSetting.run('maintainerr_delete_message_tv', '📺 Serie a punto de irse: {titulo}.');
+
+  const calls = [];
+  global.fetch = async (url, options = {}) => {
+    const u = String(url);
+    calls.push({ url: u, options });
+    if (u.endsWith('/api/collections')) {
+      return new Response(JSON.stringify(COLLECTIONS), { status: 200 });
+    }
+    if (u.includes('/library/metadata/8501')) {
+      return new Response(
+        JSON.stringify({ MediaContainer: { Metadata: [{ parentTitle: 'Breaking Bad', index: 3 }] } }),
+        { status: 200 }
+      );
+    }
+    if (u.includes('api.telegram.org')) {
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200 });
+    }
+    throw new Error(`fetch inesperado en test: ${u}`);
+  };
+
+  try {
+    await request(app)
+      .post(`/api/webhook/maintainerr/${getWebhookSecret()}`)
+      .send({
+        collectionName: 'Series eliminadas en 7 dias',
+        message: "'Breaking Bad' has been added to 'Series eliminadas en 7 dias'.",
+        dayAmount: 7,
+        mediaItems: JSON.stringify([{ mediaServerId: '8501-b' }]),
+      })
+      .expect(200);
+    await new Promise((r) => setTimeout(r, 50));
+
+    const telegram = calls.find((c) => c.url.includes('api.telegram.org'));
+    const payload = JSON.parse(telegram.options.body);
+    const text = payload.caption ?? payload.text;
+    assert.match(text, /📺 Serie a punto de irse: la serie «Breaking Bad» \(temporada 3\)\./);
+  } finally {
+    db.prepare("DELETE FROM settings WHERE key = 'maintainerr_delete_message_tv'").run();
+  }
+});
+
 test('webhook: temporada sin Plex configurado cae al título del mensaje, sin reventar', async () => {
   db.prepare("DELETE FROM settings WHERE key IN ('plex_url', 'plex_token')").run();
 
