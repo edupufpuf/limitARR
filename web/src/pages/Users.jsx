@@ -351,7 +351,7 @@ const FICHA_TABS = [
 // tenga salvado del borrado (Maintainerr). Grupo/rol/overrides se editan
 // aquí mismo; cupo/pendientes/salvadas son de la misma fuente que la pestaña
 // Cupo (esta ficha NO la sustituye, solo la enseña centrada en un usuario).
-function UserFichaModal({ user, group, role, overrides, libraries, onChanged, onClose }) {
+function UserFichaModal({ user, group, role, allGroups, allRoles, overrides, libraries, onChanged, onClose }) {
   const [tab, setTab] = useState('general');
   const [quotaAll, setQuotaAll] = useState([]);
   const [pendingAll, setPendingAll] = useState([]);
@@ -439,6 +439,77 @@ function UserFichaModal({ user, group, role, overrides, libraries, onChanged, on
     loadExtra();
   }
 
+  // Mover de grupo/rol reutiliza el mismo endpoint que las pestañas Grupos/Roles
+  // (reemplaza la lista de miembros); no hace falta tocar el grupo/rol viejo,
+  // el backend mueve al usuario solo (user_id es la PK de group_members/user_roles).
+  async function changeGroup(newGroupIdStr) {
+    const newGroupId = newGroupIdStr === '' ? null : Number(newGroupIdStr);
+    if (group && group.id !== newGroupId) {
+      await api.setGroupMembers(group.id, group.members.filter((id) => id !== user.id));
+    }
+    if (newGroupId != null) {
+      const target = allGroups.find((g) => g.id === newGroupId);
+      await api.setGroupMembers(newGroupId, [...target.members, user.id]);
+    }
+    onChanged();
+  }
+
+  async function changeRole(newRoleIdStr) {
+    const newRoleId = newRoleIdStr === '' ? null : Number(newRoleIdStr);
+    if (role && role.id !== newRoleId) {
+      await api.setRoleMembers(role.id, role.members.filter((id) => id !== user.id));
+    }
+    if (newRoleId != null) {
+      const target = allRoles.find((r) => r.id === newRoleId);
+      await api.setRoleMembers(newRoleId, [...target.members, user.id]);
+    }
+    onChanged();
+  }
+
+  const [cupoBusy, setCupoBusy] = useState({});
+
+  // Mismas acciones que la tarjeta de la pestaña Cupo, pero desde la ficha:
+  // quotaEntry.userId es el id de caché correcto (el del grupo si es un
+  // miembro de un grupo agregado), no necesariamente user.id.
+  async function resetCupo(libraryId) {
+    const cacheId = quotaEntry.userId;
+    setCupoBusy((b) => ({ ...b, [libraryId]: 'reset' }));
+    try {
+      await api.resetQuota(cacheId, libraryId);
+    } finally {
+      setCupoBusy((b) => ({ ...b, [libraryId]: null }));
+      loadExtra();
+      onChanged();
+    }
+  }
+
+  async function manualChargeCupo(libraryId) {
+    const title = prompt('Título de lo que se bajó/vio fuera de Seerr (restará un hueco de cupo):');
+    if (!title?.trim()) return;
+    const note = prompt('Nota: ¿por qué se usa este cargo manual? (opcional)');
+    const cacheId = quotaEntry.userId;
+    setCupoBusy((b) => ({ ...b, [libraryId]: 'charge' }));
+    try {
+      await api.manualCharge(cacheId, libraryId, title.trim(), user.username, note?.trim() || null);
+    } finally {
+      setCupoBusy((b) => ({ ...b, [libraryId]: null }));
+      loadExtra();
+      onChanged();
+    }
+  }
+
+  async function dismissPending(libraryId, item) {
+    if (!confirm(`¿Quitar "${item.title ?? 'este pendiente'}" del cupo?`)) return;
+    const cacheId = quotaEntry.userId;
+    await api.dismissPending(cacheId, libraryId, {
+      tmdbId: item.tmdbId,
+      seasonNumber: item.seasonNumber ?? null,
+      title: item.title,
+    });
+    loadExtra();
+    onChanged();
+  }
+
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
       <div
@@ -480,8 +551,22 @@ function UserFichaModal({ user, group, role, overrides, libraries, onChanged, on
 
         {tab === 'general' && (
           <div>
-            <FichaRow label="Grupo">{group ? <FichaBadge tone="accent">{group.name}</FichaBadge> : <span className="text-gray-500">—</span>}</FichaRow>
-            <FichaRow label="Rol">{role ? <FichaBadge tone="sky">{role.name}</FichaBadge> : <span className="text-gray-500">—</span>}</FichaRow>
+            <FichaRow label="Grupo">
+              <select value={group?.id ?? ''} onChange={(e) => changeGroup(e.target.value)} className="input w-auto py-1">
+                <option value="">— sin grupo —</option>
+                {allGroups.map((g) => (
+                  <option key={g.id} value={g.id}>{g.name}</option>
+                ))}
+              </select>
+            </FichaRow>
+            <FichaRow label="Rol">
+              <select value={role?.id ?? ''} onChange={(e) => changeRole(e.target.value)} className="input w-auto py-1">
+                <option value="">— sin rol —</option>
+                {allRoles.map((r) => (
+                  <option key={r.id} value={r.id}>{r.name}</option>
+                ))}
+              </select>
+            </FichaRow>
             <FichaRow label="Telegram">
               {myLink ? (
                 <span className="text-green-400">vinculado{myLink.label ? ` — ${myLink.label}` : ''}</span>
@@ -503,11 +588,27 @@ function UserFichaModal({ user, group, role, overrides, libraries, onChanged, on
             )}
             {quotaEntry?.libraries.map((lib) => {
               const pct = lib.limitApplied > 0 ? Math.round((lib.balance / lib.limitApplied) * 100) : 0;
+              const busy = cupoBusy[lib.libraryId];
               return (
                 <div key={lib.libraryId}>
                   <div className="flex items-center gap-3 text-sm mb-1">
                     <span className="flex-1 font-medium truncate">{lib.libraryName}</span>
                     <span className="tabular-nums">{lib.balance} / {lib.limitApplied}</span>
+                    <button
+                      onClick={() => manualChargeCupo(lib.libraryId)}
+                      disabled={Boolean(busy)}
+                      title="Restar un hueco de cupo a mano (contenido bajado/visto fuera de Seerr)"
+                      className="text-gray-400 hover:text-gray-200 text-xs disabled:opacity-50"
+                    >
+                      {busy === 'charge' ? 'cargando…' : 'cargo manual'}
+                    </button>
+                    <button
+                      onClick={() => resetCupo(lib.libraryId)}
+                      disabled={Boolean(busy)}
+                      className="text-accent-400 hover:text-accent-300 text-xs disabled:opacity-50"
+                    >
+                      {busy === 'reset' ? 'reseteando…' : 'resetear'}
+                    </button>
                   </div>
                   <div className="h-2 rounded-full bg-bg-600/70 overflow-hidden">
                     <div className="h-full rounded-full bg-accent-500" style={{ width: `${pct}%` }} />
@@ -518,10 +619,17 @@ function UserFichaModal({ user, group, role, overrides, libraries, onChanged, on
                   {lib.pendingItems?.length > 0 && (
                     <div className="flex flex-wrap gap-2 mt-2">
                       {lib.pendingItems.map((item, i) => (
-                        <div key={i} className="w-12 flex-shrink-0" title={item.title ?? ''}>
+                        <div key={i} className="relative w-12 flex-shrink-0 group" title={item.title ?? ''}>
                           <div className="aspect-[2/3] rounded overflow-hidden bg-bg-700">
                             {item.posterUrl && <img src={item.posterUrl} alt="" loading="lazy" className="w-full h-full object-cover" />}
                           </div>
+                          <button
+                            onClick={() => dismissPending(lib.libraryId, item)}
+                            className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 text-gray-200 hover:bg-accent-500 hover:text-white text-[9px] leading-none hidden group-hover:flex items-center justify-center"
+                            title="Quitar del cupo"
+                          >
+                            ✕
+                          </button>
                         </div>
                       ))}
                     </div>
@@ -944,6 +1052,8 @@ export default function Users() {
           user={selectedUser}
           group={groups.find((g) => g.members.includes(selectedUser.id))}
           role={roles.find((r) => r.members.includes(selectedUser.id))}
+          allGroups={groups}
+          allRoles={roles}
           overrides={overrides.filter((o) => o.user_id === selectedUser.id)}
           libraries={libraries}
           onChanged={load}
