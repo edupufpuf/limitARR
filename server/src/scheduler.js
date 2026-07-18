@@ -5,7 +5,7 @@ import { config } from './config.js';
 import { getRawSetting, setRawSetting } from './settings.js';
 import { listPendingRequests, approveRequest, declineRequest, getMediaDetails } from './services/seerr.js';
 import { getUsers } from './services/tautulli.js';
-import { getBalance, reconcileVoidedRequests, refreshQuotaCache, listStaleOutstandingPairs, normalize, getRequestHold, clearRequestHold } from './quota.js';
+import { getBalance, reconcileVoidedRequests, refreshQuotaCache, listStaleOutstandingPairs, normalize, getRequestHold, clearRequestHold, pruneStaleQuotaCache } from './quota.js';
 import { sendMessage, getNotifyTarget, pendingButton, renderNoQuotaMessage } from './services/telegram.js';
 import { matchByEmailOrUsername } from './userMatch.js';
 
@@ -238,6 +238,16 @@ async function runDailyMaintenance() {
     if (changes > 0) console.log(`[maintenance] registro: ${changes} fila(s) antiguas purgadas`);
   } catch (err) {
     console.error('[maintenance] purge failed:', err.message);
+  }
+
+  // Sincroniza la caché de cupo con la lista de usuarios activos de Tautulli:
+  // a quien se le quita el compartido en Plex se le queda la tarjeta fantasma
+  // en la pestaña Cupo si no se limpia (decisions_log no se toca, es historial).
+  try {
+    const removed = await pruneStaleQuotaCache();
+    if (removed > 0) console.log(`[maintenance] cupo: ${removed} usuario(s) ya no activos en Tautulli, caché limpiada`);
+  } catch (err) {
+    console.error('[maintenance] prune quota_cache failed:', err.message);
   }
 
   // Backup diario con la API online de SQLite (consistente aunque haya

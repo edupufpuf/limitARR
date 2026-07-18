@@ -7,7 +7,7 @@ import { config } from '../config.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { needsSetup, setPassword, checkPassword, getWebhookSecret } from '../auth.js';
-import { getUsers, getUser, getLibraries } from '../services/tautulli.js';
+import { getUsers, getLibraries } from '../services/tautulli.js';
 import {
   listPendingRequests,
   getSeerrUsers,
@@ -18,7 +18,7 @@ import {
   getMediaDetails,
 } from '../services/seerr.js';
 import { getSettings, getSettingsForDisplay, updateSettings } from '../settings.js';
-import { resetQuota, importSeerrHistory, refreshQuotaCache, dismissPendingItem, addManualCharge, getPendingItemDetail, quotaIdentity, getBalance, getRequestHold, setRequestHold, clearRequestHold } from '../quota.js';
+import { resetQuota, importSeerrHistory, refreshQuotaCache, dismissPendingItem, addManualCharge, getPendingItemDetail, quotaIdentity, getBalance, getRequestHold, setRequestHold, clearRequestHold, pruneStaleQuotaCache } from '../quota.js';
 import { matchByEmailOrUsername } from '../userMatch.js';
 import { runPollCycle } from '../scheduler.js';
 import { getVersionInfo } from '../services/version.js';
@@ -780,17 +780,6 @@ async function buildQuotaByUser() {
   const [tautulliUsers, seerrUsers] = await Promise.all([getUsers(), getSeerrUsers()]);
   const tautulliUserMap = new Map(tautulliUsers.map((u) => [u.id, u]));
 
-  // get_users solo trae usuarios activos: uno eliminado/desactivado en Tautulli
-  // (compartido quitado en Plex) no sale ahí pero sigue con fila en quota_cache
-  // — sin esto su tarjeta enseñaba "user#123456" en vez de su username real.
-  const missingIds = [...new Set(
-    rows.map((r) => r.user_id).filter((id) => id >= 0 && !tautulliUserMap.has(id))
-  )];
-  if (missingIds.length > 0) {
-    const resolved = await Promise.all(missingIds.map((id) => getUser(id).catch(() => null)));
-    for (const u of resolved) if (u) tautulliUserMap.set(u.id, u);
-  }
-
   const libraries = db.prepare('SELECT id, name FROM libraries WHERE enabled = 1').all();
   const libraryMap = new Map(libraries.map((l) => [l.id, l.name]));
   const recentRows = db.prepare(`
@@ -902,7 +891,10 @@ router.post('/quota/recalculate', ah(async (req, res) => {
       await refreshQuotaCache(user.id, library.id);
     }
   }
-  res.json({ ok: true, users: users.length, libraries: libraries.length });
+  // Aprovecha el recálculo manual para sincronizar con Tautulli: quien ya no
+  // sea usuario activo (compartido quitado en Plex) desaparece de la caché.
+  const removed = await pruneStaleQuotaCache();
+  res.json({ ok: true, users: users.length, libraries: libraries.length, removed });
 }));
 
 // Marca como "resueltas" las pendientes actuales de un usuario+biblioteca (no

@@ -724,6 +724,27 @@ export async function reconcileVoidedRequests() {
   }
 }
 
+const getCachedUserIds = db.prepare('SELECT DISTINCT user_id FROM quota_cache WHERE user_id >= 0');
+const deleteCacheByUser = db.prepare('DELETE FROM quota_cache WHERE user_id = ?');
+
+// Sincroniza la caché de cupo con la lista de usuarios activos de Tautulli: un
+// usuario al que se le ha quitado el compartido en Plex (deleted_user/inactivo
+// en Tautulli) sigue teniendo fila en quota_cache de cuando era usuario, y su
+// tarjeta se quedaba ahí para siempre en la pestaña Cupo. Solo toca la caché
+// (recalculable siempre) — decisions_log no se toca, es historial. Ids
+// negativos son grupos agregados, no usuarios de Tautulli: se ignoran.
+export async function pruneStaleQuotaCache() {
+  const activeIds = new Set((await getTautulliUsers()).map((u) => u.id));
+  let removed = 0;
+  for (const { user_id: userId } of getCachedUserIds.all()) {
+    if (!activeIds.has(userId)) {
+      deleteCacheByUser.run(userId);
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
 // Sin esto, el cupo solo cuenta lo que limitARR aprobó él mismo: una solicitud de
 // antes de instalarlo, o aprobada a mano directamente en Seerr, no contaría nunca
 // contra el usuario. Recorre el historial real de Seerr y rellena decisions_log
