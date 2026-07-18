@@ -514,93 +514,6 @@ export function PendingDetailModal({
   );
 }
 
-// v2: cupo mensual — tope de cosas aprobadas en el mes en curso, aunque se
-// vean, desactivado por defecto y configurable aquí (no en Bibliotecas) por
-// pedido expreso: es una norma de cupo, no de la biblioteca en sí. Se abre
-// como modal desde el botón junto a "Recalcular todos". Guarda con
-// PUT /libraries/:id, que ahora solo toca los campos que se le pasan.
-function MonthlyQuotaModal({ libraries, onClose, onChanged }) {
-  const [drafts, setDrafts] = useState({});
-  const [saving, setSaving] = useState({});
-
-  useEffect(() => {
-    setDrafts(
-      Object.fromEntries(
-        libraries.map((l) => [l.id, { enabled: Boolean(l.monthly_quota_enabled), limit: l.monthly_limit }])
-      )
-    );
-  }, [libraries]);
-
-  async function save(libraryId) {
-    const draft = drafts[libraryId];
-    setSaving((s) => ({ ...s, [libraryId]: true }));
-    await api.updateLibrary(libraryId, {
-      monthlyQuotaEnabled: draft.enabled,
-      monthlyLimit: Number(draft.limit),
-    });
-    setSaving((s) => ({ ...s, [libraryId]: false }));
-    onChanged();
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
-      <div
-        className="card w-full max-w-md max-h-[85vh] overflow-y-auto p-4 sm:p-5"
-        style={{ maxHeight: '85dvh' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between gap-2 mb-1">
-          <h3 className="font-semibold text-lg leading-tight">Cupo mensual</h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-200 text-xl leading-none">✕</button>
-        </div>
-        <p className="text-xs text-gray-500 mb-4">
-          Tope de cosas aprobadas al mes por biblioteca, aunque se vean. Desactivado por defecto.
-        </p>
-        <div className="flex flex-col gap-3">
-          {libraries.map((l) => {
-            const draft = drafts[l.id] ?? { enabled: false, limit: l.monthly_limit };
-            const dirty =
-              draft.enabled !== Boolean(l.monthly_quota_enabled) || Number(draft.limit) !== l.monthly_limit;
-            return (
-              <div key={l.id} className="flex items-center gap-2 text-sm">
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={draft.enabled}
-                    onChange={(e) => setDrafts({ ...drafts, [l.id]: { ...draft, enabled: e.target.checked } })}
-                    className="accent-accent-500"
-                  />
-                  <span className="text-gray-300">{l.name}</span>
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  value={draft.limit ?? ''}
-                  onChange={(e) => setDrafts({ ...drafts, [l.id]: { ...draft, limit: e.target.value } })}
-                  className="input w-16 py-1"
-                  title="Cosas aprobadas por mes"
-                />
-                {dirty && (
-                  <button
-                    onClick={() => save(l.id)}
-                    disabled={saving[l.id]}
-                    className="btn btn-primary py-1 px-2.5 text-xs"
-                  >
-                    {saving[l.id] ? 'Guardando…' : 'Guardar'}
-                  </button>
-                )}
-              </div>
-            );
-          })}
-          {libraries.length === 0 && (
-            <p className="text-sm text-gray-500">Sin bibliotecas configuradas.</p>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // Issue #11: solicitudes que siguen sin aprobar en Seerr, agrupadas por
 // biblioteca, con aprobar/rechazar directos. Desde el issue #16 aquí solo
 // llegan las que no tienen tarjeta de usuario donde colgarse (usuario sin
@@ -943,8 +856,6 @@ export default function Quota() {
   const [stats, setStats] = useState(null);
   const [pendingApprovals, setPendingApprovals] = useState([]);
   const [salvados, setSalvados] = useState([]);
-  const [libraries, setLibraries] = useState([]);
-  const [showMonthlyQuota, setShowMonthlyQuota] = useState(false);
   const [query, setQuery] = useState('');
   const [recalculating, setRecalculating] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -965,8 +876,6 @@ export default function Quota() {
     api.pendingApprovals().then(setPendingApprovals).catch(() => {});
     // Módulo Maintainerr opcional: si no está configurado, la lista queda vacía.
     api.salvados().then(setSalvados).catch(() => {});
-    // Solo bibliotecas activas: una deshabilitada no tiene cupo que tocar aquí.
-    api.libraries().then((libs) => setLibraries(libs.filter((l) => l.enabled)));
   }
 
   useEffect(() => {
@@ -1134,9 +1043,6 @@ export default function Quota() {
           <button onClick={recalculate} disabled={recalculating} className="btn btn-ghost">
             {recalculating ? 'Recalculando…' : 'Recalcular todos'}
           </button>
-          <button onClick={() => setShowMonthlyQuota(true)} className="btn btn-ghost">
-            Cupo mensual
-          </button>
         </div>
       </div>
 
@@ -1230,14 +1136,6 @@ export default function Quota() {
           />
         ))}
       </div>
-
-      {showMonthlyQuota && (
-        <MonthlyQuotaModal
-          libraries={libraries}
-          onClose={() => setShowMonthlyQuota(false)}
-          onChanged={load}
-        />
-      )}
 
       {detailTarget && (
         <PendingDetailModal
