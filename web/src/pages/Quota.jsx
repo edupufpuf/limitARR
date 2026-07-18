@@ -248,6 +248,8 @@ export function PendingDetailModal({
   onDismiss,
   onDecline,
   onApprove,
+  onHold,
+  onClearHold,
   loadDetail,
   readOnly = false,
 }) {
@@ -334,6 +336,11 @@ export function PendingDetailModal({
             )}
             {item.pendingApproval && (
               <div className="text-xs text-gray-400 mt-1">Pendiente de aprobación en Seerr — no resta cupo.</div>
+            )}
+            {item.holdUntil != null && (
+              <div className="text-xs text-yellow-400 mt-1">
+                ⏳ Aplazada hasta {fmtDate(item.holdUntil)} · {daysLeft(item.holdUntil)}
+              </div>
             )}
             {item.note && (
               <div className="text-xs text-gray-400 mt-1">📝 {item.note}</div>
@@ -470,7 +477,16 @@ export function PendingDetailModal({
                 fila de cupo que quitar. */}
             {item.pendingApproval ? (
             <>
-              <button onClick={() => onApprove(item)} className="btn btn-primary sm:ml-auto">
+              {item.holdUntil != null ? (
+                <button onClick={() => onClearHold(item)} className="btn btn-ghost sm:ml-auto">
+                  Quitar aplazamiento
+                </button>
+              ) : (
+                <button onClick={() => onHold(item)} className="btn btn-ghost sm:ml-auto">
+                  Aplazar
+                </button>
+              )}
+              <button onClick={() => onApprove(item)} className="btn btn-primary">
                 Aprobar
               </button>
               <button onClick={() => onDecline(item)} className="btn btn-ghost text-accent-400">
@@ -494,6 +510,94 @@ export function PendingDetailModal({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// v2: cupo mensual — tope de cosas aprobadas en el mes en curso, aunque se
+// vean, desactivado por defecto y activable aquí (no en Bibliotecas) por
+// pedido expreso: es una norma de cupo, no de la biblioteca en sí. Guarda con
+// PUT /libraries/:id, que ahora solo toca los campos que se le pasan.
+function MonthlyQuotaPanel({ libraries, onChanged }) {
+  const [open, setOpen] = useState(false);
+  const [drafts, setDrafts] = useState({});
+  const [saving, setSaving] = useState({});
+
+  useEffect(() => {
+    setDrafts(
+      Object.fromEntries(
+        libraries.map((l) => [l.id, { enabled: Boolean(l.monthly_quota_enabled), limit: l.monthly_limit }])
+      )
+    );
+  }, [libraries]);
+
+  if (libraries.length === 0) return null;
+
+  async function save(libraryId) {
+    const draft = drafts[libraryId];
+    setSaving((s) => ({ ...s, [libraryId]: true }));
+    await api.updateLibrary(libraryId, {
+      monthlyQuotaEnabled: draft.enabled,
+      monthlyLimit: Number(draft.limit),
+    });
+    setSaving((s) => ({ ...s, [libraryId]: false }));
+    onChanged();
+  }
+
+  return (
+    <div className="card p-4 mb-6">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between text-left"
+      >
+        <div>
+          <h3 className="font-semibold">Cupo mensual</h3>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Tope de cosas aprobadas al mes por biblioteca, aunque se vean. Desactivado por defecto.
+          </p>
+        </div>
+        <span className="text-gray-500 text-xs">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="flex flex-wrap gap-4 mt-4">
+          {libraries.map((l) => {
+            const draft = drafts[l.id] ?? { enabled: false, limit: l.monthly_limit };
+            const dirty =
+              draft.enabled !== Boolean(l.monthly_quota_enabled) || Number(draft.limit) !== l.monthly_limit;
+            return (
+              <div key={l.id} className="flex items-center gap-2 text-sm">
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={draft.enabled}
+                    onChange={(e) => setDrafts({ ...drafts, [l.id]: { ...draft, enabled: e.target.checked } })}
+                    className="accent-accent-500"
+                  />
+                  <span className="text-gray-300">{l.name}</span>
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={draft.limit ?? ''}
+                  onChange={(e) => setDrafts({ ...drafts, [l.id]: { ...draft, limit: e.target.value } })}
+                  className="input w-16 py-1"
+                  title="Cosas aprobadas por mes"
+                />
+                {dirty && (
+                  <button
+                    onClick={() => save(l.id)}
+                    disabled={saving[l.id]}
+                    className="btn btn-primary py-1 px-2.5 text-xs"
+                  >
+                    {saving[l.id] ? 'Guardando…' : 'Guardar'}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -526,6 +630,32 @@ function PendingApprovals({ items, onAction }) {
     }
   }
 
+  // v2: temporizador de aprobación — acción puntual sobre ESTA solicitud (no
+  // una norma general del usuario): se aplaza N días aunque tenga cupo de sobra.
+  async function hold(item) {
+    const days = prompt(`¿Aplazar "${item.title ?? 'esta solicitud'}" cuántos días?`, '7');
+    if (!days) return;
+    const n = Number(days);
+    if (!Number.isFinite(n) || n <= 0) return;
+    setActing((a) => ({ ...a, [item.requestId]: 'hold' }));
+    try {
+      await api.holdRequest(item.requestId, n);
+    } finally {
+      setActing((a) => ({ ...a, [item.requestId]: null }));
+      onAction();
+    }
+  }
+
+  async function clearHold(item) {
+    setActing((a) => ({ ...a, [item.requestId]: 'hold' }));
+    try {
+      await api.clearRequestHold(item.requestId);
+    } finally {
+      setActing((a) => ({ ...a, [item.requestId]: null }));
+      onAction();
+    }
+  }
+
   return (
     <div className="card p-4 mb-6 border-amber-400/30">
       <h3 className="font-semibold mb-1">Pendientes de aprobación</h3>
@@ -547,8 +677,28 @@ function PendingApprovals({ items, onAction }) {
                     {item.username}
                     {item.balance != null && ` · saldo ${item.balance}/${item.limit}`}
                     {item.seasons.length > 1 && ` · ${item.seasons.length} temporadas`}
+                    {item.holdUntil != null && (
+                      <span className="text-yellow-400"> · ⏳ aplazada, {daysLeft(item.holdUntil)}</span>
+                    )}
                   </div>
                 </div>
+                {item.holdUntil != null ? (
+                  <button
+                    onClick={() => clearHold(item)}
+                    disabled={Boolean(acting[item.requestId])}
+                    className="btn btn-ghost py-1 px-2.5 text-xs"
+                  >
+                    Quitar aplazamiento
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => hold(item)}
+                    disabled={Boolean(acting[item.requestId])}
+                    className="btn btn-ghost py-1 px-2.5 text-xs"
+                  >
+                    Aplazar
+                  </button>
+                )}
                 <button
                   onClick={() => act(item, 'approve')}
                   disabled={Boolean(acting[item.requestId])}
@@ -754,6 +904,14 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
                   </button>
                 </div>
                 <QuotaBar balance={lib.balance} limit={lib.limitApplied} />
+                {lib.monthly?.enabled && (
+                  <div
+                    className={`text-[11px] mt-1 tabular-nums ${lib.monthly.used >= lib.monthly.limit ? 'text-accent-400' : 'text-gray-500'}`}
+                    title="Cupo mensual: cosas aprobadas este mes, aunque se vean"
+                  >
+                    mensual {lib.monthly.used}/{lib.monthly.limit}
+                  </div>
+                )}
                 {lib.pendingItems?.length > 0 && (
                   <div className="flex flex-wrap gap-2 mt-3">
                     {lib.pendingItems.map((item, i) => (
@@ -786,6 +944,7 @@ export default function Quota() {
   const [stats, setStats] = useState(null);
   const [pendingApprovals, setPendingApprovals] = useState([]);
   const [salvados, setSalvados] = useState([]);
+  const [libraries, setLibraries] = useState([]);
   const [query, setQuery] = useState('');
   const [recalculating, setRecalculating] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -806,6 +965,7 @@ export default function Quota() {
     api.pendingApprovals().then(setPendingApprovals).catch(() => {});
     // Módulo Maintainerr opcional: si no está configurado, la lista queda vacía.
     api.salvados().then(setSalvados).catch(() => {});
+    api.libraries().then(setLibraries);
   }
 
   useEffect(() => {
@@ -841,6 +1001,7 @@ export default function Quota() {
         requestedAt: pa.requestedAt,
         balance: pa.balance,
         limit: pa.limit,
+        holdUntil: pa.holdUntil,
       });
     }
     if (byCard.size === 0) return { mergedUsers: users, unmatchedApprovals: unmatched };
@@ -975,6 +1136,8 @@ export default function Quota() {
         </div>
       </div>
 
+      <MonthlyQuotaPanel libraries={libraries} onChanged={load} />
+
       {debtors.length > 0 && <DebtorBubbles debtors={debtors} onDetail={(user, lib, item) => setDetailTarget({ user, lib, item })} />}
 
       <PendingApprovals items={unmatchedApprovals} onAction={load} />
@@ -1084,6 +1247,20 @@ export default function Quota() {
           onApprove={async (item) => {
             if (!confirm(`¿Aprobar "${item.title ?? 'esta solicitud'}" en Seerr?`)) return;
             await api.approveRequest(item.requestId);
+            load();
+            setDetailTarget(null);
+          }}
+          onHold={async (item) => {
+            const days = prompt(`¿Aplazar "${item.title ?? 'esta solicitud'}" cuántos días?`, '7');
+            if (!days) return;
+            const n = Number(days);
+            if (!Number.isFinite(n) || n <= 0) return;
+            await api.holdRequest(item.requestId, n);
+            load();
+            setDetailTarget(null);
+          }}
+          onClearHold={async (item) => {
+            await api.clearRequestHold(item.requestId);
             load();
             setDetailTarget(null);
           }}

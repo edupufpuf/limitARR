@@ -47,9 +47,16 @@ export function normalize(title) {
 
 const getOverride = db.prepare('SELECT * FROM overrides WHERE user_id = ? AND library_id = ?');
 const getGroupOverride = db.prepare(`
-  SELECT go.limit_override, go.expiry_override FROM group_members gm
+  SELECT go.limit_override, go.expiry_override, go.monthly_limit_override FROM group_members gm
   JOIN group_overrides go ON go.group_id = gm.group_id
   WHERE gm.user_id = ? AND go.library_id = ?
+`);
+// v2: rol asignado al usuario (como mucho uno, igual que el grupo). Solo
+// aplica a usuarios individuales — un grupo agregado no tiene rol propio.
+const getRoleOverride = db.prepare(`
+  SELECT ro.limit_override, ro.expiry_override, ro.monthly_limit_override FROM user_roles ur
+  JOIN role_overrides ro ON ro.role_id = ur.role_id
+  WHERE ur.user_id = ? AND ro.library_id = ?
 `);
 const getAggregatedGroupForUser = db.prepare(`
   SELECT g.id, g.name FROM group_members gm
@@ -81,6 +88,15 @@ const markVoided = db.prepare(`UPDATE decisions_log SET voided_at = datetime('no
 const getLibraryForRequest = db.prepare(`
   SELECT * FROM libraries WHERE section_type = ? AND kind = ? AND enabled = 1 LIMIT 1
 `);
+// v2: cupo mensual — cuenta lo aprobado (y no anulado) en el mes en curso,
+// para TODOS los miembros de la identidad de cupo (igual que el saldo). Un
+// cargo manual también es una fila 'approved' en esta tabla, así que cuenta
+// igual sin lógica extra. 'start of month' es local a la fecha guardada (UTC).
+const getMonthlyApprovedCount = db.prepare(`
+  SELECT COUNT(*) AS n FROM decisions_log
+  WHERE user_id = ? AND library_id = ? AND decision = 'approved' AND voided_at IS NULL
+    AND created_at >= datetime('now', 'start of month')
+`);
 const requestUnitAlreadyLogged = db.prepare(`
   SELECT 1 FROM decisions_log
   WHERE request_id = ?
@@ -93,13 +109,16 @@ const insertImportedApproval = db.prepare(`
   VALUES (@requestId, @userId, @username, @libraryId, @mediaTitle, @mediaType, @tmdbId, @seasonNumber, @posterUrl, @note, 'approved', @createdAt)
 `);
 const upsertQuotaCache = db.prepare(`
-  INSERT INTO quota_cache (user_id, library_id, limit_applied, outstanding, balance, pending_items, computed_at)
-  VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+  INSERT INTO quota_cache (user_id, library_id, limit_applied, outstanding, balance, pending_items, monthly_enabled, monthly_limit, monthly_used, computed_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
   ON CONFLICT (user_id, library_id) DO UPDATE SET
     limit_applied = excluded.limit_applied,
     outstanding = excluded.outstanding,
     balance = excluded.balance,
     pending_items = excluded.pending_items,
+    monthly_enabled = excluded.monthly_enabled,
+    monthly_limit = excluded.monthly_limit,
+    monthly_used = excluded.monthly_used,
     computed_at = excluded.computed_at
 `);
 const deleteQuotaCache = db.prepare('DELETE FROM quota_cache WHERE user_id = ? AND library_id = ?');
@@ -118,8 +137,8 @@ function rowTimeMs(row) {
 const DEFAULT_EXPIRY_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export function resolveExpiryDays(userOverride, groupOverride, libraryDays) {
-  const days = resolveLimit(userOverride, groupOverride, libraryDays ?? DEFAULT_EXPIRY_DAYS);
+export function resolveExpiryDays(overrides, libraryDays) {
+  const days = resolveLimit(overrides, libraryDays ?? DEFAULT_EXPIRY_DAYS);
   return days > 0 ? days : null; // null = no caduca
 }
 
@@ -168,11 +187,16 @@ export function quotaIdentity(id) {
   return { cacheId: numericId, memberIds: [numericId], aggregated: false };
 }
 
-// Precedencia del límite efectivo. Comparaciones con != null a propósito:
-// 0 es un valor legítimo (bloquear del todo) y no puede tratarse como "sin override".
-export function resolveLimit(userOverride, groupOverride, defaultLimit) {
-  if (userOverride != null) return userOverride;
-  if (groupOverride != null) return groupOverride;
+// Precedencia del límite efectivo: el primer valor no-null de `overrides`, en
+// el orden en que se pasen (individual > grupo > rol), y si no hay ninguno, el
+// default de biblioteca. Comparación con != null a propósito: 0 es un valor
+// legítimo (bloquear del todo) y no puede tratarse como "sin override". Misma
+// función sirve para el límite normal, el mensual (v2) y, envuelta por
+// resolveExpiryDays, la caducidad.
+export function resolveLimit(overrides, defaultLimit) {
+  for (const override of overrides) {
+    if (override != null) return override;
+  }
   return defaultLimit;
 }
 
@@ -371,25 +395,37 @@ export async function getBalance(userId, libraryId) {
   const library = getLibrary.get(libraryId);
   let limit;
   let expiryDays;
+  let monthlyLimit;
   if (identity.aggregated) {
+    // Un grupo agregado no tiene rol propio (el rol es de usuario individual):
+    // solo cuenta su propio override de grupo, igual que ya hacía el límite.
     const groupOverride = getGroupOverrideByGroup.get(identity.groupId, libraryId);
-    limit = resolveLimit(null, groupOverride?.limit_override ?? null, library.default_limit);
-    expiryDays = resolveExpiryDays(null, groupOverride?.expiry_override ?? null, library.expiry_days);
+    limit = resolveLimit([groupOverride?.limit_override ?? null], library.default_limit);
+    expiryDays = resolveExpiryDays([groupOverride?.expiry_override ?? null], library.expiry_days);
+    monthlyLimit = resolveLimit([groupOverride?.monthly_limit_override ?? null], library.monthly_limit);
   } else {
     const override = getOverride.get(identity.cacheId, libraryId);
     const groupOverride = getGroupOverride.get(identity.cacheId, libraryId);
-    limit = resolveLimit(
-      override?.limit_override ?? null,
-      groupOverride?.limit_override ?? null,
-      library.default_limit
-    );
-    expiryDays = resolveExpiryDays(
-      override?.expiry_override ?? null,
-      groupOverride?.expiry_override ?? null,
-      library.expiry_days
-    );
+    const roleOverride = getRoleOverride.get(identity.cacheId, libraryId);
+    // Precedencia (v2): override individual > override de grupo > rol asignado > biblioteca.
+    const chain = (field) => [override?.[field] ?? null, groupOverride?.[field] ?? null, roleOverride?.[field] ?? null];
+    limit = resolveLimit(chain('limit_override'), library.default_limit);
+    expiryDays = resolveExpiryDays(chain('expiry_override'), library.expiry_days);
+    monthlyLimit = resolveLimit(chain('monthly_limit_override'), library.monthly_limit);
   }
   const resetAt = getResetAt.get(identity.cacheId, libraryId)?.reset_at ?? '0000-01-01';
+  // v2: cupo mensual — independiente de si se ha visto o no. Solo se aplica si
+  // la biblioteca lo tiene activado; el resto del cálculo de saldo no cambia.
+  const monthlyUsed = identity.memberIds.reduce(
+    (sum, memberId) => sum + getMonthlyApprovedCount.get(memberId, libraryId).n,
+    0
+  );
+  const monthly = {
+    enabled: Boolean(library.monthly_quota_enabled),
+    limit: monthlyLimit,
+    used: monthlyUsed,
+    remaining: Math.max(0, monthlyLimit - monthlyUsed),
+  };
 
   const allApproved = identity.memberIds.flatMap((memberId) => getApprovedTitles.all(memberId, libraryId, resetAt));
   if (library.section_type === 'show') {
@@ -399,7 +435,8 @@ export async function getBalance(userId, libraryId) {
     for (const memberId of identity.memberIds) {
       history.push(...(await getUserEpisodeHistory(memberId, libraryId)));
     }
-    return computeTvBalance(limit, allApproved, history, getSeasonWatchedPercent(), expiryDays);
+    const tvResult = await computeTvBalance(limit, allApproved, history, getSeasonWatchedPercent(), expiryDays);
+    return { ...tvResult, monthly };
   }
 
   // Issue #14: la disponibilidad se consulta antes de filtrar caducadas porque
@@ -422,7 +459,7 @@ export async function getBalance(userId, libraryId) {
   }
   await hydrateMissingPosters(approved);
   const unavailable = new Set([...availability].filter(([, v]) => v.unavailable).map(([k]) => k));
-  return computeBalance(limit, approved, watchedTitles, unavailable, percentByTitle, expiryDays, availability);
+  return { ...computeBalance(limit, approved, watchedTitles, unavailable, percentByTitle, expiryDays, availability), monthly };
 }
 
 // "Resetea" el cupo de un usuario+biblioteca: las aprobaciones anteriores a ahora
@@ -480,17 +517,20 @@ export async function refreshQuotaCache(userId, libraryId) {
   const library = getLibrary.get(libraryId);
   if (!library?.enabled) {
     deleteQuotaCache.run(identity.cacheId, libraryId);
-    return { limit: 0, outstanding: 0, balance: 0, pendingItems: [], disabled: true };
+    return { limit: 0, outstanding: 0, balance: 0, pendingItems: [], disabled: true, monthly: { enabled: false, limit: 0, used: 0, remaining: 0 } };
   }
-  const { limit, outstanding, balance, pendingItems } = await getBalance(identity.cacheId, libraryId);
+  const { limit, outstanding, balance, pendingItems, monthly } = await getBalance(identity.cacheId, libraryId);
   for (const item of pendingItems) {
     item.ratingKey = await lookupRatingKey(item);
   }
   if (identity.aggregated) {
     for (const memberId of identity.memberIds) deleteQuotaCache.run(memberId, libraryId);
   }
-  upsertQuotaCache.run(identity.cacheId, libraryId, limit, outstanding, balance, JSON.stringify(pendingItems));
-  return { limit, outstanding, balance, pendingItems };
+  upsertQuotaCache.run(
+    identity.cacheId, libraryId, limit, outstanding, balance, JSON.stringify(pendingItems),
+    monthly.enabled ? 1 : 0, monthly.limit, monthly.used
+  );
+  return { limit, outstanding, balance, pendingItems, monthly };
 }
 
 // Issue #5: ver una película en Plex no dispara ningún evento hacia limitARR, así
@@ -620,6 +660,30 @@ export function addManualCharge(userId, libraryId, title, username = null, note 
     note: note || null,
     createdAt: toSqliteDateTime(new Date().toISOString()),
   });
+}
+
+// v2: temporizador de aprobación — aplaza UNA solicitud concreta hasta
+// hold_until, aunque el usuario tenga cupo de sobra. Es una acción puntual del
+// admin sobre esa solicitud (no una norma general del usuario o su rol).
+const getRequestHoldStmt = db.prepare('SELECT hold_until FROM request_holds WHERE request_id = ?');
+const upsertRequestHold = db.prepare(`
+  INSERT INTO request_holds (request_id, hold_until) VALUES (?, ?)
+  ON CONFLICT (request_id) DO UPDATE SET hold_until = excluded.hold_until
+`);
+const deleteRequestHold = db.prepare('DELETE FROM request_holds WHERE request_id = ?');
+
+export function getRequestHold(requestId) {
+  const row = getRequestHoldStmt.get(requestId);
+  if (!row) return null;
+  return { holdUntil: Date.parse(row.hold_until.replace(' ', 'T') + 'Z') };
+}
+
+export function setRequestHold(requestId, days) {
+  upsertRequestHold.run(requestId, toSqliteDateTime(new Date(Date.now() + days * DAY_MS).toISOString()));
+}
+
+export function clearRequestHold(requestId) {
+  deleteRequestHold.run(requestId);
 }
 
 // Quita a mano UN pendiente del cupo de un usuario (botón ✕ del panel), sin

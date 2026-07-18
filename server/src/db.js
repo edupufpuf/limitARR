@@ -169,6 +169,62 @@ addColumnIfMissing('ALTER TABLE group_overrides ADD COLUMN expiry_override INTEG
 // libre puesto por el admin al crearlo, para saber luego por qué está ahí.
 addColumnIfMissing('ALTER TABLE decisions_log ADD COLUMN note TEXT');
 
+// v2: cupo mensual — tope de cosas aprobadas en el mes en curso, independiente
+// de si se han visto o no. Desactivado por defecto; se activa por biblioteca
+// desde la pestaña Cupo. monthly_limit_override sigue la misma precedencia que
+// limit_override (individual > grupo > rol > biblioteca), 0 = bloquear el mes entero.
+addColumnIfMissing('ALTER TABLE libraries ADD COLUMN monthly_quota_enabled INTEGER NOT NULL DEFAULT 0');
+addColumnIfMissing('ALTER TABLE libraries ADD COLUMN monthly_limit INTEGER NOT NULL DEFAULT 10');
+addColumnIfMissing('ALTER TABLE overrides ADD COLUMN monthly_limit_override INTEGER');
+addColumnIfMissing('ALTER TABLE group_overrides ADD COLUMN monthly_limit_override INTEGER');
+addColumnIfMissing('ALTER TABLE quota_cache ADD COLUMN monthly_enabled INTEGER NOT NULL DEFAULT 0');
+addColumnIfMissing('ALTER TABLE quota_cache ADD COLUMN monthly_limit INTEGER');
+addColumnIfMissing('ALTER TABLE quota_cache ADD COLUMN monthly_used INTEGER');
+
+// v2: roles — igual que los grupos, un usuario tiene como mucho un rol
+// (user_roles.user_id es PK), y el rol da valores por defecto de límite,
+// caducidad y cupo mensual por biblioteca. Precedencia: override individual >
+// override de grupo > ROL > límite de biblioteca (el rol es un escalón nuevo
+// justo antes del valor de biblioteca, no sustituye a los overrides puntuales).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS roles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE
+  );
+
+  CREATE TABLE IF NOT EXISTS user_roles (
+    user_id INTEGER PRIMARY KEY,      -- Tautulli user_id
+    role_id INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS role_overrides (
+    role_id INTEGER NOT NULL,
+    library_id INTEGER NOT NULL,
+    limit_override INTEGER,
+    expiry_override INTEGER,
+    monthly_limit_override INTEGER,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (role_id, library_id)
+  );
+
+  -- v2: temporizador de aprobación — aplaza UNA solicitud concreta (no una
+  -- norma general del usuario) hasta hold_until, aunque haya cupo de sobra.
+  -- Se limpia sola cuando el ciclo de sondeo la encuentra ya cumplida.
+  CREATE TABLE IF NOT EXISTS request_holds (
+    request_id INTEGER PRIMARY KEY,
+    hold_until TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
+// Roles por defecto pedidos por Edu: se siembran una sola vez si la tabla está
+// vacía (una instalación nueva, o la primera vez que esta versión arranca).
+// Nacen sin overrides — el admin los rellena por biblioteca en Overrides.
+if (db.prepare('SELECT COUNT(*) AS n FROM roles').get().n === 0) {
+  const insertRole = db.prepare('INSERT INTO roles (name) VALUES (?)');
+  for (const name of ['Usuario', 'Amigo', 'Invitado', 'Admin']) insertRole.run(name);
+}
+
 // decisions_log se consulta en cada ciclo y crece sin límite; sin índices,
 // todo son full scans. El parcial cubre la consulta caliente (aprobadas
 // vivas de un usuario+biblioteca); los otros dos, el registro paginado/KPIs

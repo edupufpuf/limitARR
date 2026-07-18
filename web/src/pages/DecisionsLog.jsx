@@ -7,9 +7,11 @@ const PAGE_SIZE = 50;
 const decisionBadge = {
   approved: 'bg-green-400/10 text-green-400 ring-green-400/25',
   no_quota: 'bg-accent-500/10 text-accent-400 ring-accent-500/25',
+  no_monthly_quota: 'bg-accent-500/10 text-accent-400 ring-accent-500/25',
   declined: 'bg-accent-500/10 text-accent-400 ring-accent-500/25',
   declined_multi_season: 'bg-accent-500/10 text-accent-400 ring-accent-500/25',
   season_hold: 'bg-yellow-400/10 text-yellow-400 ring-yellow-400/25',
+  held: 'bg-yellow-400/10 text-yellow-400 ring-yellow-400/25',
   no_library_config: 'bg-bg-700/60 text-gray-400 ring-bg-600',
   unmatched_user: 'bg-bg-700/60 text-gray-400 ring-bg-600',
   salvado: 'bg-sky-400/10 text-sky-400 ring-sky-400/25',
@@ -18,9 +20,11 @@ const decisionBadge = {
 const decisionLabel = {
   approved: 'aprobada',
   no_quota: 'sin cupo',
+  no_monthly_quota: 'sin cupo mensual',
   declined: 'rechazada',
   declined_multi_season: 'rechazada (varias temporadas)',
   season_hold: 'en cola (temporada anterior sin ver)',
+  held: '⏳ aplazada',
   no_library_config: 'sin biblioteca configurada',
   unmatched_user: 'usuario no encontrado en Tautulli',
   salvado: '💾 salvada',

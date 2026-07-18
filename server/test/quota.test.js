@@ -13,19 +13,31 @@ import {
   getSeasonWatchedPercent,
   resolveExpiryDays,
   dropExpiredRows,
+  getRequestHold,
+  setRequestHold,
+  clearRequestHold,
 } from '../src/quota.js';
 import { setRawSetting } from '../src/settings.js';
 import { db } from '../src/db.js';
 
-test('resolveLimit: individual gana a grupo, grupo gana a biblioteca', () => {
-  assert.equal(resolveLimit(5, 3, 4), 5);
-  assert.equal(resolveLimit(null, 3, 4), 3);
-  assert.equal(resolveLimit(null, null, 4), 4);
+test('resolveLimit: el primer override no-null gana, en el orden dado', () => {
+  assert.equal(resolveLimit([5, 3], 4), 5);
+  assert.equal(resolveLimit([null, 3], 4), 3);
+  assert.equal(resolveLimit([null, null], 4), 4);
 });
 
 test('resolveLimit: 0 es un override válido, no "sin valor"', () => {
-  assert.equal(resolveLimit(0, 3, 4), 0);
-  assert.equal(resolveLimit(null, 0, 4), 0);
+  assert.equal(resolveLimit([0, 3], 4), 0);
+  assert.equal(resolveLimit([null, 0], 4), 0);
+});
+
+// v2: rol — tercer escalón entre grupo y biblioteca (individual > grupo > rol > biblioteca).
+test('resolveLimit: precedencia de 3 niveles (individual > grupo > rol)', () => {
+  assert.equal(resolveLimit([5, 3, 7], 4), 5); // individual gana a todos
+  assert.equal(resolveLimit([null, 3, 7], 4), 3); // grupo gana a rol
+  assert.equal(resolveLimit([null, null, 7], 4), 7); // rol gana a biblioteca
+  assert.equal(resolveLimit([null, null, null], 4), 4); // nada: biblioteca
+  assert.equal(resolveLimit([null, null, 0], 4), 0); // 0 de rol también es válido
 });
 
 test('normalize: acentos y puntuación no importan', () => {
@@ -399,16 +411,16 @@ test('getSeasonWatchedPercent: default 85, respeta el ajuste y descarta basura',
 // --- Issue #10: caducidad de pendientes ---
 
 test('resolveExpiryDays: misma precedencia que el límite y default 30', () => {
-  assert.equal(resolveExpiryDays(null, null, null), 30);
-  assert.equal(resolveExpiryDays(null, null, 15), 15);
-  assert.equal(resolveExpiryDays(null, 10, 15), 10);
-  assert.equal(resolveExpiryDays(5, 10, 15), 5);
+  assert.equal(resolveExpiryDays([null, null], null), 30);
+  assert.equal(resolveExpiryDays([null, null], 15), 15);
+  assert.equal(resolveExpiryDays([null, 10], 15), 10);
+  assert.equal(resolveExpiryDays([5, 10], 15), 5);
 });
 
 test('resolveExpiryDays: 0 significa "no caduca" en cualquier nivel', () => {
-  assert.equal(resolveExpiryDays(0, 10, 15), null);
-  assert.equal(resolveExpiryDays(null, 0, 15), null);
-  assert.equal(resolveExpiryDays(null, null, 0), null);
+  assert.equal(resolveExpiryDays([0, 10], 15), null);
+  assert.equal(resolveExpiryDays([null, 0], 15), null);
+  assert.equal(resolveExpiryDays([null, null], 0), null);
 });
 
 test('dropExpiredRows: quita las filas más viejas que el plazo y respeta "sin caducidad"', () => {
@@ -458,6 +470,33 @@ test('computeBalance: expiresAt y availableSince salen de la disponibilidad', ()
   const r = computeBalance(2, approved, new Set(), new Set(), new Map(), 30, availability);
   assert.equal(r.pendingItems[0].availableSince, since);
   assert.equal(r.pendingItems[0].expiresAt, since + 30 * 86_400_000);
+});
+
+// --- v2: temporizador de aprobación (acción puntual sobre una solicitud) ---
+
+test('setRequestHold/getRequestHold: guarda y lee la fecha de aplazamiento', () => {
+  setRequestHold(70001, 7);
+  const hold = getRequestHold(70001);
+  assert.ok(hold.holdUntil > Date.now()); // dentro de 7 días, en el futuro
+  assert.ok(hold.holdUntil <= Date.now() + 7 * 86_400_000 + 1000);
+});
+
+test('getRequestHold: sin aplazamiento devuelve null', () => {
+  assert.equal(getRequestHold(70002), null);
+});
+
+test('clearRequestHold: quita el aplazamiento', () => {
+  setRequestHold(70003, 1);
+  clearRequestHold(70003);
+  assert.equal(getRequestHold(70003), null);
+});
+
+test('setRequestHold: repetir sobre la misma solicitud actualiza la fecha', () => {
+  setRequestHold(70004, 1);
+  const first = getRequestHold(70004).holdUntil;
+  setRequestHold(70004, 30);
+  const second = getRequestHold(70004).holdUntil;
+  assert.ok(second > first);
 });
 
 test('computeBalance: una no disponible no lleva fecha de caducidad', () => {

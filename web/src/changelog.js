@@ -3,21 +3,12 @@
 // en localStorage para no repetir el aviso una vez visto.
 export const CHANGELOG = [
   {
-    id: '2026-07-15',
-    date: '15 jul 2026',
+    id: '2026-07-18',
+    date: '18 jul 2026',
     items: [
-      'Módulo Maintainerr: aviso en Telegram con botón 💾 Salvar cuando una película entra en la colección de borrado; al pulsarlo se mueve a la colección de salvados con días extra.',
-      'Sección "Salvadas para ver" en el panel de usuario y en las tarjetas de Cupo del admin, con cuenta atrás y quién la salvó (via vínculo de "Mis avisos").',
-      'Configuración del módulo en Avisos → "Salvar del borrado (Maintainerr)": URL, bot dedicado, chat/topic y colecciones de salvados.',
-    ],
-  },
-  {
-    id: '2026-07-14',
-    date: '14 jul 2026',
-    items: [
-      'Suplantar usuario: icono de ojo en cada tarjeta de Cupo para ver el panel "Mi cupo" tal cual lo ve ese usuario, con vuelta a admin sin perder tu sesión.',
-      'El aviso "Usuario sin cupo" ya se puede desactivar, igual que los demás avisos de Telegram.',
-      'Vincular Telegram con un click desde "Mis avisos": ya no hace falta escribir al bot y esperar a que un admin lo vincule a mano.',
+      'Cupo mensual: tope de cosas aprobadas al mes por biblioteca, aunque se vean. Desactivado por defecto; se activa y configura en la pestaña Cupo.',
+      'Roles en Overrides: ponen límite, caducidad y cupo mensual de golpe a todos sus miembros (con los roles Usuario, Amigo, Invitado y Admin ya creados). Precedencia: override individual > override de grupo > rol > límite de biblioteca.',
+      'Temporizador de aprobación: en Pendientes de aprobación, botón "Aplazar" para que una solicitud concreta no se apruebe hasta pasados N días, aunque haya cupo de sobra.',
     ],
   },
 ];

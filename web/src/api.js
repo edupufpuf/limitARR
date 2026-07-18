@@ -58,6 +58,16 @@ export const api = {
   deleteGroupOverride: (id, libraryId) =>
     request(`/groups/${id}/overrides/${libraryId}`, { method: 'DELETE' }),
 
+  roles: () => request('/roles'),
+  createRole: (name) => request('/roles', { method: 'POST', body: JSON.stringify({ name }) }),
+  deleteRole: (id) => request(`/roles/${id}`, { method: 'DELETE' }),
+  setRoleMembers: (id, userIds) =>
+    request(`/roles/${id}/members`, { method: 'PUT', body: JSON.stringify({ userIds }) }),
+  setRoleOverride: (id, libraryId, body) =>
+    request(`/roles/${id}/overrides/${libraryId}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteRoleOverride: (id, libraryId) =>
+    request(`/roles/${id}/overrides/${libraryId}`, { method: 'DELETE' }),
+
   quota: () => request('/quota'),
   recalculateQuota: () => request('/quota/recalculate', { method: 'POST' }),
   resetQuota: (userId, libraryId) => request(`/quota/reset/${userId}/${libraryId}`, { method: 'POST' }),
@@ -75,6 +85,8 @@ export const api = {
   pendingApprovals: () => request('/requests/pending-approval'),
   approveRequest: (id) => request(`/requests/${id}/approve`, { method: 'POST' }),
   declineRequest: (id) => request(`/requests/${id}/decline`, { method: 'POST' }),
+  holdRequest: (id, days) => request(`/requests/${id}/hold`, { method: 'POST', body: JSON.stringify({ days }) }),
+  clearRequestHold: (id) => request(`/requests/${id}/hold`, { method: 'DELETE' }),
   decisions: (params = {}) => request(`/decisions?${new URLSearchParams(params)}`),
   stats: () => request('/stats'),
 

@@ -18,7 +18,7 @@ import {
   getMediaDetails,
 } from '../services/seerr.js';
 import { getSettings, getSettingsForDisplay, updateSettings } from '../settings.js';
-import { resetQuota, importSeerrHistory, refreshQuotaCache, dismissPendingItem, addManualCharge, getPendingItemDetail, quotaIdentity, getBalance } from '../quota.js';
+import { resetQuota, importSeerrHistory, refreshQuotaCache, dismissPendingItem, addManualCharge, getPendingItemDetail, quotaIdentity, getBalance, getRequestHold, setRequestHold, clearRequestHold } from '../quota.js';
 import { matchByEmailOrUsername } from '../userMatch.js';
 import { runPollCycle } from '../scheduler.js';
 import { getVersionInfo } from '../services/version.js';
@@ -416,14 +416,39 @@ router.post('/libraries/sync', ah(async (req, res) => {
   res.json({ discovered: discovered.length, inserted });
 }));
 
+// Actualización parcial: dos pestañas distintas tocan esta biblioteca (Bibliotecas
+// edita kind/límite/caducidad/series; Cupo solo activa el cupo mensual), así que
+// un campo ausente del body conserva el valor ya guardado en vez de borrarse.
 router.put('/libraries/:id', ah(async (req, res) => {
-  const { kind, enabled, defaultLimit, expiryDays, oneSeasonPerRequest, sequentialSeasons } = req.body || {};
+  const current = db.prepare('SELECT * FROM libraries WHERE id = ?').get(req.params.id);
+  if (!current) return res.status(404).json({ error: 'not_found' });
+  const {
+    kind, enabled, defaultLimit, expiryDays, oneSeasonPerRequest, sequentialSeasons,
+    monthlyQuotaEnabled, monthlyLimit,
+  } = req.body || {};
+  const next = {
+    kind: kind ?? current.kind,
+    enabled: enabled !== undefined ? (enabled ? 1 : 0) : current.enabled,
+    defaultLimit: defaultLimit ?? current.default_limit,
+    expiryDays: expiryDays !== undefined ? expiryDays : current.expiry_days,
+    oneSeasonPerRequest: oneSeasonPerRequest !== undefined ? (oneSeasonPerRequest ? 1 : 0) : current.one_season_per_request,
+    sequentialSeasons: sequentialSeasons !== undefined ? (sequentialSeasons ? 1 : 0) : current.sequential_seasons,
+    monthlyQuotaEnabled: monthlyQuotaEnabled !== undefined ? (monthlyQuotaEnabled ? 1 : 0) : current.monthly_quota_enabled,
+    monthlyLimit: monthlyLimit ?? current.monthly_limit,
+  };
   const result = db
-    .prepare('UPDATE libraries SET kind = ?, enabled = ?, default_limit = ?, expiry_days = ?, one_season_per_request = ?, sequential_seasons = ? WHERE id = ?')
-    .run(kind, enabled ? 1 : 0, defaultLimit, expiryDays ?? null, oneSeasonPerRequest ? 1 : 0, sequentialSeasons ? 1 : 0, req.params.id);
+    .prepare(`
+      UPDATE libraries SET kind = ?, enabled = ?, default_limit = ?, expiry_days = ?, one_season_per_request = ?,
+        sequential_seasons = ?, monthly_quota_enabled = ?, monthly_limit = ?
+      WHERE id = ?
+    `)
+    .run(
+      next.kind, next.enabled, next.defaultLimit, next.expiryDays, next.oneSeasonPerRequest,
+      next.sequentialSeasons, next.monthlyQuotaEnabled, next.monthlyLimit, req.params.id
+    );
   if (result.changes === 0) return res.status(404).json({ error: 'not_found' });
 
-  if (enabled) {
+  if (next.enabled) {
     const users = await getUsers();
     for (const user of users) await refreshQuotaCache(user.id, req.params.id);
   } else {
@@ -447,16 +472,17 @@ router.get('/overrides', (req, res) => {
 
 router.put('/overrides/:userId/:libraryId', ah(async (req, res) => {
   const { userId, libraryId } = req.params;
-  const { limitOverride, note, expiryOverride } = req.body || {};
+  const { limitOverride, note, expiryOverride, monthlyLimitOverride } = req.body || {};
   db.prepare(`
-    INSERT INTO overrides (user_id, library_id, limit_override, note, expiry_override, updated_at)
-    VALUES (?, ?, ?, ?, ?, datetime('now'))
+    INSERT INTO overrides (user_id, library_id, limit_override, note, expiry_override, monthly_limit_override, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT (user_id, library_id) DO UPDATE SET
       limit_override = excluded.limit_override,
       note = excluded.note,
       expiry_override = excluded.expiry_override,
+      monthly_limit_override = excluded.monthly_limit_override,
       updated_at = excluded.updated_at
-  `).run(userId, libraryId, limitOverride, note || null, expiryOverride ?? null);
+  `).run(userId, libraryId, limitOverride, note || null, expiryOverride ?? null, monthlyLimitOverride ?? null);
   await refreshQuotaCache(userId, libraryId);
   res.json({ ok: true });
 }));
@@ -622,16 +648,17 @@ router.put('/groups/:id/members', ah(async (req, res) => {
 router.put('/groups/:id/overrides/:libraryId', ah(async (req, res) => {
   const { id, libraryId } = req.params;
   if (!groupExists.get(id)) return res.status(404).json({ error: 'group_not_found' });
-  const { limitOverride, expiryOverride } = req.body || {};
+  const { limitOverride, expiryOverride, monthlyLimitOverride } = req.body || {};
   if (limitOverride === undefined) return res.status(400).json({ error: 'limitOverride_required' });
   db.prepare(`
-    INSERT INTO group_overrides (group_id, library_id, limit_override, expiry_override, updated_at)
-    VALUES (?, ?, ?, ?, datetime('now'))
+    INSERT INTO group_overrides (group_id, library_id, limit_override, expiry_override, monthly_limit_override, updated_at)
+    VALUES (?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT (group_id, library_id) DO UPDATE SET
       limit_override = excluded.limit_override,
       expiry_override = excluded.expiry_override,
+      monthly_limit_override = excluded.monthly_limit_override,
       updated_at = excluded.updated_at
-  `).run(id, libraryId, limitOverride, expiryOverride ?? null);
+  `).run(id, libraryId, limitOverride, expiryOverride ?? null, monthlyLimitOverride ?? null);
   await refreshAffected(groupMemberIds.all(id).map((r) => r.user_id), [libraryId]);
   res.json({ ok: true });
 }));
@@ -640,6 +667,103 @@ router.delete('/groups/:id/overrides/:libraryId', ah(async (req, res) => {
   const { id, libraryId } = req.params;
   db.prepare('DELETE FROM group_overrides WHERE group_id = ? AND library_id = ?').run(id, libraryId);
   await refreshAffected(groupMemberIds.all(id).map((r) => r.user_id), [libraryId]);
+  res.json({ ok: true });
+}));
+
+// --- v2: Roles ---
+// Igual patrón que Grupos: un usuario tiene como mucho un rol (user_roles.user_id
+// es PK), y el rol da valores de límite/caducidad/cupo mensual por biblioteca que
+// se usan como el escalón justo antes del límite de biblioteca (ver quota.js).
+
+const roleExists = db.prepare('SELECT id FROM roles WHERE id = ?');
+const roleMemberIds = db.prepare('SELECT user_id FROM user_roles WHERE role_id = ?');
+const roleOverrideLibs = db.prepare('SELECT library_id FROM role_overrides WHERE role_id = ?');
+
+router.get('/roles', (req, res) => {
+  const roles = db.prepare('SELECT * FROM roles ORDER BY name').all();
+  const members = db.prepare('SELECT * FROM user_roles').all();
+  const overrides = db.prepare('SELECT * FROM role_overrides').all();
+  res.json(
+    roles.map((r) => ({
+      ...r,
+      members: members.filter((m) => m.role_id === r.id).map((m) => m.user_id),
+      overrides: overrides.filter((o) => o.role_id === r.id),
+    }))
+  );
+});
+
+router.post('/roles', (req, res) => {
+  const name = (req.body?.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'name_required' });
+  try {
+    const { lastInsertRowid } = db.prepare('INSERT INTO roles (name) VALUES (?)').run(name);
+    res.json({ ok: true, id: lastInsertRowid });
+  } catch (err) {
+    if (/UNIQUE/.test(err.message)) return res.status(409).json({ error: 'name_taken' });
+    throw err;
+  }
+});
+
+router.delete('/roles/:id', ah(async (req, res) => {
+  const id = Number(req.params.id);
+  const userIds = roleMemberIds.all(id).map((r) => r.user_id);
+  const libraryIds = roleOverrideLibs.all(id).map((r) => r.library_id);
+  db.transaction(() => {
+    db.prepare('DELETE FROM role_overrides WHERE role_id = ?').run(id);
+    db.prepare('DELETE FROM user_roles WHERE role_id = ?').run(id);
+    db.prepare('DELETE FROM roles WHERE id = ?').run(id);
+  })();
+  await refreshAffected(userIds, libraryIds);
+  res.json({ ok: true });
+}));
+
+// Reemplaza la lista completa de miembros del rol (como en grupos, asignar a
+// otro rol mueve — user_roles.user_id es la PK).
+router.put('/roles/:id/members', ah(async (req, res) => {
+  const { id } = req.params;
+  if (!roleExists.get(id)) return res.status(404).json({ error: 'role_not_found' });
+  if (!Array.isArray(req.body?.userIds)) return res.status(400).json({ error: 'userIds_required' });
+  const userIds = req.body.userIds.map(Number);
+
+  const before = roleMemberIds.all(id).map((r) => r.user_id);
+  db.transaction(() => {
+    db.prepare('DELETE FROM user_roles WHERE role_id = ?').run(id);
+    const insert = db.prepare(
+      'INSERT INTO user_roles (user_id, role_id) VALUES (?, ?) ' +
+        'ON CONFLICT (user_id) DO UPDATE SET role_id = excluded.role_id'
+    );
+    for (const userId of userIds) insert.run(userId, id);
+  })();
+
+  const removed = before.filter((u) => !userIds.includes(u));
+  const added = userIds.filter((u) => !before.includes(u));
+  const libraryIds = roleOverrideLibs.all(id).map((r) => r.library_id);
+  await refreshAffected([...added, ...removed], libraryIds);
+  res.json({ ok: true });
+}));
+
+router.put('/roles/:id/overrides/:libraryId', ah(async (req, res) => {
+  const { id, libraryId } = req.params;
+  if (!roleExists.get(id)) return res.status(404).json({ error: 'role_not_found' });
+  const { limitOverride, expiryOverride, monthlyLimitOverride } = req.body || {};
+  if (limitOverride === undefined) return res.status(400).json({ error: 'limitOverride_required' });
+  db.prepare(`
+    INSERT INTO role_overrides (role_id, library_id, limit_override, expiry_override, monthly_limit_override, updated_at)
+    VALUES (?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT (role_id, library_id) DO UPDATE SET
+      limit_override = excluded.limit_override,
+      expiry_override = excluded.expiry_override,
+      monthly_limit_override = excluded.monthly_limit_override,
+      updated_at = excluded.updated_at
+  `).run(id, libraryId, limitOverride, expiryOverride ?? null, monthlyLimitOverride ?? null);
+  await refreshAffected(roleMemberIds.all(id).map((r) => r.user_id), [libraryId]);
+  res.json({ ok: true });
+}));
+
+router.delete('/roles/:id/overrides/:libraryId', ah(async (req, res) => {
+  const { id, libraryId } = req.params;
+  db.prepare('DELETE FROM role_overrides WHERE role_id = ? AND library_id = ?').run(id, libraryId);
+  await refreshAffected(roleMemberIds.all(id).map((r) => r.user_id), [libraryId]);
   res.json({ ok: true });
 }));
 
@@ -734,6 +858,11 @@ async function buildQuotaByUser() {
       outstanding: row.outstanding,
       pendingItems,
       computedAt: row.computed_at,
+      monthly: {
+        enabled: Boolean(row.monthly_enabled),
+        limit: row.monthly_limit,
+        used: row.monthly_used,
+      },
     });
   }
   return [...byUser.values()];
@@ -892,6 +1021,8 @@ async function buildPendingApprovalItems() {
       requestedAt: request.createdAt ?? null,
       balance: cached?.balance ?? null,
       limit: cached?.limit_applied ?? null,
+      // v2: temporizador de aprobación — si el admin aplazó esta solicitud.
+      holdUntil: getRequestHold(request.id)?.holdUntil ?? null,
     });
   }
   return items;
@@ -976,6 +1107,21 @@ router.post('/requests/:id/decline', ah(async (req, res) => {
   }
   res.json({ ok: true, freed: affected.length });
 }));
+
+// v2: temporizador de aprobación — aplaza ESTA solicitud concreta (acción
+// puntual, no una norma general del usuario) hasta dentro de N días; el ciclo
+// de sondeo la respeta y la limpia sola al cumplirse el plazo.
+router.post('/requests/:id/hold', (req, res) => {
+  const days = Number(req.body?.days);
+  if (!Number.isFinite(days) || days <= 0) return res.status(400).json({ error: 'days_required' });
+  setRequestHold(Number(req.params.id), days);
+  res.json({ ok: true, holdUntil: getRequestHold(Number(req.params.id)).holdUntil });
+});
+
+router.delete('/requests/:id/hold', (req, res) => {
+  clearRequestHold(Number(req.params.id));
+  res.json({ ok: true });
+});
 
 // --- Stats (KPIs para la cabecera de la pestaña Cupo) ---
 

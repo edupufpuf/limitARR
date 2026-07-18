@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 
 function GroupCard({ group, users, libraries, onChanged }) {
-  // Límite y caducidad por biblioteca como texto del input: '' = sin override.
+  // Límite, caducidad y cupo mensual por biblioteca como texto del input: '' = sin override.
   const [limits, setLimits] = useState({});
   const [expiries, setExpiries] = useState({});
+  const [monthlyLimits, setMonthlyLimits] = useState({});
 
   useEffect(() => {
     setLimits(
@@ -20,6 +21,14 @@ function GroupCard({ group, users, libraries, onChanged }) {
         libraries.map((l) => [
           l.id,
           group.overrides.find((o) => o.library_id === l.id)?.expiry_override ?? '',
+        ])
+      )
+    );
+    setMonthlyLimits(
+      Object.fromEntries(
+        libraries.map((l) => [
+          l.id,
+          group.overrides.find((o) => o.library_id === l.id)?.monthly_limit_override ?? '',
         ])
       )
     );
@@ -41,9 +50,11 @@ function GroupCard({ group, users, libraries, onChanged }) {
       }
     } else {
       const expiry = expiries[libraryId];
+      const monthly = monthlyLimits[libraryId];
       await api.setGroupOverride(group.id, libraryId, {
         limitOverride: Number(value),
         expiryOverride: expiry === '' ? null : Number(expiry),
+        monthlyLimitOverride: monthly === '' ? null : Number(monthly),
       });
     }
     onChanged();
@@ -111,15 +122,17 @@ function GroupCard({ group, users, libraries, onChanged }) {
         })}
       </div>
 
-      <div className="label mb-1.5">Límite y caducidad (días) por biblioteca (vacío = el de la biblioteca)</div>
+      <div className="label mb-1.5">Límite, caducidad y cupo mensual por biblioteca (vacío = el de la biblioteca)</div>
       <div className="flex flex-wrap gap-3">
         {libraries.map((l) => {
           const savedOverride = group.overrides.find((o) => o.library_id === l.id);
           const savedLimit = savedOverride?.limit_override ?? '';
           const savedExpiry = savedOverride?.expiry_override ?? '';
+          const savedMonthly = savedOverride?.monthly_limit_override ?? '';
           const dirty =
             String(limits[l.id] ?? '') !== String(savedLimit) ||
-            String(expiries[l.id] ?? '') !== String(savedExpiry);
+            String(expiries[l.id] ?? '') !== String(savedExpiry) ||
+            String(monthlyLimits[l.id] ?? '') !== String(savedMonthly);
           return (
             <div key={l.id} className="flex items-center gap-2 text-sm">
               <span className="text-gray-400">{l.name}</span>
@@ -140,6 +153,156 @@ function GroupCard({ group, users, libraries, onChanged }) {
                 placeholder="cad."
                 title="Caducidad en días (0 = no caduca; vacío = la de la biblioteca)"
               />
+              <input
+                type="number"
+                min={0}
+                value={monthlyLimits[l.id] ?? ''}
+                onChange={(e) => setMonthlyLimits({ ...monthlyLimits, [l.id]: e.target.value })}
+                className="input w-16 py-1"
+                placeholder="mes"
+                title="Cupo mensual (0 = bloquear el mes; vacío = el de la biblioteca)"
+              />
+              {dirty && (
+                <button onClick={() => saveLimit(l.id)} className="btn btn-primary py-1 px-2.5 text-xs">
+                  Guardar
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// v2: rol — mismo patrón que GroupCard (un usuario tiene como mucho un rol),
+// pero sin el toggle de cupo agregado (eso es cosa de grupos) y con un tercer
+// campo por biblioteca: el cupo mensual (0 = bloquear el mes entero, vacío =
+// el de la biblioteca).
+function RoleCard({ role, users, libraries, onChanged }) {
+  const [limits, setLimits] = useState({});
+  const [expiries, setExpiries] = useState({});
+  const [monthlyLimits, setMonthlyLimits] = useState({});
+
+  useEffect(() => {
+    setLimits(
+      Object.fromEntries(
+        libraries.map((l) => [l.id, role.overrides.find((o) => o.library_id === l.id)?.limit_override ?? ''])
+      )
+    );
+    setExpiries(
+      Object.fromEntries(
+        libraries.map((l) => [l.id, role.overrides.find((o) => o.library_id === l.id)?.expiry_override ?? ''])
+      )
+    );
+    setMonthlyLimits(
+      Object.fromEntries(
+        libraries.map((l) => [l.id, role.overrides.find((o) => o.library_id === l.id)?.monthly_limit_override ?? ''])
+      )
+    );
+  }, [role, libraries]);
+
+  async function toggleMember(userId) {
+    const next = role.members.includes(userId)
+      ? role.members.filter((id) => id !== userId)
+      : [...role.members, userId];
+    await api.setRoleMembers(role.id, next);
+    onChanged();
+  }
+
+  async function saveLimit(libraryId) {
+    const value = limits[libraryId];
+    if (value === '') {
+      if (role.overrides.some((o) => o.library_id === libraryId)) {
+        await api.deleteRoleOverride(role.id, libraryId);
+      }
+    } else {
+      const expiry = expiries[libraryId];
+      const monthly = monthlyLimits[libraryId];
+      await api.setRoleOverride(role.id, libraryId, {
+        limitOverride: Number(value),
+        expiryOverride: expiry === '' ? null : Number(expiry),
+        monthlyLimitOverride: monthly === '' ? null : Number(monthly),
+      });
+    }
+    onChanged();
+  }
+
+  async function removeRole() {
+    if (!window.confirm(`¿Eliminar el rol "${role.name}"? Sus miembros vuelven al límite de biblioteca (o de su grupo).`)) return;
+    await api.deleteRole(role.id);
+    onChanged();
+  }
+
+  return (
+    <div className="card p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-semibold">{role.name}</h3>
+        <button onClick={removeRole} className="text-accent-400 text-xs">
+          eliminar rol
+        </button>
+      </div>
+
+      <div className="label mb-1.5">Miembros</div>
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        {users.map((u) => {
+          const inRole = role.members.includes(u.id);
+          return (
+            <button
+              key={u.id}
+              onClick={() => toggleMember(u.id)}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                inRole
+                  ? 'bg-accent-600/20 text-accent-300 ring-1 ring-accent-500/40'
+                  : 'bg-bg-700/60 text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              {u.username}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="label mb-1.5">Límite, caducidad y cupo mensual por biblioteca (vacío = el de la biblioteca)</div>
+      <div className="flex flex-wrap gap-3">
+        {libraries.map((l) => {
+          const savedOverride = role.overrides.find((o) => o.library_id === l.id);
+          const savedLimit = savedOverride?.limit_override ?? '';
+          const savedExpiry = savedOverride?.expiry_override ?? '';
+          const savedMonthly = savedOverride?.monthly_limit_override ?? '';
+          const dirty =
+            String(limits[l.id] ?? '') !== String(savedLimit) ||
+            String(expiries[l.id] ?? '') !== String(savedExpiry) ||
+            String(monthlyLimits[l.id] ?? '') !== String(savedMonthly);
+          return (
+            <div key={l.id} className="flex items-center gap-2 text-sm">
+              <span className="text-gray-400">{l.name}</span>
+              <input
+                type="number"
+                min={0}
+                value={limits[l.id] ?? ''}
+                onChange={(e) => setLimits({ ...limits, [l.id]: e.target.value })}
+                className="input w-16 py-1"
+                title="Límite"
+              />
+              <input
+                type="number"
+                min={0}
+                value={expiries[l.id] ?? ''}
+                onChange={(e) => setExpiries({ ...expiries, [l.id]: e.target.value })}
+                className="input w-16 py-1"
+                placeholder="cad."
+                title="Caducidad en días (0 = no caduca; vacío = la de la biblioteca)"
+              />
+              <input
+                type="number"
+                min={0}
+                value={monthlyLimits[l.id] ?? ''}
+                onChange={(e) => setMonthlyLimits({ ...monthlyLimits, [l.id]: e.target.value })}
+                className="input w-16 py-1"
+                placeholder="mes"
+                title="Cupo mensual (0 = bloquear el mes; vacío = el de la biblioteca)"
+              />
               {dirty && (
                 <button onClick={() => saveLimit(l.id)} className="btn btn-primary py-1 px-2.5 text-xs">
                   Guardar
@@ -157,9 +320,11 @@ export default function Overrides() {
   const [overrides, setOverrides] = useState([]);
   const [groups, setGroups] = useState([]);
   const [newGroupName, setNewGroupName] = useState('');
+  const [roles, setRoles] = useState([]);
+  const [newRoleName, setNewRoleName] = useState('');
   const [users, setUsers] = useState([]);
   const [libraries, setLibraries] = useState([]);
-  const [form, setForm] = useState({ userId: '', libraryId: '', limitOverride: 4, expiryOverride: '', note: '' });
+  const [form, setForm] = useState({ userId: '', libraryId: '', limitOverride: 4, expiryOverride: '', monthlyLimitOverride: '', note: '' });
   const [bulkForm, setBulkForm] = useState({ libraryId: '', limitOverride: 2 });
   const [applyingBulk, setApplyingBulk] = useState(false);
   const [bulkResult, setBulkResult] = useState(null);
@@ -167,6 +332,7 @@ export default function Overrides() {
   function load() {
     api.overrides().then(setOverrides);
     api.groups().then(setGroups);
+    api.roles().then(setRoles);
   }
 
   async function createGroup(e) {
@@ -174,6 +340,14 @@ export default function Overrides() {
     if (!newGroupName.trim()) return;
     await api.createGroup(newGroupName.trim());
     setNewGroupName('');
+    load();
+  }
+
+  async function createRole(e) {
+    e.preventDefault();
+    if (!newRoleName.trim()) return;
+    await api.createRole(newRoleName.trim());
+    setNewRoleName('');
     load();
   }
 
@@ -189,6 +363,7 @@ export default function Overrides() {
     await api.setOverride(form.userId, form.libraryId, {
       limitOverride: Number(form.limitOverride),
       expiryOverride: form.expiryOverride === '' ? null : Number(form.expiryOverride),
+      monthlyLimitOverride: form.monthlyLimitOverride === '' ? null : Number(form.monthlyLimitOverride),
       note: form.note,
     });
     setForm({ ...form, note: '' });
@@ -243,6 +418,35 @@ export default function Overrides() {
       )}
       <p className="text-[11px] text-gray-600 mb-6">
         Cada usuario puede estar como mucho en un grupo: marcarlo en otro lo mueve.
+      </p>
+
+      <h3 className="text-sm font-semibold text-gray-300 mb-2">Roles</h3>
+      <p className="text-xs text-gray-500 mb-3">
+        Un rol pone varias normas de golpe (límite, caducidad y cupo mensual por biblioteca) a todos
+        sus miembros. Precedencia: override individual &gt; override de grupo &gt; rol &gt; límite de
+        biblioteca — un override puntual siempre gana al rol.
+      </p>
+      <form onSubmit={createRole} className="flex gap-2 mb-3">
+        <input
+          value={newRoleName}
+          onChange={(e) => setNewRoleName(e.target.value)}
+          placeholder="Nombre del rol (p.ej. Amigo)"
+          className="input py-1 max-w-xs"
+        />
+        <button type="submit" className="btn btn-primary">
+          Crear rol
+        </button>
+      </form>
+      {roles.length > 0 && (
+        <div className="space-y-3 mb-4">
+          {roles.map((r) => (
+            <RoleCard key={r.id} role={r} users={users} libraries={libraries} onChanged={load} />
+          ))}
+        </div>
+      )}
+      <p className="text-[11px] text-gray-600 mb-6">
+        Cada usuario puede tener como mucho un rol: marcarlo en otro lo mueve. Un usuario puede tener
+        rol y grupo a la vez (son independientes) — el grupo gana si ambos tocan la misma biblioteca.
       </p>
 
       <h3 className="text-sm font-semibold text-gray-300 mb-2">Overrides individuales</h3>
@@ -337,6 +541,19 @@ export default function Overrides() {
             className="input w-20 py-1"
           />
         </div>
+        <div>
+          <label className="label" title="Tope de cosas aprobadas en el mes en curso, aunque se vean. 0 = bloquear el mes; vacío = el de la biblioteca.">
+            Cupo mensual
+          </label>
+          <input
+            type="number"
+            min={0}
+            value={form.monthlyLimitOverride}
+            onChange={(e) => setForm({ ...form, monthlyLimitOverride: e.target.value })}
+            placeholder="mes"
+            className="input w-20 py-1"
+          />
+        </div>
         <div className="flex-1 min-w-[120px]">
           <label className="label">Nota</label>
           <input
@@ -358,6 +575,7 @@ export default function Overrides() {
               <th className="th">Biblioteca</th>
               <th className="th">Límite</th>
               <th className="th">Caducidad</th>
+              <th className="th">Cupo mensual</th>
               <th className="th">Nota</th>
               <th className="th"></th>
             </tr>
@@ -370,6 +588,9 @@ export default function Overrides() {
                 <td className="py-2 pr-4">{o.limit_override}</td>
                 <td className="py-2 pr-4 text-gray-400">
                   {o.expiry_override == null ? '—' : o.expiry_override === 0 ? 'no caduca' : `${o.expiry_override} días`}
+                </td>
+                <td className="py-2 pr-4 text-gray-400">
+                  {o.monthly_limit_override == null ? '—' : o.monthly_limit_override}
                 </td>
                 <td className="py-2 pr-4 text-gray-400">{o.note}</td>
                 <td className="py-2 pr-4">

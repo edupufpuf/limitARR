@@ -5,7 +5,7 @@ import { config } from './config.js';
 import { getRawSetting, setRawSetting } from './settings.js';
 import { listPendingRequests, approveRequest, declineRequest, getMediaDetails } from './services/seerr.js';
 import { getUsers } from './services/tautulli.js';
-import { getBalance, reconcileVoidedRequests, refreshQuotaCache, listStaleOutstandingPairs, normalize } from './quota.js';
+import { getBalance, reconcileVoidedRequests, refreshQuotaCache, listStaleOutstandingPairs, normalize, getRequestHold, clearRequestHold } from './quota.js';
 import { sendMessage, getNotifyTarget, pendingButton, renderNoQuotaMessage } from './services/telegram.js';
 import { matchByEmailOrUsername } from './userMatch.js';
 
@@ -58,6 +58,45 @@ async function notifyNoQuota(base) {
   });
   try {
     await sendMessage(chatId, text, { replyMarkup });
+  } catch (err) {
+    console.error('[scheduler] telegram notify failed:', err.message);
+  }
+}
+
+// v2: cupo mensual agotado — reutiliza el toggle de "sin cupo" en vez de sumar
+// un ajuste más, dejando claro en el texto que el motivo es el tope del mes.
+async function notifyNoMonthlyQuota(base, monthly) {
+  const libraryName = getLibraryName.get(base.libraryId)?.name ?? `biblioteca #${base.libraryId}`;
+  const target = getNotifyTarget();
+  if (!target.notifyNoQuota) return;
+
+  const chatId = getChatId.get(base.userId)?.chat_id;
+  if (!chatId) return;
+  const text =
+    `🚫 Cupo mensual agotado: ${base.mediaTitle ?? 'tu solicitud'} (${libraryName}).\n` +
+    `${base.username}: ya llevas ${monthly.used}/${monthly.limit} este mes.`;
+  try {
+    await sendMessage(chatId, text);
+  } catch (err) {
+    console.error('[scheduler] telegram notify failed:', err.message);
+  }
+}
+
+// v2: temporizador de aprobación — aviso de que una solicitud concreta queda
+// aplazada hasta una fecha (acción puntual del admin, no una norma del usuario).
+async function notifyHeld(base, holdUntilMs) {
+  const libraryName = getLibraryName.get(base.libraryId)?.name ?? `biblioteca #${base.libraryId}`;
+  const target = getNotifyTarget();
+  if (!target.notifyNoQuota) return;
+
+  const chatId = getChatId.get(base.userId)?.chat_id;
+  if (!chatId) return;
+  const dateStr = new Date(holdUntilMs).toLocaleDateString('es-ES', { day: 'numeric', month: 'long' });
+  const text =
+    `⏳ Aplazada: ${base.mediaTitle ?? 'tu solicitud'} (${libraryName}).\n` +
+    `${base.username}: se aprobará a partir del ${dateStr}.`;
+  try {
+    await sendMessage(chatId, text);
   } catch (err) {
     console.error('[scheduler] telegram notify failed:', err.message);
   }
@@ -260,6 +299,22 @@ export async function runPollCycle() {
       continue;
     }
 
+    // v2: temporizador de aprobación — el admin aplazó ESTA solicitud concreta
+    // (acción puntual, no una norma del usuario) hasta una fecha; se comprueba
+    // antes que cualquier otra regla, aunque haya cupo de sobra.
+    const hold = getRequestHold(request.id);
+    if (hold) {
+      if (hold.holdUntil > Date.now()) {
+        const details = await getMediaDetails(request.mediaType, request.tmdbId, requestedSeasons[0]);
+        base.mediaTitle = formatMediaTitle(request.mediaType, details.title, requestedSeasons[0]);
+        base.posterUrl = details.posterUrl;
+        base.seasonNumber = null; // aplaza la solicitud entera, no una temporada suelta
+        if (logIfChanged(base, 'held')) await notifyHeld(base, hold.holdUntil);
+        continue;
+      }
+      clearRequestHold(request.id); // plazo cumplido: se limpia y sigue el flujo normal
+    }
+
     // Issue #13: temporada a temporada. Con el toggle activo en la biblioteca
     // (la cola secuencial lo implica: no se puede aprobar media solicitud),
     // una solicitud con varias temporadas se rechaza entera y con aviso.
@@ -285,7 +340,7 @@ export async function runPollCycle() {
     base.mediaTitle = formatMediaTitle(request.mediaType, firstDetails.title, requestedSeasons[0]);
     base.posterUrl = firstDetails.posterUrl;
 
-    const { limit, balance, pendingItems } = await getBalance(tautulliUser.id, library.id);
+    const { limit, balance, pendingItems, monthly } = await getBalance(tautulliUser.id, library.id);
 
     // Issue #13 (fase 2): cola secuencial. La solicitud espera en Seerr si el
     // usuario ya tiene una temporada de ESTA serie sin terminar de ver, o si
@@ -313,7 +368,10 @@ export async function runPollCycle() {
     }
 
     const requiredUnits = request.mediaType === 'tv' ? requestedSeasons.length : 1;
-    const decision = balance >= requiredUnits ? 'approved' : 'no_quota';
+    // v2: cupo mensual — tope aparte del saldo de pendientes por ver; agotado
+    // bloquea igual aunque el usuario tenga saldo libre.
+    const monthlyOk = !monthly.enabled || monthly.remaining >= requiredUnits;
+    const decision = balance >= requiredUnits && monthlyOk ? 'approved' : monthlyOk ? 'no_quota' : 'no_monthly_quota';
 
     if (decision === 'approved') {
       await approveRequest(request.id);
@@ -338,6 +396,7 @@ export async function runPollCycle() {
       isNew = logIfChanged(row, decision) || isNew;
     }
     if (decision === 'no_quota' && isNew) await notifyNoQuota(base);
+    if (decision === 'no_monthly_quota' && isNew) await notifyNoMonthlyQuota(base, monthly);
     if (decision === 'approved' && isNew) {
       await notifyApproved(base, Math.max(0, balance - requiredUnits));
     }

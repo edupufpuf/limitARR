@@ -202,6 +202,83 @@ test('grupos: PUT sobre un grupo inexistente devuelve 404', async () => {
   await agent.put('/api/groups/99999').send({ aggregated: true }).expect(404);
 });
 
+// --- v2: roles (mismo patrón que grupos, sin cupo agregado) ---
+
+test('roles: vienen los 4 por defecto sembrados (Usuario/Amigo/Invitado/Admin)', async () => {
+  const roles = (await agent.get('/api/roles').expect(200)).body;
+  const names = roles.map((r) => r.name).sort();
+  assert.deepEqual(names, ['Admin', 'Amigo', 'Invitado', 'Usuario']);
+});
+
+test('roles: crear y listar', async () => {
+  const created = await agent.post('/api/roles').send({ name: 'Rol de Prueba' }).expect(200);
+  const roles = (await agent.get('/api/roles').expect(200)).body;
+  const found = roles.find((r) => r.id === created.body.id);
+  assert.equal(found.name, 'Rol de Prueba');
+  assert.deepEqual(found.members, []);
+});
+
+test('roles: nombre repetido devuelve 409', async () => {
+  await agent.post('/api/roles').send({ name: 'Rol Duplicado' }).expect(200);
+  await agent.post('/api/roles').send({ name: 'Rol Duplicado' }).expect(409);
+});
+
+test('roles: asignar miembros los mueve de rol (máx. un rol por usuario)', async () => {
+  const a = (await agent.post('/api/roles').send({ name: 'Rol A' }).expect(200)).body.id;
+  const b = (await agent.post('/api/roles').send({ name: 'Rol B' }).expect(200)).body.id;
+
+  await agent.put(`/api/roles/${a}/members`).send({ userIds: [801, 802] }).expect(200);
+  await agent.put(`/api/roles/${b}/members`).send({ userIds: [802] }).expect(200);
+
+  const roles = (await agent.get('/api/roles').expect(200)).body;
+  assert.deepEqual(roles.find((r) => r.id === a).members, [801]);
+  assert.deepEqual(roles.find((r) => r.id === b).members, [802]);
+});
+
+test('roles: eliminar limpia miembros y overrides', async () => {
+  const id = (await agent.post('/api/roles').send({ name: 'Rol Efímero' }).expect(200)).body.id;
+  await agent.put(`/api/roles/${id}/members`).send({ userIds: [901] }).expect(200);
+  db.prepare('INSERT INTO role_overrides (role_id, library_id, limit_override) VALUES (?, 9, 3)').run(id);
+
+  await agent.delete(`/api/roles/${id}`).expect(200);
+
+  assert.equal(db.prepare('SELECT 1 FROM roles WHERE id = ?').get(id), undefined);
+  assert.equal(db.prepare('SELECT 1 FROM user_roles WHERE role_id = ?').get(id), undefined);
+  assert.equal(db.prepare('SELECT 1 FROM role_overrides WHERE role_id = ?').get(id), undefined);
+});
+
+test('roles: override por biblioteca acepta límite, caducidad y cupo mensual', async () => {
+  const id = (await agent.post('/api/roles').send({ name: 'Rol Overrides' }).expect(200)).body.id;
+  await agent.put(`/api/roles/${id}/overrides/42`).send({ limitOverride: 2, expiryOverride: 15, monthlyLimitOverride: 3 }).expect(200);
+
+  const roles = (await agent.get('/api/roles').expect(200)).body;
+  const override = roles.find((r) => r.id === id).overrides.find((o) => o.library_id === 42);
+  assert.equal(override.limit_override, 2);
+  assert.equal(override.expiry_override, 15);
+  assert.equal(override.monthly_limit_override, 3);
+
+  await agent.delete(`/api/roles/${id}/overrides/42`).expect(200);
+  const rolesAfter = (await agent.get('/api/roles').expect(200)).body;
+  assert.equal(rolesAfter.find((r) => r.id === id).overrides.length, 0);
+});
+
+// --- v2: temporizador de aprobación (acción puntual sobre una solicitud) ---
+
+test('requests: aplazar y quitar aplazamiento', async () => {
+  await agent.post('/api/requests/12345/hold').send({ days: 7 }).expect(200);
+  let row = db.prepare('SELECT * FROM request_holds WHERE request_id = ?').get(12345);
+  assert.ok(row);
+
+  await agent.delete('/api/requests/12345/hold').expect(200);
+  row = db.prepare('SELECT * FROM request_holds WHERE request_id = ?').get(12345);
+  assert.equal(row, undefined);
+});
+
+test('requests: aplazar sin días válidos devuelve 400', async () => {
+  await agent.post('/api/requests/12346/hold').send({ days: 0 }).expect(400);
+  await agent.post('/api/requests/12346/hold').send({}).expect(400);
+});
+
 test('overrides: alta, listado y borrado', async () => {
   await agent.put('/api/overrides/701/42').send({ limitOverride: 2, note: 'castigado' }).expect(200);
 
@@ -319,6 +396,63 @@ test('cupo: cargo manual resta un hueco sin tmdb y se quita con el ✕ normal', 
     db.prepare('DELETE FROM quota_cache WHERE library_id = 1778').run();
     db.prepare('DELETE FROM libraries WHERE id = 1778').run();
     db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key')").run();
+  }
+});
+
+// --- v2: cupo mensual — cuenta lo aprobado en el mes, se vea o no ---
+
+test('cupo mensual: cuenta cargos aprobados en el mes, independientemente de si se ven', async () => {
+  const upsertSetting = db.prepare(`
+    INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+  `);
+  upsertSetting.run('tautulli_url', 'http://tautulli.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
+  upsertSetting.run('seerr_url', 'http://seerr.test');
+  upsertSetting.run('seerr_api_key', 'test-key');
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit, monthly_quota_enabled, monthly_limit)
+    VALUES (1779, 'Películas', 'movie', 'standard', 1, 4, 1, 1)
+  `).run();
+
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith('http://tautulli.test')) {
+      const cmd = new URL(url).searchParams.get('cmd');
+      const data = cmd === 'get_users' ? [{ user_id: 1890, username: 'ana' }] : { data: [] };
+      return new Response(JSON.stringify({ response: { result: 'success', data } }), { status: 200 });
+    }
+    if (url.startsWith('http://seerr.test')) {
+      return new Response(JSON.stringify({ results: [] }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const first = await agent
+      .post('/api/quota/manual-charge/1890/1779')
+      .send({ title: 'Vista fuera de Seerr 1' })
+      .expect(200);
+    assert.deepEqual(first.body.monthly, { enabled: true, limit: 1, used: 1, remaining: 0 });
+
+    // Un segundo cargo manual sigue aplicándose (acción del admin, no pasa por
+    // el tope): el mensual queda en 2/1, por encima del límite, y así se enseña.
+    const second = await agent
+      .post('/api/quota/manual-charge/1890/1779')
+      .send({ title: 'Vista fuera de Seerr 2' })
+      .expect(200);
+    assert.deepEqual(second.body.monthly, { enabled: true, limit: 1, used: 2, remaining: 0 });
+
+    const quota = (await agent.get('/api/quota').expect(200)).body;
+    const lib = quota.find((u) => u.userId === 1890)?.libraries.find((l) => l.libraryId === 1779);
+    assert.deepEqual(lib.monthly, { enabled: true, limit: 1, used: 2 });
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM decisions_log WHERE library_id = 1779').run();
+    db.prepare('DELETE FROM quota_cache WHERE library_id = 1779').run();
+    db.prepare('DELETE FROM libraries WHERE id = 1779').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
   }
 });
 
