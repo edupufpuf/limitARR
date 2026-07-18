@@ -7,7 +7,7 @@ import { config } from '../config.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { needsSetup, setPassword, checkPassword, getWebhookSecret } from '../auth.js';
-import { getUsers, getLibraries } from '../services/tautulli.js';
+import { getUsers, getUser, getLibraries } from '../services/tautulli.js';
 import {
   listPendingRequests,
   getSeerrUsers,
@@ -779,6 +779,18 @@ async function buildQuotaByUser() {
   `).all();
   const [tautulliUsers, seerrUsers] = await Promise.all([getUsers(), getSeerrUsers()]);
   const tautulliUserMap = new Map(tautulliUsers.map((u) => [u.id, u]));
+
+  // get_users solo trae usuarios activos: uno eliminado/desactivado en Tautulli
+  // (compartido quitado en Plex) no sale ahí pero sigue con fila en quota_cache
+  // — sin esto su tarjeta enseñaba "user#123456" en vez de su username real.
+  const missingIds = [...new Set(
+    rows.map((r) => r.user_id).filter((id) => id >= 0 && !tautulliUserMap.has(id))
+  )];
+  if (missingIds.length > 0) {
+    const resolved = await Promise.all(missingIds.map((id) => getUser(id).catch(() => null)));
+    for (const u of resolved) if (u) tautulliUserMap.set(u.id, u);
+  }
+
   const libraries = db.prepare('SELECT id, name FROM libraries WHERE enabled = 1').all();
   const libraryMap = new Map(libraries.map((l) => [l.id, l.name]));
   const recentRows = db.prepare(`

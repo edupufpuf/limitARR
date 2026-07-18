@@ -43,6 +43,22 @@ export async function getUsers() {
   }));
 }
 
+// get_users solo trae usuarios activos: uno eliminado/desactivado en Tautulli
+// (compartido quitado en Plex) desaparece de ahí aunque siga teniendo
+// historial de cupo en limitARR. get_user (singular) sí lo resuelve por id
+// aunque esté marcado deleted_user — se usa como fallback puntual, no en el
+// listado general.
+export async function getUser(userId) {
+  const data = await call('get_user', { user_id: userId });
+  return {
+    id: Number(data.user_id),
+    username: data.username,
+    email: data.email,
+    friendlyName: data.friendly_name,
+    isAdmin: Boolean(Number(data.is_admin)),
+  };
+}
+
 // Búsqueda en Plex vía Tautulli, para localizar el rating_key de una película,
 // serie o temporada y poder enlazar su página de estadísticas
 // (/info?rating_key=X). Devuelve también los guids (incluye "tmdb://<id>", en

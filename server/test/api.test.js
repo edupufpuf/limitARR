@@ -456,6 +456,58 @@ test('cupo mensual: cuenta cargos aprobados en el mes, independientemente de si 
   }
 });
 
+test('cupo: un usuario eliminado/desactivado en Tautulli (fuera de get_users) muestra su username real, no "user#id"', async () => {
+  const upsertSetting = db.prepare(`
+    INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+  `);
+  upsertSetting.run('tautulli_url', 'http://tautulli.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
+  upsertSetting.run('seerr_url', 'http://seerr.test');
+  upsertSetting.run('seerr_api_key', 'test-key');
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (1780, 'Series', 'show', 'standard', 1, 4)
+  `).run();
+  db.prepare(`
+    INSERT INTO quota_cache (user_id, library_id, limit_applied, outstanding, balance)
+    VALUES (999999, 1780, 4, 1, 3)
+  `).run();
+
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith('http://tautulli.test')) {
+      const cmd = new URL(url).searchParams.get('cmd');
+      if (cmd === 'get_users') {
+        return new Response(JSON.stringify({ response: { result: 'success', data: [] } }), { status: 200 });
+      }
+      if (cmd === 'get_user') {
+        return new Response(
+          JSON.stringify({ response: { result: 'success', data: { user_id: 999999, username: 'sandracalvo563', deleted_user: 1 } } }),
+          { status: 200 }
+        );
+      }
+      throw new Error(`unexpected tautulli cmd ${cmd}`);
+    }
+    if (url.startsWith('http://seerr.test')) {
+      return new Response(JSON.stringify({ results: [] }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const quota = (await agent.get('/api/quota').expect(200)).body;
+    const card = quota.find((u) => u.userId === 999999);
+    assert.equal(card.username, 'sandracalvo563');
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM quota_cache WHERE library_id = 1780').run();
+    db.prepare('DELETE FROM libraries WHERE id = 1780').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
+  }
+});
+
 test('notifications: los toggles de aviso se guardan y se leen', async () => {
   let s = (await agent.get('/api/notifications/settings').expect(200)).body;
   assert.equal(s.notifyApproved, true); // default ON
