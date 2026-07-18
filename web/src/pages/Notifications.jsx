@@ -529,8 +529,9 @@ export default function Notifications() {
                   className="input min-h-16 resize-y"
                 />
                 <p className="text-xs text-gray-500 mt-2">
-                  Variables: <span className="text-gray-300">{'{usuario}'}</span> y{' '}
-                  <span className="text-gray-300">{'{dias}'}</span> (frase con los días extra, vacía si no aplica).
+                  Variables: <span className="text-gray-300">{'{usuario}'}</span>,{' '}
+                  <span className="text-gray-300">{'{dias}'}</span> (frase con los días extra, vacía si no aplica) y{' '}
+                  <span className="text-gray-300">{'{fecha}'}</span> (nueva fecha de borrado tras salvar, p.ej. "22 de julio").
                 </p>
               </div>
             </MiniSection>

@@ -473,9 +473,16 @@ async function handleSaveCallback(query) {
 
     const { savedMessage } = getMaintainerrSettings();
     const diasPhrase = days ? ` — hay ${days} días más para verla` : '';
+    // {fecha}: nueva fecha de borrado tras salvar (hoy + días de la colección
+    // de salvados), igual que {fecha} en el aviso original pero contando
+    // desde el momento del salvado, no de la alta en Maintainerr.
+    const fechaTexto = days
+      ? new Date(Date.now() + days * 86_400_000).toLocaleDateString('es-ES', { day: 'numeric', month: 'long' })
+      : '';
     const note = savedMessage
       .replace(/{usuario}/g, displayName(query.from))
-      .replace(/{dias}/g, diasPhrase);
+      .replace(/{dias}/g, diasPhrase)
+      .replace(/{fecha}/g, fechaTexto);
     await botApi('answerCallbackQuery', {
       callback_query_id: query.id,
       text: days ? `Salvada: ${days} días más` : 'Salvada',
