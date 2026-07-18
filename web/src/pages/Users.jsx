@@ -316,7 +316,142 @@ function RoleCard({ role, users, libraries, onChanged }) {
   );
 }
 
-export default function Overrides() {
+// Ficha de un usuario: de un vistazo, su grupo y rol asignados (badges, de
+// solo lectura aquí — se asignan desde las secciones de Grupos/Roles de
+// arriba) y sus overrides propios por biblioteca, editables igual que en
+// GroupCard/RoleCard. Colapsada por defecto para que la lista quepa aunque
+// haya muchos usuarios en el servidor.
+function UserFicha({ user, group, role, overrides, libraries, expanded, onToggle, libName, onChanged }) {
+  const [limits, setLimits] = useState({});
+  const [expiries, setExpiries] = useState({});
+  const [monthlyLimits, setMonthlyLimits] = useState({});
+  const [notes, setNotes] = useState({});
+
+  useEffect(() => {
+    setLimits(Object.fromEntries(libraries.map((l) => [l.id, overrides.find((o) => o.library_id === l.id)?.limit_override ?? ''])));
+    setExpiries(Object.fromEntries(libraries.map((l) => [l.id, overrides.find((o) => o.library_id === l.id)?.expiry_override ?? ''])));
+    setMonthlyLimits(Object.fromEntries(libraries.map((l) => [l.id, overrides.find((o) => o.library_id === l.id)?.monthly_limit_override ?? ''])));
+    setNotes(Object.fromEntries(libraries.map((l) => [l.id, overrides.find((o) => o.library_id === l.id)?.note ?? ''])));
+  }, [overrides, libraries]);
+
+  async function saveLimit(libraryId) {
+    const value = limits[libraryId];
+    if (value === '') {
+      if (overrides.some((o) => o.library_id === libraryId)) {
+        await api.deleteOverride(user.id, libraryId);
+      }
+    } else {
+      await api.setOverride(user.id, libraryId, {
+        limitOverride: Number(value),
+        expiryOverride: expiries[libraryId] === '' ? null : Number(expiries[libraryId]),
+        monthlyLimitOverride: monthlyLimits[libraryId] === '' ? null : Number(monthlyLimits[libraryId]),
+        note: notes[libraryId] || '',
+      });
+    }
+    onChanged();
+  }
+
+  async function clearLimit(libraryId) {
+    await api.deleteOverride(user.id, libraryId);
+    onChanged();
+  }
+
+  return (
+    <div className="card overflow-hidden">
+      <button onClick={onToggle} className="w-full flex items-center gap-3 p-3 text-left hover:bg-bg-700/40 transition-colors">
+        <span className="w-8 h-8 rounded-full bg-bg-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
+          {user.username.slice(0, 2).toUpperCase()}
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="font-medium truncate flex items-center gap-1.5 flex-wrap">
+            {user.username}
+            {group && (
+              <span className="text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-accent-600/20 text-accent-300 ring-1 ring-accent-500/40">
+                {group.name}
+              </span>
+            )}
+            {role && (
+              <span className="text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-sky-600/20 text-sky-300 ring-1 ring-sky-500/40">
+                {role.name}
+              </span>
+            )}
+          </div>
+          {overrides.length > 0 && (
+            <div className="text-xs text-gray-500 truncate">
+              {overrides.length} override{overrides.length > 1 ? 's' : ''} propio{overrides.length > 1 ? 's' : ''}: {overrides.map((o) => libName(o.library_id)).join(', ')}
+            </div>
+          )}
+        </div>
+        <span className="text-gray-500 text-xs">{expanded ? '▲' : '▼'}</span>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-bg-700 p-4">
+          <div className="label mb-1.5">Overrides propios por biblioteca (vacío = herencia normal: grupo &gt; rol &gt; biblioteca)</div>
+          <div className="flex flex-col gap-2">
+            {libraries.map((l) => {
+              const saved = overrides.find((o) => o.library_id === l.id);
+              const dirty =
+                String(limits[l.id] ?? '') !== String(saved?.limit_override ?? '') ||
+                String(expiries[l.id] ?? '') !== String(saved?.expiry_override ?? '') ||
+                String(monthlyLimits[l.id] ?? '') !== String(saved?.monthly_limit_override ?? '') ||
+                String(notes[l.id] ?? '') !== String(saved?.note ?? '');
+              return (
+                <div key={l.id} className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="text-gray-400 w-24 truncate">{l.name}</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={limits[l.id] ?? ''}
+                    onChange={(e) => setLimits({ ...limits, [l.id]: e.target.value })}
+                    className="input w-16 py-1"
+                    title="Límite"
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    value={expiries[l.id] ?? ''}
+                    onChange={(e) => setExpiries({ ...expiries, [l.id]: e.target.value })}
+                    className="input w-16 py-1"
+                    placeholder="cad."
+                    title="Caducidad en días (0 = no caduca; vacío = herencia)"
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    value={monthlyLimits[l.id] ?? ''}
+                    onChange={(e) => setMonthlyLimits({ ...monthlyLimits, [l.id]: e.target.value })}
+                    className="input w-16 py-1"
+                    placeholder="mes"
+                    title="Cupo mensual (0 = bloquear el mes; vacío = herencia)"
+                  />
+                  <input
+                    value={notes[l.id] ?? ''}
+                    onChange={(e) => setNotes({ ...notes, [l.id]: e.target.value })}
+                    placeholder="nota"
+                    className="input w-32 py-1"
+                  />
+                  {dirty && (
+                    <button onClick={() => saveLimit(l.id)} className="btn btn-primary py-1 px-2.5 text-xs">
+                      Guardar
+                    </button>
+                  )}
+                  {!dirty && saved && (
+                    <button onClick={() => clearLimit(l.id)} className="text-accent-400 text-xs">
+                      quitar
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function Users() {
   const [overrides, setOverrides] = useState([]);
   const [groups, setGroups] = useState([]);
   const [newGroupName, setNewGroupName] = useState('');
@@ -324,10 +459,11 @@ export default function Overrides() {
   const [newRoleName, setNewRoleName] = useState('');
   const [users, setUsers] = useState([]);
   const [libraries, setLibraries] = useState([]);
-  const [form, setForm] = useState({ userId: '', libraryId: '', limitOverride: 4, expiryOverride: '', monthlyLimitOverride: '', note: '' });
   const [bulkForm, setBulkForm] = useState({ libraryId: '', limitOverride: 2 });
   const [applyingBulk, setApplyingBulk] = useState(false);
   const [bulkResult, setBulkResult] = useState(null);
+  const [query, setQuery] = useState('');
+  const [expandedUsers, setExpandedUsers] = useState(new Set());
 
   function load() {
     api.overrides().then(setOverrides);
@@ -359,22 +495,12 @@ export default function Overrides() {
     api.libraries().then((libs) => setLibraries(libs.filter((l) => l.enabled)));
   }, []);
 
-  async function submit(e) {
-    e.preventDefault();
-    if (!form.userId || !form.libraryId) return;
-    await api.setOverride(form.userId, form.libraryId, {
-      limitOverride: Number(form.limitOverride),
-      expiryOverride: form.expiryOverride === '' ? null : Number(form.expiryOverride),
-      monthlyLimitOverride: form.monthlyLimitOverride === '' ? null : Number(form.monthlyLimitOverride),
-      note: form.note,
+  function toggleUser(userId) {
+    setExpandedUsers((prev) => {
+      const next = new Set(prev);
+      next.has(userId) ? next.delete(userId) : next.add(userId);
+      return next;
     });
-    setForm({ ...form, note: '' });
-    load();
-  }
-
-  async function remove(userId, libraryId) {
-    await api.deleteOverride(userId, libraryId);
-    load();
   }
 
   async function applyBulk(e) {
@@ -388,14 +514,15 @@ export default function Overrides() {
     setApplyingBulk(false);
   }
 
-  const userName = (id) => users.find((u) => u.id === id)?.username ?? `user#${id}`;
   const libName = (id) => libraries.find((l) => l.id === id)?.name ?? `#${id}`;
+
+  const visibleUsers = users.filter((u) => u.username.toLowerCase().includes(query.trim().toLowerCase()));
 
   return (
     <div>
-      <h2 className="page-title mb-1">Overrides</h2>
+      <h2 className="page-title mb-1">Usuarios</h2>
       <p className="text-xs text-gray-500 mb-4">
-        Precedencia del límite: override individual &gt; override de grupo &gt; límite de la
+        Precedencia del límite: override individual &gt; override de grupo &gt; rol &gt; límite de la
         biblioteca. Pon 0 para bloquear del todo.
       </p>
 
@@ -451,7 +578,7 @@ export default function Overrides() {
         rol y grupo a la vez (son independientes) — el grupo gana si ambos tocan la misma biblioteca.
       </p>
 
-      <h3 className="text-sm font-semibold text-gray-300 mb-2">Overrides individuales</h3>
+      <h3 className="text-sm font-semibold text-gray-300 mb-2">Usuarios</h3>
 
       <form onSubmit={applyBulk} className="card p-4 mb-4 flex flex-wrap gap-3 items-end">
         <div>
@@ -489,122 +616,34 @@ export default function Overrides() {
         {bulkResult && <span className="text-xs text-gray-500">{bulkResult}</span>}
       </form>
 
-      <form onSubmit={submit} className="card p-4 mb-6 flex flex-wrap gap-3 items-end">
-        <div>
-          <label className="label">Usuario</label>
-          <select
-            value={form.userId}
-            onChange={(e) => setForm({ ...form, userId: e.target.value })}
-            className="input w-auto py-1"
-          >
-            <option value="">—</option>
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.username}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="label">Biblioteca</label>
-          <select
-            value={form.libraryId}
-            onChange={(e) => setForm({ ...form, libraryId: e.target.value })}
-            className="input w-auto py-1"
-          >
-            <option value="">—</option>
-            {libraries.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="label">Límite</label>
-          <input
-            type="number"
-            min={0}
-            value={form.limitOverride}
-            onChange={(e) => setForm({ ...form, limitOverride: e.target.value })}
-            className="input w-20 py-1"
-          />
-        </div>
-        <div>
-          <label className="label" title="Días hasta que un pendiente sin ver sale del cupo. 0 = no caduca; vacío = la de la biblioteca.">
-            Caducidad
-          </label>
-          <input
-            type="number"
-            min={0}
-            value={form.expiryOverride}
-            onChange={(e) => setForm({ ...form, expiryOverride: e.target.value })}
-            placeholder="días"
-            className="input w-20 py-1"
-          />
-        </div>
-        <div>
-          <label className="label" title="Tope de cosas aprobadas en el mes en curso, aunque se vean. 0 = bloquear el mes; vacío = el de la biblioteca.">
-            Cupo mensual
-          </label>
-          <input
-            type="number"
-            min={0}
-            value={form.monthlyLimitOverride}
-            onChange={(e) => setForm({ ...form, monthlyLimitOverride: e.target.value })}
-            placeholder="mes"
-            className="input w-20 py-1"
-          />
-        </div>
-        <div className="flex-1 min-w-[120px]">
-          <label className="label">Nota</label>
-          <input
-            value={form.note}
-            onChange={(e) => setForm({ ...form, note: e.target.value })}
-            className="input py-1"
-          />
-        </div>
-        <button type="submit" className="btn btn-primary">
-          Guardar override
-        </button>
-      </form>
-
-      <div className="card overflow-x-auto px-4">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-bg-700">
-              <th className="th">Usuario</th>
-              <th className="th">Biblioteca</th>
-              <th className="th">Límite</th>
-              <th className="th">Caducidad</th>
-              <th className="th">Cupo mensual</th>
-              <th className="th">Nota</th>
-              <th className="th"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {overrides.map((o) => (
-              <tr key={`${o.user_id}-${o.library_id}`} className="border-b border-bg-700/50 last:border-0 hover:bg-bg-700/20 transition-colors">
-                <td className="py-2 pr-4 whitespace-nowrap">{userName(o.user_id)}</td>
-                <td className="py-2 pr-4 whitespace-nowrap">{libName(o.library_id)}</td>
-                <td className="py-2 pr-4">{o.limit_override}</td>
-                <td className="py-2 pr-4 text-gray-400">
-                  {o.expiry_override == null ? '—' : o.expiry_override === 0 ? 'no caduca' : `${o.expiry_override} días`}
-                </td>
-                <td className="py-2 pr-4 text-gray-400">
-                  {o.monthly_limit_override == null ? '—' : o.monthly_limit_override}
-                </td>
-                <td className="py-2 pr-4 text-gray-400">{o.note}</td>
-                <td className="py-2 pr-4">
-                  <button onClick={() => remove(o.user_id, o.library_id)} className="text-accent-400 text-xs">
-                    eliminar
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="relative mb-3 max-w-xs">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Buscar usuario…"
+          className="input"
+        />
       </div>
+
+      <div className="space-y-2">
+        {visibleUsers.map((u) => (
+          <UserFicha
+            key={u.id}
+            user={u}
+            group={groups.find((g) => g.members.includes(u.id))}
+            role={roles.find((r) => r.members.includes(u.id))}
+            overrides={overrides.filter((o) => o.user_id === u.id)}
+            libraries={libraries}
+            expanded={expandedUsers.has(u.id)}
+            onToggle={() => toggleUser(u.id)}
+            libName={libName}
+            onChanged={load}
+          />
+        ))}
+      </div>
+      {users.length > 0 && visibleUsers.length === 0 && (
+        <p className="text-gray-500 text-sm py-6 text-center">Ningún usuario coincide con "{query}".</p>
+      )}
     </div>
   );
 }
