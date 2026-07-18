@@ -515,11 +515,11 @@ export function PendingDetailModal({
 }
 
 // v2: cupo mensual — tope de cosas aprobadas en el mes en curso, aunque se
-// vean, desactivado por defecto y activable aquí (no en Bibliotecas) por
-// pedido expreso: es una norma de cupo, no de la biblioteca en sí. Guarda con
+// vean, desactivado por defecto y configurable aquí (no en Bibliotecas) por
+// pedido expreso: es una norma de cupo, no de la biblioteca en sí. Se abre
+// como modal desde el botón junto a "Recalcular todos". Guarda con
 // PUT /libraries/:id, que ahora solo toca los campos que se le pasan.
-function MonthlyQuotaPanel({ libraries, onChanged }) {
-  const [open, setOpen] = useState(false);
+function MonthlyQuotaModal({ libraries, onClose, onChanged }) {
   const [drafts, setDrafts] = useState({});
   const [saving, setSaving] = useState({});
 
@@ -530,8 +530,6 @@ function MonthlyQuotaPanel({ libraries, onChanged }) {
       )
     );
   }, [libraries]);
-
-  if (libraries.length === 0) return null;
 
   async function save(libraryId) {
     const draft = drafts[libraryId];
@@ -545,22 +543,20 @@ function MonthlyQuotaPanel({ libraries, onChanged }) {
   }
 
   return (
-    <div className="card p-4 mb-6">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center justify-between text-left"
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
+      <div
+        className="card w-full max-w-md max-h-[85vh] overflow-y-auto p-4 sm:p-5"
+        style={{ maxHeight: '85dvh' }}
+        onClick={(e) => e.stopPropagation()}
       >
-        <div>
-          <h3 className="font-semibold">Cupo mensual</h3>
-          <p className="text-xs text-gray-500 mt-0.5">
-            Tope de cosas aprobadas al mes por biblioteca, aunque se vean. Desactivado por defecto.
-          </p>
+        <div className="flex items-start justify-between gap-2 mb-1">
+          <h3 className="font-semibold text-lg leading-tight">Cupo mensual</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-200 text-xl leading-none">✕</button>
         </div>
-        <span className="text-gray-500 text-xs">{open ? '▲' : '▼'}</span>
-      </button>
-      {open && (
-        <div className="flex flex-wrap gap-4 mt-4">
+        <p className="text-xs text-gray-500 mb-4">
+          Tope de cosas aprobadas al mes por biblioteca, aunque se vean. Desactivado por defecto.
+        </p>
+        <div className="flex flex-col gap-3">
           {libraries.map((l) => {
             const draft = drafts[l.id] ?? { enabled: false, limit: l.monthly_limit };
             const dirty =
@@ -596,8 +592,11 @@ function MonthlyQuotaPanel({ libraries, onChanged }) {
               </div>
             );
           })}
+          {libraries.length === 0 && (
+            <p className="text-sm text-gray-500">Sin bibliotecas configuradas.</p>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -945,6 +944,7 @@ export default function Quota() {
   const [pendingApprovals, setPendingApprovals] = useState([]);
   const [salvados, setSalvados] = useState([]);
   const [libraries, setLibraries] = useState([]);
+  const [showMonthlyQuota, setShowMonthlyQuota] = useState(false);
   const [query, setQuery] = useState('');
   const [recalculating, setRecalculating] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -1133,10 +1133,11 @@ export default function Quota() {
           <button onClick={recalculate} disabled={recalculating} className="btn btn-ghost">
             {recalculating ? 'Recalculando…' : 'Recalcular todos'}
           </button>
+          <button onClick={() => setShowMonthlyQuota(true)} className="btn btn-ghost">
+            Cupo mensual
+          </button>
         </div>
       </div>
-
-      <MonthlyQuotaPanel libraries={libraries} onChanged={load} />
 
       {debtors.length > 0 && <DebtorBubbles debtors={debtors} onDetail={(user, lib, item) => setDetailTarget({ user, lib, item })} />}
 
@@ -1228,6 +1229,14 @@ export default function Quota() {
           />
         ))}
       </div>
+
+      {showMonthlyQuota && (
+        <MonthlyQuotaModal
+          libraries={libraries}
+          onClose={() => setShowMonthlyQuota(false)}
+          onChanged={load}
+        />
+      )}
 
       {detailTarget && (
         <PendingDetailModal
