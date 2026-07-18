@@ -60,7 +60,8 @@ function LibraryCard({ lib, expanded, onToggle, onSaved }) {
   const [kind, setKind] = useState(lib.kind);
   const [enabled, setEnabled] = useState(Boolean(lib.enabled));
   const [defaultLimit, setDefaultLimit] = useState(lib.default_limit);
-  const [expiryDays, setExpiryDays] = useState(lib.expiry_days ?? '');
+  const [expiryEnabled, setExpiryEnabled] = useState(lib.expiry_days !== 0);
+  const [expiryDays, setExpiryDays] = useState(lib.expiry_days > 0 ? lib.expiry_days : '');
   const [monthlyEnabled, setMonthlyEnabled] = useState(Boolean(lib.monthly_quota_enabled));
   const [monthlyLimit, setMonthlyLimit] = useState(lib.monthly_limit);
   const [oneSeasonPerRequest, setOneSeasonPerRequest] = useState(Boolean(lib.one_season_per_request));
@@ -73,7 +74,7 @@ function LibraryCard({ lib, expanded, onToggle, onSaved }) {
       kind,
       enabled,
       defaultLimit: Number(defaultLimit),
-      expiryDays: expiryDays === '' ? null : Number(expiryDays),
+      expiryDays: !expiryEnabled ? 0 : expiryDays === '' ? null : Number(expiryDays),
       monthlyQuotaEnabled: monthlyEnabled,
       monthlyLimit: Number(monthlyLimit),
       oneSeasonPerRequest,
@@ -128,22 +129,32 @@ function LibraryCard({ lib, expanded, onToggle, onSaved }) {
             className="input w-20 py-1"
           />
         </div>
-        <div>
-          <label
-            className="text-xs text-gray-400 mr-2 block mb-1"
-            title="Pasados estos días sin verse, el pendiente sale del cupo. 0 = no caduca."
-          >
-            Caducidad (días)
-          </label>
+      </div>
+
+      <div className="border-t border-bg-700 pt-3 mb-1">
+        <label className="flex items-center gap-2 cursor-pointer mb-2">
           <input
-            type="number"
-            min={0}
-            value={expiryDays}
-            onChange={(e) => setExpiryDays(e.target.value)}
-            placeholder="30"
-            className="input w-20 py-1"
+            type="checkbox"
+            checked={expiryEnabled}
+            onChange={(e) => setExpiryEnabled(e.target.checked)}
+            className="accent-accent-500"
           />
-        </div>
+          <span className="text-sm font-medium">Caducidad</span>
+          {expiryEnabled && (
+            <input
+              type="number"
+              min={1}
+              value={expiryDays}
+              onChange={(e) => setExpiryDays(e.target.value)}
+              placeholder="30"
+              className="input w-16 py-1 ml-1"
+              title="Días sin ver hasta que el pendiente sale del cupo"
+            />
+          )}
+        </label>
+        <p className="text-xs text-gray-500">
+          Pasados estos días sin verse, el pendiente sale del cupo. Desmarca para que nunca caduque.
+        </p>
       </div>
 
       <div className="border-t border-bg-700 pt-3 mb-1">
