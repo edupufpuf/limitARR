@@ -202,7 +202,8 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
           <section className="card p-5 mt-8">
             <h2 className="font-extrabold text-xl mb-1">📅 Cupo mensual</h2>
             <p className="text-sm text-gray-500 mb-4">
-              Cosas aprobadas este mes por biblioteca, aunque las hayas visto ya.
+              Límite de cuántas puedes pedir al mes — el tuyo si tienes uno particular, si no el general de la
+              biblioteca. Cuentan aunque ya te las hayas visto.
             </p>
             <div className="grid sm:grid-cols-2 gap-4">
               {quota.libraries
