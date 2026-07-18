@@ -198,13 +198,23 @@ async function notifyDeletionCandidate(source, target, item, { fallbackTitle = n
   // = nombre de la serie, index = número de temporada. Sin Plex configurado
   // o si falla, se cae al título compartido del mensaje (sin temporada).
   let itemTitle = fallbackTitle ?? null;
+  let showName = null;
+  let seasonNumber = null;
   if (isSeason) {
     const meta = await getPlexMetadata(item.mediaServerId);
     if (meta?.parentTitle && Number.isFinite(meta.index)) {
-      itemTitle = `${meta.parentTitle} - Temporada ${meta.index}`;
+      showName = meta.parentTitle;
+      seasonNumber = meta.index;
+      itemTitle = `${showName} - Temporada ${seasonNumber}`;
     }
   }
-  const tituloTexto = itemTitle ? `«${itemTitle}»` : isSeason ? 'Esta temporada' : 'Esta película';
+  // Serie: nombrar explícitamente "la serie X (temporada N)" en vez de dejar
+  // que el guion de itemTitle ("X - Temporada N") se lea ambiguo en el aviso.
+  const tituloTexto = showName
+    ? `la serie «${showName}» (temporada ${seasonNumber})`
+    : itemTitle
+      ? `«${itemTitle}»`
+      : isSeason ? 'esta temporada' : 'esta película';
 
   const text = target
     ? deleteMessage

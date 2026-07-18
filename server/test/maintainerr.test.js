@@ -123,7 +123,7 @@ test('webhook: alta en colección de borrado manda aviso Telegram con botón Sal
 
 // --- Salvadas para series (siempre por temporada) ---
 
-test('webhook: colección de series resuelve "Serie - Temporada N" contra Plex, no el título compartido del mensaje', async () => {
+test('webhook: colección de series nombra serie y temporada explícitas contra Plex, no el título compartido del mensaje', async () => {
   upsertSetting.run('plex_url', 'http://plex.test:32400');
   upsertSetting.run('plex_token', 'plex-token-test');
 
@@ -165,7 +165,7 @@ test('webhook: colección de series resuelve "Serie - Temporada N" contra Plex, 
   const telegram = calls.find((c) => c.url.includes('api.telegram.org'));
   const payload = JSON.parse(telegram.options.body);
   const text = payload.caption ?? payload.text;
-  assert.match(text, /«Breaking Bad - Temporada 3» se borrará en 7 días/);
+  assert.match(text, /la serie «Breaking Bad» \(temporada 3\) se borrará en 7 días/);
 });
 
 test('webhook: temporada sin Plex configurado cae al título del mensaje, sin reventar', async () => {
