@@ -530,9 +530,14 @@ export function startMaintainerrPoller() {
   }
   loop();
 
-  // Sondeo de respaldo cada 5 min para altas manuales (ver pollMaintainerrCollections);
-  // no compite con el long-poll de arriba, que es solo para los clics del botón Salvar.
-  setInterval(() => {
+  // Sondeo de respaldo cada minuto para altas manuales (ver
+  // pollMaintainerrCollections) — igual de frecuente que el ciclo de cupo, y
+  // se lanza también al arrancar (setInterval no lo hace solo: sin esto, tras
+  // cada despliegue/reinicio había que esperar el intervalo entero para el
+  // primer aviso). No compite con el long-poll de arriba, que es solo para
+  // los clics del botón Salvar.
+  const pollCollections = () =>
     pollMaintainerrCollections().catch((err) => console.error('[maintainerr] sondeo de colecciones falló:', err.message));
-  }, 5 * 60 * 1000);
+  pollCollections();
+  setInterval(pollCollections, 60 * 1000);
 }
