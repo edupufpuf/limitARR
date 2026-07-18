@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { SalvadosGrid } from '../components/Salvados.jsx';
 
@@ -442,8 +442,8 @@ function UserFichaModal({ user, group, role, overrides, libraries, onChanged, on
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
       <div
-        className="card w-full max-w-2xl max-h-[85vh] overflow-y-auto p-4 sm:p-5"
-        style={{ maxHeight: '85dvh' }}
+        className="card w-full max-w-4xl max-h-[90vh] overflow-y-auto p-4 sm:p-6"
+        style={{ maxHeight: '90dvh' }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 mb-4">
@@ -648,10 +648,23 @@ function UserFichaModal({ user, group, role, overrides, libraries, onChanged, on
   );
 }
 
-// Tabla estilo Seerr: usuario, grupo/rol asignados y overrides propios, con
-// "Ver ficha" para abrir el detalle editable (issue de Edu: quería la lista
-// de usuarios como en Seerr, con pestañas propias para Grupos/Roles/Overrides).
-function UsersTable({ users, groups, roles, overrides, query, setQuery, onSelect }) {
+// Peor saldo (balance más bajo) entre las bibliotecas de un usuario, para el
+// chip de cupo de la fila — mismo criterio de color que la pestaña Cupo.
+function worstQuotaLib(entry) {
+  if (!entry?.libraries?.length) return null;
+  return entry.libraries.reduce((worst, l) => (l.balance < worst.balance ? l : worst), entry.libraries[0]);
+}
+
+function quotaTone(balance) {
+  if (balance <= 0) return 'text-accent-400';
+  if (balance <= 1) return 'text-yellow-400';
+  return 'text-green-400';
+}
+
+// Fila limpia por usuario, estilo tarjeta (como en Cupo): foto real de Seerr
+// si hay match (si no, iniciales), grupo/rol asignados, cupo y pendientes de
+// un vistazo. Toda la fila abre la ficha — nada de botones sueltos.
+function UsersTable({ users, groups, roles, quotaByUserId, pendingCountByUserId, query, setQuery, onSelect }) {
   const visibleUsers = users.filter((u) => u.username.toLowerCase().includes(query.trim().toLowerCase()));
 
   return (
@@ -664,49 +677,51 @@ function UsersTable({ users, groups, roles, overrides, query, setQuery, onSelect
           className="input"
         />
       </div>
-      <div className="card overflow-x-auto px-4">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-bg-700">
-              <th className="th">Usuario</th>
-              <th className="th">Grupo</th>
-              <th className="th">Rol</th>
-              <th className="th">Overrides propios</th>
-              <th className="th"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {visibleUsers.map((u) => {
-              const group = groups.find((g) => g.members.includes(u.id));
-              const role = roles.find((r) => r.members.includes(u.id));
-              const own = overrides.filter((o) => o.user_id === u.id);
-              return (
-                <tr key={u.id} className="border-b border-bg-700/50 last:border-0 hover:bg-bg-700/20 transition-colors">
-                  <td className="py-2 pr-4 whitespace-nowrap">
-                    <div className="flex items-center gap-2">
-                      <span className="w-7 h-7 rounded-full bg-bg-700 flex items-center justify-center text-[10px] font-bold flex-shrink-0">
-                        {u.username.slice(0, 2).toUpperCase()}
-                      </span>
-                      {u.username}
-                    </div>
-                  </td>
-                  <td className="py-2 pr-4 text-gray-400">{group?.name ?? '—'}</td>
-                  <td className="py-2 pr-4 text-gray-400">{role?.name ?? '—'}</td>
-                  <td className="py-2 pr-4 text-gray-400">{own.length > 0 ? own.length : '—'}</td>
-                  <td className="py-2 pr-4">
-                    <button onClick={() => onSelect(u)} className="btn btn-ghost py-1 px-2.5 text-xs">
-                      Ver ficha
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        {users.length > 0 && visibleUsers.length === 0 && (
-          <p className="text-gray-500 text-sm py-6 text-center">Ningún usuario coincide con "{query}".</p>
-        )}
+      <div className="space-y-2">
+        {visibleUsers.map((u) => {
+          const group = groups.find((g) => g.members.includes(u.id));
+          const role = roles.find((r) => r.members.includes(u.id));
+          const quotaEntry = quotaByUserId.get(u.id);
+          const worst = worstQuotaLib(quotaEntry);
+          const pending = pendingCountByUserId.get(u.id) ?? 0;
+          return (
+            <button
+              key={u.id}
+              onClick={() => onSelect(u)}
+              className="card w-full flex items-center gap-3 p-3 text-left hover:bg-bg-700/40 transition-colors"
+            >
+              <span className="w-9 h-9 rounded-full bg-bg-700 overflow-hidden flex items-center justify-center text-xs font-bold flex-shrink-0">
+                {quotaEntry?.avatar ? (
+                  <img src={quotaEntry.avatar} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                ) : (
+                  u.username.slice(0, 2).toUpperCase()
+                )}
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="font-medium truncate flex items-center gap-1.5 flex-wrap">
+                  {u.username}
+                  {group && <FichaBadge tone="accent">{group.name}</FichaBadge>}
+                  {role && <FichaBadge tone="sky">{role.name}</FichaBadge>}
+                </div>
+                {u.email && <div className="text-xs text-gray-500 truncate">{u.email}</div>}
+              </div>
+              {worst && (
+                <span className={`text-sm font-bold tabular-nums flex-shrink-0 ${quotaTone(worst.balance)}`}>
+                  {worst.balance}/{worst.limitApplied}
+                </span>
+              )}
+              {pending > 0 && (
+                <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-yellow-400/10 text-yellow-400 ring-1 ring-yellow-400/25 flex-shrink-0">
+                  {pending} pdte.
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
+      {users.length > 0 && visibleUsers.length === 0 && (
+        <p className="text-gray-500 text-sm py-6 text-center">Ningún usuario coincide con "{query}".</p>
+      )}
     </div>
   );
 }
@@ -732,11 +747,16 @@ export default function Users() {
   const [bulkResult, setBulkResult] = useState(null);
   const [query, setQuery] = useState('');
   const [selectedUser, setSelectedUser] = useState(null);
+  const [quota, setQuota] = useState([]);
+  const [pendingApprovals, setPendingApprovals] = useState([]);
 
   function load() {
     api.overrides().then(setOverrides);
     api.groups().then(setGroups);
     api.roles().then(setRoles);
+    // Foto de Seerr, cupo y pendientes de un vistazo en la tabla de usuarios.
+    api.quota().then(setQuota).catch(() => {});
+    api.pendingApprovals().then(setPendingApprovals).catch(() => {});
   }
 
   async function createGroup(e) {
@@ -774,6 +794,16 @@ export default function Users() {
     setApplyingBulk(false);
   }
 
+  const quotaByUserId = useMemo(() => new Map(quota.filter((q) => !q.isGroup).map((q) => [q.userId, q])), [quota]);
+  const pendingCountByUserId = useMemo(() => {
+    const map = new Map();
+    for (const p of pendingApprovals) {
+      if (p.userId == null) continue;
+      map.set(p.userId, (map.get(p.userId) ?? 0) + 1);
+    }
+    return map;
+  }, [pendingApprovals]);
+
   return (
     <div>
       <h2 className="page-title mb-1">Usuarios</h2>
@@ -803,7 +833,8 @@ export default function Users() {
           users={users}
           groups={groups}
           roles={roles}
-          overrides={overrides}
+          quotaByUserId={quotaByUserId}
+          pendingCountByUserId={pendingCountByUserId}
           query={query}
           setQuery={setQuery}
           onSelect={setSelectedUser}
