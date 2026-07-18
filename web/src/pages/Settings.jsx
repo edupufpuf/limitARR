@@ -10,6 +10,120 @@ function StatusDot({ result }) {
   );
 }
 
+// Apartado "Cupo": todo lo que antes vivía suelto en Bibliotecas (temporadas
+// seguidas, por biblioteca de series) o mezclado en el formulario de conexión
+// (% de visionado). Cada trozo guarda por su cuenta, sin depender del resto.
+function CupoSettings() {
+  const [percent, setPercent] = useState('');
+  const [savedPercent, setSavedPercent] = useState('');
+  const [savingPercent, setSavingPercent] = useState(false);
+  const [libs, setLibs] = useState([]);
+  const [savingLib, setSavingLib] = useState({});
+
+  function load() {
+    api.settings().then((s) => {
+      setPercent(s.tv_season_watched_percent ?? '');
+      setSavedPercent(s.tv_season_watched_percent ?? '');
+    });
+    api.libraries().then((all) => setLibs(all.filter((l) => l.section_type === 'show')));
+  }
+
+  useEffect(load, []);
+
+  async function savePercent(e) {
+    e.preventDefault();
+    setSavingPercent(true);
+    await api.updateSettings({ tv_season_watched_percent: percent });
+    load();
+    setSavingPercent(false);
+  }
+
+  async function toggleOneSeason(lib) {
+    setSavingLib((s) => ({ ...s, [lib.id]: true }));
+    await api.updateLibrary(lib.id, { oneSeasonPerRequest: !lib.one_season_per_request });
+    load();
+    setSavingLib((s) => ({ ...s, [lib.id]: false }));
+  }
+
+  async function toggleSequential(lib) {
+    setSavingLib((s) => ({ ...s, [lib.id]: true }));
+    await api.updateLibrary(lib.id, { sequentialSeasons: !lib.sequential_seasons });
+    load();
+    setSavingLib((s) => ({ ...s, [lib.id]: false }));
+  }
+
+  return (
+    <div className="card p-5 space-y-5">
+      <fieldset>
+        <legend className="text-sm font-semibold text-accent-400 mb-2">Temporada vista</legend>
+        <form onSubmit={savePercent} className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="label">% de episodios para dar la temporada por completada</label>
+            <input
+              value={percent}
+              onChange={(e) => setPercent(e.target.value)}
+              placeholder="85 — vacío = valor por defecto"
+              inputMode="numeric"
+              className="input w-40"
+            />
+          </div>
+          {percent !== savedPercent && (
+            <button type="submit" disabled={savingPercent} className="btn btn-primary">
+              {savingPercent ? 'Guardando…' : 'Guardar'}
+            </button>
+          )}
+        </form>
+        <p className="text-xs text-gray-500 mt-2">
+          Una temporada libera cupo cuando este % de sus episodios está visto
+          (al 85% cada uno, umbral de Tautulli). 100 exige verla entera.
+        </p>
+      </fieldset>
+
+      {libs.length > 0 && (
+        <fieldset>
+          <legend className="text-sm font-semibold text-accent-400 mb-3">Temporadas seguidas, por biblioteca</legend>
+          <div className="space-y-4">
+            {libs.map((lib) => (
+              <div key={lib.id}>
+                <div className="text-sm font-medium mb-1.5">{lib.name}</div>
+                <label className="flex items-start gap-2 mb-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(lib.one_season_per_request)}
+                    onChange={() => toggleOneSeason(lib)}
+                    disabled={savingLib[lib.id]}
+                    className="mt-0.5 accent-accent-500"
+                  />
+                  <span className="text-xs text-gray-400">
+                    <span className="text-gray-200 font-medium">Solo una temporada por solicitud</span> — una
+                    solicitud con varias temporadas de golpe se rechaza en Seerr automáticamente (con aviso
+                    por Telegram): hay que pedirlas de una en una.
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(lib.sequential_seasons)}
+                    onChange={() => toggleSequential(lib)}
+                    disabled={savingLib[lib.id]}
+                    className="mt-0.5 accent-accent-500"
+                  />
+                  <span className="text-xs text-gray-400">
+                    <span className="text-gray-200 font-medium">Temporadas en orden</span> — un usuario solo
+                    puede tener sin ver una temporada de cada serie: las siguientes esperan en Seerr (en
+                    cola, con aviso) y se aprueban solas al terminar la anterior. Se aprueba siempre la
+                    temporada más baja primero. Implica "solo una temporada por solicitud".
+                  </span>
+                </label>
+              </div>
+            ))}
+          </div>
+        </fieldset>
+      )}
+    </div>
+  );
+}
+
 export default function Settings() {
   const [settings, setSettings] = useState(null);
   const [form, setForm] = useState({
@@ -21,7 +135,6 @@ export default function Settings() {
     tautulli_public_url: '',
     plex_url: '',
     plex_token: '',
-    tv_season_watched_percent: '',
   });
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -45,7 +158,6 @@ export default function Settings() {
         tautulli_url: s.tautulli_url ?? '',
         tautulli_public_url: s.tautulli_public_url ?? '',
         plex_url: s.plex_url ?? '',
-        tv_season_watched_percent: s.tv_season_watched_percent ?? '',
       }));
     });
     api.webhookInfo().then((r) => setWebhookUrl(r.url));
@@ -201,22 +313,6 @@ export default function Settings() {
           />
         </fieldset>
 
-        <fieldset>
-          <legend className="text-sm font-semibold text-accent-400 mb-2">Cupo de series</legend>
-          <label className="label">Temporada vista al alcanzar el % de episodios</label>
-          <input
-            value={form.tv_season_watched_percent}
-            onChange={(e) => setForm({ ...form, tv_season_watched_percent: e.target.value })}
-            placeholder="85 — vacío = valor por defecto"
-            inputMode="numeric"
-            className="input w-40"
-          />
-          <p className="text-xs text-gray-500 mt-2">
-            Una temporada libera cupo cuando este % de sus episodios está visto
-            (al 85% cada uno, umbral de Tautulli). 100 exige verla entera.
-          </p>
-        </fieldset>
-
         <div className="flex flex-wrap items-center gap-3 pt-2">
           <button
             type="submit"
@@ -243,6 +339,9 @@ export default function Settings() {
           </div>
         )}
       </form>
+
+      <h3 className="text-sm font-semibold text-accent-400 mt-8 mb-2">Cupo</h3>
+      <CupoSettings />
 
       <h3 className="text-sm font-semibold text-accent-400 mt-8 mb-2">Reacción instantánea</h3>
       <div className="card p-5">
