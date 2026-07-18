@@ -23,6 +23,14 @@ function LibraryCard({ library, onDetail }) {
       <div className="h-2 rounded-full bg-bg-950 mt-4 overflow-hidden">
         <div className="h-full rounded-full bg-accent-500" style={{ width: `${percent}%` }} />
       </div>
+      {library.monthly?.enabled && (
+        <div
+          className={`text-[11px] mt-1.5 tabular-nums ${library.monthly.used >= library.monthly.limit ? 'text-accent-400' : 'text-gray-500'}`}
+          title="Cupo mensual: cosas aprobadas este mes, aunque se vean"
+        >
+          mensual {library.monthly.used}/{library.monthly.limit}
+        </div>
+      )}
       {library.pendingItems?.length > 0 && (
         <div className="grid grid-cols-3 sm:grid-cols-5 gap-3 mt-5">
           {library.pendingItems.map((item, index) => (
