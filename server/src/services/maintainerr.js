@@ -234,10 +234,13 @@ async function notifyDeletionCandidate(source, target, item, { fallbackTitle = n
         .replace(/{fecha}/g, fechaTexto)
         .replace(/{diasSalvado}/g, String(target.deleteAfterDays ?? ''))
     : `🎬 ${tituloTexto} se borrará${diasTexto}.\n\n⚠️ Sin colección de salvados configurada para "${source.title}" — no se puede salvar.`;
+  // "Salvar" pide confirmación antes de mover nada (asksave: cambia el
+  // teclado a Sí/Cancelar; el save: real solo llega tras confirmar — ver
+  // handleAskSaveCallback/handleCancelSaveCallback).
   const replyMarkup = target
     ? {
         inline_keyboard: [
-          [{ text: '💾 Salvar', callback_data: `save:${item.mediaServerId}:${source.id}:${target.id}` }],
+          [{ text: '💾 Salvar', callback_data: `asksave:${item.mediaServerId}:${source.id}:${target.id}` }],
         ],
       }
     : undefined;
@@ -365,6 +368,50 @@ function resolveTautulliUser(telegramUserId) {
   return db
     .prepare('SELECT user_id FROM telegram_links WHERE chat_id = ?')
     .get(String(telegramUserId))?.user_id ?? null;
+}
+
+// Primer clic en "💾 Salvar": no mueve nada todavía, solo cambia el teclado
+// a Sí/Cancelar. El save: real (handleSaveCallback) solo llega si confirman.
+async function handleAskSaveCallback(query) {
+  const [, mediaServerId, sourceId, targetId] = query.data.split(':');
+  const confirmMarkup = {
+    inline_keyboard: [
+      [
+        { text: '✅ Sí, salvar', callback_data: `save:${mediaServerId}:${sourceId}:${targetId}` },
+        { text: '✖️ Cancelar', callback_data: `cancelsave:${mediaServerId}:${sourceId}:${targetId}` },
+      ],
+    ],
+  };
+  try {
+    await botApi('editMessageReplyMarkup', {
+      chat_id: query.message.chat.id,
+      message_id: query.message.message_id,
+      reply_markup: confirmMarkup,
+    });
+    await botApi('answerCallbackQuery', { callback_query_id: query.id, text: '¿Seguro?' });
+  } catch (err) {
+    console.error('[maintainerr] error preguntando confirmación:', err.message);
+  }
+}
+
+// Cancelar: vuelve al botón "💾 Salvar" de partida, sin tocar la colección.
+async function handleCancelSaveCallback(query) {
+  const [, mediaServerId, sourceId, targetId] = query.data.split(':');
+  const originalMarkup = {
+    inline_keyboard: [
+      [{ text: '💾 Salvar', callback_data: `asksave:${mediaServerId}:${sourceId}:${targetId}` }],
+    ],
+  };
+  try {
+    await botApi('editMessageReplyMarkup', {
+      chat_id: query.message.chat.id,
+      message_id: query.message.message_id,
+      reply_markup: originalMarkup,
+    });
+    await botApi('answerCallbackQuery', { callback_query_id: query.id, text: 'Cancelado' });
+  } catch (err) {
+    console.error('[maintainerr] error cancelando confirmación:', err.message);
+  }
 }
 
 async function handleSaveCallback(query) {
@@ -517,7 +564,12 @@ export function startMaintainerrPoller() {
         if (updates.length > 0) {
           setRawSetting(OFFSET_KEY, String(updates[updates.length - 1].update_id));
           for (const u of updates) {
-            if (u.callback_query?.data?.startsWith('save:')) {
+            const data = u.callback_query?.data;
+            if (data?.startsWith('asksave:')) {
+              await handleAskSaveCallback(u.callback_query);
+            } else if (data?.startsWith('cancelsave:')) {
+              await handleCancelSaveCallback(u.callback_query);
+            } else if (data?.startsWith('save:')) {
               await handleSaveCallback(u.callback_query);
             }
           }

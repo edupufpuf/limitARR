@@ -117,7 +117,7 @@ test('webhook: alta en colección de borrado manda aviso Telegram con botón Sal
   assert.match(text, /estará 15 días más/);
   assert.equal(
     payload.reply_markup.inline_keyboard[0][0].callback_data,
-    'save:9010:1:4'
+    'asksave:9010:1:4'
   );
 });
 
