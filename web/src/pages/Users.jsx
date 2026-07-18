@@ -21,6 +21,18 @@ function FichaBadge({ tone, children }) {
   );
 }
 
+// Antes cada caja de override solo tenía título/placeholder (desaparece al
+// escribir un número) — no se veía qué era cada una. Con una etiqueta fija
+// encima siempre se sabe qué campo es, aunque tenga valor.
+function OverrideField({ label, className, ...inputProps }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] uppercase tracking-wide text-gray-500">{label}</span>
+      <input className={className ?? 'input w-20 py-1'} {...inputProps} />
+    </div>
+  );
+}
+
 function GroupCard({ group, users, libraries, onChanged }) {
   // Límite, caducidad y cupo mensual por biblioteca como texto del input: '' = sin override.
   const [limits, setLimits] = useState({});
@@ -154,36 +166,33 @@ function GroupCard({ group, users, libraries, onChanged }) {
             String(expiries[l.id] ?? '') !== String(savedExpiry) ||
             String(monthlyLimits[l.id] ?? '') !== String(savedMonthly);
           return (
-            <div key={l.id} className="flex items-center gap-2 text-sm">
-              <span className="text-gray-400 w-28 truncate flex-shrink-0">{l.name}</span>
-              <input
+            <div key={l.id} className="flex items-end gap-2 text-sm">
+              <span className="text-gray-400 w-28 truncate flex-shrink-0 pb-1.5">{l.name}</span>
+              <OverrideField
+                label="Límite"
                 type="number"
                 min={0}
                 value={limits[l.id] ?? ''}
                 onChange={(e) => setLimits({ ...limits, [l.id]: e.target.value })}
-                className="input w-20 py-1"
-                title="Límite"
               />
-              <input
+              <OverrideField
+                label="Caducidad"
                 type="number"
                 min={0}
                 value={expiries[l.id] ?? ''}
                 onChange={(e) => setExpiries({ ...expiries, [l.id]: e.target.value })}
-                className="input w-20 py-1"
-                placeholder="cad."
-                title="Caducidad en días (0 = no caduca; vacío = la de la biblioteca)"
+                title="Días (0 = no caduca; vacío = la de la biblioteca)"
               />
-              <input
+              <OverrideField
+                label="Mensual"
                 type="number"
                 min={0}
                 value={monthlyLimits[l.id] ?? ''}
                 onChange={(e) => setMonthlyLimits({ ...monthlyLimits, [l.id]: e.target.value })}
-                className="input w-20 py-1"
-                placeholder="mes"
                 title="Cupo mensual (0 = bloquear el mes; vacío = el de la biblioteca)"
               />
               {dirty && (
-                <button onClick={() => saveLimit(l.id)} className="btn btn-primary py-1 px-2.5 text-xs">
+                <button onClick={() => saveLimit(l.id)} className="btn btn-primary py-1 px-2.5 text-xs mb-0.5">
                   Guardar
                 </button>
               )}
@@ -295,36 +304,33 @@ function RoleCard({ role, users, libraries, onChanged }) {
             String(expiries[l.id] ?? '') !== String(savedExpiry) ||
             String(monthlyLimits[l.id] ?? '') !== String(savedMonthly);
           return (
-            <div key={l.id} className="flex items-center gap-2 text-sm">
-              <span className="text-gray-400 w-28 truncate flex-shrink-0">{l.name}</span>
-              <input
+            <div key={l.id} className="flex items-end gap-2 text-sm">
+              <span className="text-gray-400 w-28 truncate flex-shrink-0 pb-1.5">{l.name}</span>
+              <OverrideField
+                label="Límite"
                 type="number"
                 min={0}
                 value={limits[l.id] ?? ''}
                 onChange={(e) => setLimits({ ...limits, [l.id]: e.target.value })}
-                className="input w-20 py-1"
-                title="Límite"
               />
-              <input
+              <OverrideField
+                label="Caducidad"
                 type="number"
                 min={0}
                 value={expiries[l.id] ?? ''}
                 onChange={(e) => setExpiries({ ...expiries, [l.id]: e.target.value })}
-                className="input w-20 py-1"
-                placeholder="cad."
-                title="Caducidad en días (0 = no caduca; vacío = la de la biblioteca)"
+                title="Días (0 = no caduca; vacío = la de la biblioteca)"
               />
-              <input
+              <OverrideField
+                label="Mensual"
                 type="number"
                 min={0}
                 value={monthlyLimits[l.id] ?? ''}
                 onChange={(e) => setMonthlyLimits({ ...monthlyLimits, [l.id]: e.target.value })}
-                className="input w-20 py-1"
-                placeholder="mes"
                 title="Cupo mensual (0 = bloquear el mes; vacío = el de la biblioteca)"
               />
               {dirty && (
-                <button onClick={() => saveLimit(l.id)} className="btn btn-primary py-1 px-2.5 text-xs">
+                <button onClick={() => saveLimit(l.id)} className="btn btn-primary py-1 px-2.5 text-xs mb-0.5">
                   Guardar
                 </button>
               )}
@@ -700,47 +706,44 @@ function UserFichaModal({ user, group, role, allGroups, allRoles, overrides, lib
                   String(monthlyLimits[l.id] ?? '') !== String(saved?.monthly_limit_override ?? '') ||
                   String(notes[l.id] ?? '') !== String(saved?.note ?? '');
                 return (
-                  <div key={l.id} className="flex flex-wrap items-center gap-2 text-sm">
-                    <span className="text-gray-400 w-28 truncate flex-shrink-0">{l.name}</span>
-                    <input
+                  <div key={l.id} className="flex flex-wrap items-end gap-2 text-sm">
+                    <span className="text-gray-400 w-28 truncate flex-shrink-0 pb-1.5">{l.name}</span>
+                    <OverrideField
+                      label="Límite"
                       type="number"
                       min={0}
                       value={limits[l.id] ?? ''}
                       onChange={(e) => setLimits({ ...limits, [l.id]: e.target.value })}
-                      className="input w-20 py-1"
-                      title="Límite"
                     />
-                    <input
+                    <OverrideField
+                      label="Caducidad"
                       type="number"
                       min={0}
                       value={expiries[l.id] ?? ''}
                       onChange={(e) => setExpiries({ ...expiries, [l.id]: e.target.value })}
-                      className="input w-20 py-1"
-                      placeholder="cad."
-                      title="Caducidad en días (0 = no caduca; vacío = herencia)"
+                      title="Días (0 = no caduca; vacío = herencia)"
                     />
-                    <input
+                    <OverrideField
+                      label="Mensual"
                       type="number"
                       min={0}
                       value={monthlyLimits[l.id] ?? ''}
                       onChange={(e) => setMonthlyLimits({ ...monthlyLimits, [l.id]: e.target.value })}
-                      className="input w-20 py-1"
-                      placeholder="mes"
                       title="Cupo mensual (0 = bloquear el mes; vacío = herencia)"
                     />
-                    <input
+                    <OverrideField
+                      label="Nota"
                       value={notes[l.id] ?? ''}
                       onChange={(e) => setNotes({ ...notes, [l.id]: e.target.value })}
-                      placeholder="nota"
                       className="input w-40 py-1"
                     />
                     {dirty && (
-                      <button onClick={() => saveLimit(l.id)} className="btn btn-primary py-1 px-2.5 text-xs">
+                      <button onClick={() => saveLimit(l.id)} className="btn btn-primary py-1 px-2.5 text-xs mb-0.5">
                         Guardar
                       </button>
                     )}
                     {!dirty && saved && (
-                      <button onClick={() => clearLimit(l.id)} className="text-accent-400 text-xs">
+                      <button onClick={() => clearLimit(l.id)} className="text-accent-400 text-xs mb-1.5">
                         quitar
                       </button>
                     )}
