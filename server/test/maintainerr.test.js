@@ -34,6 +34,22 @@ const COLLECTIONS = [
     deleteAfterDays: 15,
     media: [],
   },
+  {
+    id: 2,
+    title: 'Series eliminadas en 7 dias',
+    type: 'season',
+    libraryId: '4',
+    deleteAfterDays: 7,
+    media: [{ mediaServerId: '8501', tmdbId: 292557, image_path: 'https://img.test/show.jpg' }],
+  },
+  {
+    id: 5,
+    title: 'Series Salvadas por 7 días',
+    type: 'season',
+    libraryId: '4',
+    deleteAfterDays: 7,
+    media: [],
+  },
 ];
 
 const realFetch = global.fetch;
@@ -61,7 +77,10 @@ before(async () => {
   upsertSetting.run('maintainerr_chat_id', '-100123');
   upsertSetting.run(
     'maintainerr_salvados_pairs',
-    JSON.stringify([{ source: 'Peliculas eliminadas en 7 días', target: 'Peliculas Salvadas por 15 días' }])
+    JSON.stringify([
+      { source: 'Peliculas eliminadas en 7 días', target: 'Peliculas Salvadas por 15 días' },
+      { source: 'Series eliminadas en 7 dias', target: 'Series Salvadas por 7 días' },
+    ])
   );
 });
 
@@ -100,6 +119,88 @@ test('webhook: alta en colección de borrado manda aviso Telegram con botón Sal
     payload.reply_markup.inline_keyboard[0][0].callback_data,
     'save:9010:1:4'
   );
+});
+
+// --- Salvadas para series (siempre por temporada) ---
+
+test('webhook: colección de series resuelve "Serie - Temporada N" contra Plex, no el título compartido del mensaje', async () => {
+  upsertSetting.run('plex_url', 'http://plex.test:32400');
+  upsertSetting.run('plex_token', 'plex-token-test');
+
+  const calls = [];
+  global.fetch = async (url, options = {}) => {
+    const u = String(url);
+    calls.push({ url: u, options });
+    if (u.endsWith('/api/collections')) {
+      return new Response(JSON.stringify(COLLECTIONS), { status: 200 });
+    }
+    if (u.includes('/library/metadata/8501')) {
+      return new Response(
+        JSON.stringify({ MediaContainer: { Metadata: [{ parentTitle: 'Breaking Bad', index: 3 }] } }),
+        { status: 200 }
+      );
+    }
+    if (u.includes('api.telegram.org')) {
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200 });
+    }
+    throw new Error(`fetch inesperado en test: ${u}`);
+  };
+
+  await request(app)
+    .post(`/api/webhook/maintainerr/${getWebhookSecret()}`)
+    .send({
+      collectionName: 'Series eliminadas en 7 dias',
+      // El mensaje de Maintainerr no trae temporada — solo sirve de fallback.
+      message: "'Breaking Bad' has been added to 'Series eliminadas en 7 dias'. The item will be handled in 7 days.",
+      dayAmount: 7,
+      mediaItems: JSON.stringify([{ mediaServerId: '8501' }]),
+    })
+    .expect(200);
+
+  await new Promise((r) => setTimeout(r, 50));
+
+  const plexCall = calls.find((c) => c.url.includes('/library/metadata/8501'));
+  assert.ok(plexCall, 'debería haber consultado Plex por la temporada');
+
+  const telegram = calls.find((c) => c.url.includes('api.telegram.org'));
+  const payload = JSON.parse(telegram.options.body);
+  const text = payload.caption ?? payload.text;
+  assert.match(text, /«Breaking Bad - Temporada 3» se borrará en 7 días/);
+});
+
+test('webhook: temporada sin Plex configurado cae al título del mensaje, sin reventar', async () => {
+  db.prepare("DELETE FROM settings WHERE key IN ('plex_url', 'plex_token')").run();
+
+  const calls = [];
+  global.fetch = async (url, options = {}) => {
+    const u = String(url);
+    calls.push({ url: u, options });
+    if (u.endsWith('/api/collections')) {
+      return new Response(JSON.stringify(COLLECTIONS), { status: 200 });
+    }
+    if (u.includes('api.telegram.org')) {
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200 });
+    }
+    throw new Error(`fetch inesperado en test: ${u}`);
+  };
+
+  await request(app)
+    .post(`/api/webhook/maintainerr/${getWebhookSecret()}`)
+    .send({
+      collectionName: 'Series eliminadas en 7 dias',
+      message: "'Breaking Bad' has been added to 'Series eliminadas en 7 dias'. The item will be handled in 7 days.",
+      dayAmount: 7,
+      mediaItems: JSON.stringify([{ mediaServerId: '8501' }]),
+    })
+    .expect(200);
+
+  await new Promise((r) => setTimeout(r, 50));
+
+  assert.equal(calls.some((c) => c.url.includes('/library/metadata/')), false);
+  const telegram = calls.find((c) => c.url.includes('api.telegram.org'));
+  const payload = JSON.parse(telegram.options.body);
+  const text = payload.caption ?? payload.text;
+  assert.match(text, /«Breaking Bad» se borrará en 7 días/);
 });
 
 test('webhook: alta en la propia colección de salvados se ignora (sin bucle)', async () => {

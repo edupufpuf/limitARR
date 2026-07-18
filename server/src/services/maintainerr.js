@@ -1,5 +1,6 @@
 import { db } from '../db.js';
 import { getRawSetting, setRawSetting, mask } from '../settings.js';
+import { getPlexMetadata } from './plex.js';
 
 // Módulo Maintainerr: cuando Maintainerr mete una película en una colección de
 // borrado, avisa por Telegram con un botón "Salvar" que la mueve a la colección
@@ -189,14 +190,33 @@ export async function handleMaintainerrWebhook(body) {
 
   // Maintainerr no manda el título suelto, solo embebido en su mensaje:
   // "'Título' has been added to 'Colección'. ..." — el ancla tras la última
-  // comilla aguanta títulos con apóstrofes.
-  const title = /'(.+)' has been added to '/.exec(body.message ?? '')?.[1];
+  // comilla aguanta títulos con apóstrofes. Sirve tal cual para película (un
+  // único item por aviso); para series (colección type 'season') es solo un
+  // fallback compartido — cada item se resuelve aparte más abajo, porque el
+  // mismo mensaje puede llegar a cubrir temporadas distintas.
+  const fallbackTitle = /'(.+)' has been added to '/.exec(body.message ?? '')?.[1];
   const deleteDays = body.dayAmount ?? source.deleteAfterDays;
-  const tituloTexto = title ? `«${title}»` : 'Esta película';
   const diasTexto = deleteDays ? ` en ${deleteDays} días` : '';
+  const isSeason = source.type !== 'movie';
 
   for (const item of mediaItems) {
     const sourceMedia = source.media?.find((m) => m.mediaServerId === item.mediaServerId);
+
+    // Issue: Salvadas para series, siempre por temporada. Maintainerr no da
+    // seasonNumber ni el título de la serie sueltos en su "media" (solo
+    // tmdbId a nivel de serie), así que "Serie - Temporada N" sale de
+    // consultar Plex por el ratingKey (mediaServerId) del ítem: parentTitle
+    // = nombre de la serie, index = número de temporada. Sin Plex configurado
+    // o si falla, se cae al título compartido del mensaje (sin temporada).
+    let itemTitle = fallbackTitle ?? null;
+    if (isSeason) {
+      const meta = await getPlexMetadata(item.mediaServerId);
+      if (meta?.parentTitle && Number.isFinite(meta.index)) {
+        itemTitle = `${meta.parentTitle} - Temporada ${meta.index}`;
+      }
+    }
+    const tituloTexto = itemTitle ? `«${itemTitle}»` : isSeason ? 'Esta temporada' : 'Esta película';
+
     const text = target
       ? deleteMessage
           .replace(/{titulo}/g, tituloTexto)
@@ -215,7 +235,7 @@ export async function handleMaintainerrWebhook(body) {
       // El título viaja también en el registro de salvados al pulsar el botón,
       // así que se guarda aparte del mensaje (el caption es editable por Telegram).
       pendingTitles.set(String(item.mediaServerId), {
-        title: title ?? null,
+        title: itemTitle,
         tmdbId: sourceMedia?.tmdbId ?? null,
         posterUrl: sourceMedia?.image_path ?? null,
         libraryId: source.libraryId != null ? Number(source.libraryId) : null,
@@ -278,8 +298,18 @@ async function handleSaveCallback(query) {
 
     const cached = pendingTitles.get(String(mediaServerId)) ?? {};
     pendingTitles.delete(String(mediaServerId));
+    // Mismo motivo que el título por caché: si el proceso reinició entre el
+    // aviso y el clic no hay "Serie - Temporada N" guardado. Se recalcula en
+    // vivo contra Plex (igual que el webhook) en vez de guardar sin temporada.
+    let liveTitle = null;
+    if (!cached.title && sourceCollection?.type !== 'movie') {
+      const plexMeta = await getPlexMetadata(mediaServerId);
+      if (plexMeta?.parentTitle && Number.isFinite(plexMeta.index)) {
+        liveTitle = `${plexMeta.parentTitle} - Temporada ${plexMeta.index}`;
+      }
+    }
     const meta = {
-      title: cached.title ?? null,
+      title: cached.title ?? liveTitle,
       tmdbId: cached.tmdbId ?? liveMedia?.tmdbId ?? null,
       posterUrl: cached.posterUrl ?? liveMedia?.image_path ?? null,
       libraryId: cached.libraryId ?? (sourceCollection?.libraryId != null ? Number(sourceCollection.libraryId) : null),
