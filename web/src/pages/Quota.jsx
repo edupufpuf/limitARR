@@ -965,7 +965,8 @@ export default function Quota() {
     api.pendingApprovals().then(setPendingApprovals).catch(() => {});
     // Módulo Maintainerr opcional: si no está configurado, la lista queda vacía.
     api.salvados().then(setSalvados).catch(() => {});
-    api.libraries().then(setLibraries);
+    // Solo bibliotecas activas: una deshabilitada no tiene cupo que tocar aquí.
+    api.libraries().then((libs) => setLibraries(libs.filter((l) => l.enabled)));
   }
 
   useEffect(() => {

@@ -354,7 +354,9 @@ export default function Overrides() {
   useEffect(() => {
     load();
     api.users().then(setUsers);
-    api.libraries().then(setLibraries);
+    // Bibliotecas deshabilitadas no aparecen aquí: no tiene sentido ponerles
+    // override si no están activas (se gestionan solo desde Bibliotecas).
+    api.libraries().then((libs) => setLibraries(libs.filter((l) => l.enabled)));
   }, []);
 
   async function submit(e) {
