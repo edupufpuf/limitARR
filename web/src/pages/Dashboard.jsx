@@ -38,7 +38,7 @@ export default function Dashboard({ onLoggedOut }) {
   return (
     <div className="min-h-screen flex flex-col sm:flex-row bg-bg-950 text-gray-100">
       {/* Sidebar — solo desktop */}
-      <nav className="hidden sm:flex w-[300px] bg-gradient-to-b from-bg-900 via-bg-900 to-bg-950 border-r border-bg-700/55 px-7 py-8 flex-col flex-shrink-0 shadow-[18px_0_48px_-32px_rgba(0,0,0,.85)]">
+      <nav className="hidden sm:flex w-[300px] h-screen sticky top-0 overflow-y-auto bg-gradient-to-b from-bg-900 via-bg-900 to-bg-950 border-r border-bg-700/55 px-7 py-8 flex-col flex-shrink-0 shadow-[18px_0_48px_-32px_rgba(0,0,0,.85)]">
         <div className="mb-16">
           <Wordmark className="text-[42px]" />
         </div>
