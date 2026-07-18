@@ -1,6 +1,6 @@
 import { db } from '../db.js';
 import { getRawSetting, setRawSetting, mask } from '../settings.js';
-import { getPlexMetadata } from './plex.js';
+import { getSeasonInfo } from './tautulli.js';
 
 // Módulo Maintainerr: cuando Maintainerr mete una película en una colección de
 // borrado, avisa por Telegram con un botón "Salvar" que la mueve a la colección
@@ -205,17 +205,17 @@ async function notifyDeletionCandidate(source, target, item, { fallbackTitle = n
   // Issue: Salvadas para series, siempre por temporada. Maintainerr no da
   // seasonNumber ni el título de la serie sueltos en su "media" (solo
   // tmdbId a nivel de serie), así que "Serie - Temporada N" sale de
-  // consultar Plex por el ratingKey (mediaServerId) del ítem: parentTitle
-  // = nombre de la serie, index = número de temporada. Sin Plex configurado
-  // o si falla, se cae al título compartido del mensaje (sin temporada).
+  // consultar Tautulli por el rating_key (mediaServerId) del ítem — ya
+  // configurado, sin depender de una conexión Plex aparte. Si falla, se cae
+  // al título compartido del mensaje (sin temporada).
   let itemTitle = fallbackTitle ?? null;
   let showName = null;
   let seasonNumber = null;
   if (isSeason) {
-    const meta = await getPlexMetadata(item.mediaServerId);
-    if (meta?.parentTitle && Number.isFinite(meta.index)) {
-      showName = meta.parentTitle;
-      seasonNumber = meta.index;
+    const info = await getSeasonInfo(item.mediaServerId);
+    if (info) {
+      showName = info.showTitle;
+      seasonNumber = info.seasonNumber;
       itemTitle = `${showName} - Temporada ${seasonNumber}`;
     }
   }
@@ -391,13 +391,11 @@ async function handleSaveCallback(query) {
     pendingTitles.delete(String(mediaServerId));
     // Mismo motivo que el título por caché: si el proceso reinició entre el
     // aviso y el clic no hay "Serie - Temporada N" guardado. Se recalcula en
-    // vivo contra Plex (igual que el webhook) en vez de guardar sin temporada.
+    // vivo contra Tautulli (igual que el webhook) en vez de guardar sin temporada.
     let liveTitle = null;
     if (!cached.title && sourceCollection?.type !== 'movie') {
-      const plexMeta = await getPlexMetadata(mediaServerId);
-      if (plexMeta?.parentTitle && Number.isFinite(plexMeta.index)) {
-        liveTitle = `${plexMeta.parentTitle} - Temporada ${plexMeta.index}`;
-      }
+      const info = await getSeasonInfo(mediaServerId);
+      if (info) liveTitle = `${info.showTitle} - Temporada ${info.seasonNumber}`;
     }
     const meta = {
       title: cached.title ?? liveTitle,

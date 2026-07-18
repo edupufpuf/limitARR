@@ -145,6 +145,24 @@ export async function getItemWatchHistory(ratingKey, isTv = false) {
   return [];
 }
 
+// Nombre de la serie + número de temporada a partir del rating_key de Plex
+// de una temporada. Para el módulo Maintainerr (avisos de borrado de
+// series): usa Tautulli, ya configurado y probado, en vez de exigir una
+// conexión Plex aparte (plex_url/plex_token) solo para esto — que en la
+// práctica se queda sin rellenar y deja el aviso sin serie ni temporada.
+export async function getSeasonInfo(ratingKey) {
+  if (!ratingKey) return null;
+  try {
+    const data = await call('get_metadata', { rating_key: ratingKey });
+    if (data?.media_type !== 'season') return null;
+    const seasonNumber = Number(data.media_index);
+    if (!data.parent_title || !Number.isFinite(seasonNumber)) return null;
+    return { showTitle: data.parent_title, seasonNumber };
+  } catch {
+    return null; // sin Tautulli (o rating_key inválido) no se puede nombrar la temporada
+  }
+}
+
 export async function getSeasonEpisodes(showRatingKey, seasonNumber) {
   if (!showRatingKey || !seasonNumber) return [];
   const seasons = await call('get_children_metadata', { rating_key: showRatingKey });

@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { getRawSetting, setRawSetting, getSettings } from '../settings.js';
+import { getRawSetting, setRawSetting } from '../settings.js';
 
 const CLIENT_ID_KEY = 'plex_client_identifier';
 const PRODUCT = 'limitARR';
@@ -43,25 +43,6 @@ export async function getPlexAccount(token) {
   return plexFetch('https://plex.tv/api/v2/user', {
     headers: { 'X-Plex-Token': token },
   });
-}
-
-// Metadato de un ítem de Plex por su ratingKey. Lo usa el módulo Maintainerr
-// para resolver serie+temporada de un "media" de una colección de tipo
-// season: Maintainerr no manda seasonNumber ni el título de la serie suelto,
-// solo tmdbId (a nivel de serie) e image_path — parentTitle/index de Plex sí
-// distinguen una temporada de otra. Sin Plex configurado o si falla, null:
-// el llamante cae a lo que tenga (el título del mensaje de Maintainerr).
-export async function getPlexMetadata(ratingKey) {
-  const { plex_url: baseUrl, plex_token: token } = getSettings();
-  if (!baseUrl || !token) return null;
-  try {
-    const data = await plexFetch(`${baseUrl.replace(/\/$/, '')}/library/metadata/${ratingKey}`, {
-      headers: { 'X-Plex-Token': token },
-    });
-    return data.MediaContainer?.Metadata?.[0] ?? null;
-  } catch {
-    return null;
-  }
 }
 
 export async function testPlexServer(baseUrl, token) {
