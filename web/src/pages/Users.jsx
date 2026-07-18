@@ -1,5 +1,25 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { SalvadosGrid } from '../components/Salvados.jsx';
+
+function FichaRow({ label, children }) {
+  return (
+    <div className="flex items-center gap-4 py-2 border-b border-bg-700/50 last:border-0 text-sm">
+      <span className="w-28 flex-shrink-0 text-gray-400">{label}</span>
+      <span className="min-w-0 flex-1">{children}</span>
+    </div>
+  );
+}
+
+function FichaBadge({ tone, children }) {
+  const tones = {
+    accent: 'bg-accent-600/20 text-accent-300 ring-1 ring-accent-500/40',
+    sky: 'bg-sky-600/20 text-sky-300 ring-1 ring-sky-500/40',
+  };
+  return (
+    <span className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${tones[tone]}`}>{children}</span>
+  );
+}
 
 function GroupCard({ group, users, libraries, onChanged }) {
   // Límite, caducidad y cupo mensual por biblioteca como texto del input: '' = sin override.
@@ -316,15 +336,42 @@ function RoleCard({ role, users, libraries, onChanged }) {
   );
 }
 
+const FICHA_TABS = [
+  { key: 'general', label: 'General' },
+  { key: 'cupo', label: 'Cupo' },
+  { key: 'pendientes', label: 'Pendientes' },
+  { key: 'salvadas', label: 'Salvadas' },
+  { key: 'overrides', label: 'Overrides' },
+];
+
 // Ficha de un usuario, en modal (se abre desde la fila de la tabla de
-// Usuarios): grupo y rol asignados (badges, de solo lectura aquí — se
-// asignan desde las pestañas de Grupos/Roles) y sus overrides propios por
-// biblioteca, editables igual que en GroupCard/RoleCard.
-function UserFichaModal({ user, group, role, overrides, libraries, libName, onChanged, onClose }) {
+// Usuarios): TODO lo relacionado con él en un sitio — grupo/rol asignados,
+// vínculo de Telegram, su cupo por biblioteca, sus pendientes de aprobación
+// (con Aprobar/Rechazar/Aplazar en el sitio, igual que en Cupo) y lo que
+// tenga salvado del borrado (Maintainerr). Grupo/rol/overrides se editan
+// aquí mismo; cupo/pendientes/salvadas son de la misma fuente que la pestaña
+// Cupo (esta ficha NO la sustituye, solo la enseña centrada en un usuario).
+function UserFichaModal({ user, group, role, overrides, libraries, onChanged, onClose }) {
+  const [tab, setTab] = useState('general');
+  const [quotaAll, setQuotaAll] = useState([]);
+  const [pendingAll, setPendingAll] = useState([]);
+  const [links, setLinks] = useState([]);
+  const [salvadosAll, setSalvadosAll] = useState([]);
+  const [acting, setActing] = useState({});
+
   const [limits, setLimits] = useState({});
   const [expiries, setExpiries] = useState({});
   const [monthlyLimits, setMonthlyLimits] = useState({});
   const [notes, setNotes] = useState({});
+
+  function loadExtra() {
+    api.quota().then(setQuotaAll).catch(() => {});
+    api.pendingApprovals().then(setPendingAll).catch(() => setPendingAll([]));
+    api.notificationLinks().then(setLinks).catch(() => setLinks([]));
+    api.salvados().then(setSalvadosAll).catch(() => setSalvadosAll([]));
+  }
+
+  useEffect(loadExtra, [user.id]);
 
   useEffect(() => {
     setLimits(Object.fromEntries(libraries.map((l) => [l.id, overrides.find((o) => o.library_id === l.id)?.limit_override ?? ''])));
@@ -355,91 +402,247 @@ function UserFichaModal({ user, group, role, overrides, libraries, libName, onCh
     onChanged();
   }
 
+  // Un miembro de un grupo con cupo agregado no tiene fila propia (issue #4):
+  // la caché vive bajo el grupo (isGroup=true), identificado solo por
+  // username entre sus miembros — se enseña el cupo compartido con nota.
+  const quotaEntry =
+    quotaAll.find((q) => q.userId === user.id) ??
+    quotaAll.find((q) => q.isGroup && q.members?.includes(user.username));
+  const myPending = pendingAll.filter((p) => p.userId === user.id);
+  const myLink = links.find((l) => l.user_id === user.id) ?? null;
+  const mySalvados = salvadosAll.filter((s) => s.user_id === user.id);
+
+  async function act(item, action) {
+    const label = action === 'approve' ? 'Aprobar' : 'Rechazar';
+    if (!confirm(`¿${label} "${item.title ?? 'esta solicitud'}" en Seerr?`)) return;
+    setActing((a) => ({ ...a, [item.requestId]: action }));
+    try {
+      if (action === 'approve') await api.approveRequest(item.requestId);
+      else await api.declineRequest(item.requestId);
+    } finally {
+      setActing((a) => ({ ...a, [item.requestId]: null }));
+      loadExtra();
+    }
+  }
+
+  async function hold(item) {
+    const days = prompt(`¿Aplazar "${item.title ?? 'esta solicitud'}" cuántos días?`, '7');
+    if (!days) return;
+    const n = Number(days);
+    if (!Number.isFinite(n) || n <= 0) return;
+    await api.holdRequest(item.requestId, n);
+    loadExtra();
+  }
+
+  async function clearHold(item) {
+    await api.clearRequestHold(item.requestId);
+    loadExtra();
+  }
+
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
       <div
-        className="card w-full max-w-lg max-h-[85vh] overflow-y-auto p-4 sm:p-5"
+        className="card w-full max-w-2xl max-h-[85vh] overflow-y-auto p-4 sm:p-5"
         style={{ maxHeight: '85dvh' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-2 mb-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-semibold text-lg leading-tight">{user.username}</h3>
-            {group && (
-              <span className="text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-accent-600/20 text-accent-300 ring-1 ring-accent-500/40">
-                {group.name}
-              </span>
-            )}
-            {role && (
-              <span className="text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-sky-600/20 text-sky-300 ring-1 ring-sky-500/40">
-                {role.name}
-              </span>
-            )}
-          </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-200 text-xl leading-none">✕</button>
-        </div>
-        <p className="text-xs text-gray-500 mb-4">
-          Grupo y rol se asignan desde sus pestañas. Aquí solo los overrides propios de este usuario
-          (vacío = herencia normal: grupo &gt; rol &gt; biblioteca).
-        </p>
-        <div className="flex flex-col gap-2">
-          {libraries.map((l) => {
-            const saved = overrides.find((o) => o.library_id === l.id);
-            const dirty =
-              String(limits[l.id] ?? '') !== String(saved?.limit_override ?? '') ||
-              String(expiries[l.id] ?? '') !== String(saved?.expiry_override ?? '') ||
-              String(monthlyLimits[l.id] ?? '') !== String(saved?.monthly_limit_override ?? '') ||
-              String(notes[l.id] ?? '') !== String(saved?.note ?? '');
-            return (
-              <div key={l.id} className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="text-gray-400 w-24 truncate">{l.name}</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={limits[l.id] ?? ''}
-                  onChange={(e) => setLimits({ ...limits, [l.id]: e.target.value })}
-                  className="input w-16 py-1"
-                  title="Límite"
-                />
-                <input
-                  type="number"
-                  min={0}
-                  value={expiries[l.id] ?? ''}
-                  onChange={(e) => setExpiries({ ...expiries, [l.id]: e.target.value })}
-                  className="input w-16 py-1"
-                  placeholder="cad."
-                  title="Caducidad en días (0 = no caduca; vacío = herencia)"
-                />
-                <input
-                  type="number"
-                  min={0}
-                  value={monthlyLimits[l.id] ?? ''}
-                  onChange={(e) => setMonthlyLimits({ ...monthlyLimits, [l.id]: e.target.value })}
-                  className="input w-16 py-1"
-                  placeholder="mes"
-                  title="Cupo mensual (0 = bloquear el mes; vacío = herencia)"
-                />
-                <input
-                  value={notes[l.id] ?? ''}
-                  onChange={(e) => setNotes({ ...notes, [l.id]: e.target.value })}
-                  placeholder="nota"
-                  className="input w-28 py-1"
-                />
-                {dirty && (
-                  <button onClick={() => saveLimit(l.id)} className="btn btn-primary py-1 px-2.5 text-xs">
-                    Guardar
-                  </button>
-                )}
-                {!dirty && saved && (
-                  <button onClick={() => clearLimit(l.id)} className="text-accent-400 text-xs">
-                    quitar
-                  </button>
-                )}
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="w-14 h-14 rounded-full bg-bg-700 flex items-center justify-center text-lg font-bold flex-shrink-0">
+              {user.username.slice(0, 2).toUpperCase()}
+            </span>
+            <div className="min-w-0">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <h3 className="font-bold text-lg text-accent-300 leading-tight truncate">{user.username}</h3>
+                {user.email && <span className="text-gray-500 text-sm truncate">({user.email})</span>}
               </div>
-            );
-          })}
-          {libraries.length === 0 && <p className="text-sm text-gray-500">Sin bibliotecas activas.</p>}
+              <div className="text-xs text-gray-500 mt-0.5">Id de usuario: {user.id}</div>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-200 text-xl leading-none flex-shrink-0">✕</button>
         </div>
+
+        <div className="flex gap-1 mb-4 border-b border-bg-700 overflow-x-auto">
+          {FICHA_TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${
+                tab === t.key
+                  ? 'border-accent-500 text-accent-300'
+                  : 'border-transparent text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'general' && (
+          <div>
+            <FichaRow label="Grupo">{group ? <FichaBadge tone="accent">{group.name}</FichaBadge> : <span className="text-gray-500">—</span>}</FichaRow>
+            <FichaRow label="Rol">{role ? <FichaBadge tone="sky">{role.name}</FichaBadge> : <span className="text-gray-500">—</span>}</FichaRow>
+            <FichaRow label="Telegram">
+              {myLink ? (
+                <span className="text-green-400">vinculado{myLink.label ? ` — ${myLink.label}` : ''}</span>
+              ) : (
+                <span className="text-gray-500">sin vincular</span>
+              )}
+            </FichaRow>
+          </div>
+        )}
+
+        {tab === 'cupo' && (
+          <div className="space-y-4">
+            {!quotaEntry && <p className="text-sm text-gray-500">Sin cupo calculado todavía.</p>}
+            {quotaEntry?.isGroup && (
+              <p className="text-xs text-gray-500">
+                Cupo compartido con el grupo "{quotaEntry.username}" (cupo agregado): lo pedido por
+                cualquier miembro cuenta aquí.
+              </p>
+            )}
+            {quotaEntry?.libraries.map((lib) => {
+              const pct = lib.limitApplied > 0 ? Math.round((lib.balance / lib.limitApplied) * 100) : 0;
+              return (
+                <div key={lib.libraryId}>
+                  <div className="flex items-center gap-3 text-sm mb-1">
+                    <span className="flex-1 font-medium truncate">{lib.libraryName}</span>
+                    <span className="tabular-nums">{lib.balance} / {lib.limitApplied}</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-bg-600/70 overflow-hidden">
+                    <div className="h-full rounded-full bg-accent-500" style={{ width: `${pct}%` }} />
+                  </div>
+                  {lib.monthly?.enabled && (
+                    <div className="text-[11px] text-gray-500 mt-1">mensual {lib.monthly.used}/{lib.monthly.limit}</div>
+                  )}
+                  {lib.pendingItems?.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {lib.pendingItems.map((item, i) => (
+                        <div key={i} className="w-12 flex-shrink-0" title={item.title ?? ''}>
+                          <div className="aspect-[2/3] rounded overflow-hidden bg-bg-700">
+                            {item.posterUrl && <img src={item.posterUrl} alt="" loading="lazy" className="w-full h-full object-cover" />}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {tab === 'pendientes' && (
+          <div className="space-y-2">
+            {myPending.length === 0 && <p className="text-sm text-gray-500">Sin pendientes de aprobación.</p>}
+            {myPending.map((item) => (
+              <div key={item.requestId} className="flex flex-wrap items-center gap-2 sm:gap-3 text-sm">
+                <span className="w-8 h-12 rounded overflow-hidden bg-bg-600 flex-shrink-0">
+                  {item.posterUrl && <img src={item.posterUrl} alt="" loading="lazy" className="w-full h-full object-cover" />}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="truncate font-medium">{item.title ?? `solicitud #${item.requestId}`}</div>
+                  <div className="text-xs text-gray-500 truncate">
+                    {item.libraryName ?? 'Sin biblioteca'}
+                    {item.balance != null && ` · saldo ${item.balance}/${item.limit}`}
+                    {item.holdUntil != null && <span className="text-yellow-400"> · aplazada</span>}
+                  </div>
+                </div>
+                {item.holdUntil != null ? (
+                  <button onClick={() => clearHold(item)} className="btn btn-ghost py-1 px-2 text-xs">Quitar aplazamiento</button>
+                ) : (
+                  <button onClick={() => hold(item)} className="btn btn-ghost py-1 px-2 text-xs">Aplazar</button>
+                )}
+                <button
+                  onClick={() => act(item, 'approve')}
+                  disabled={Boolean(acting[item.requestId])}
+                  className="btn btn-primary py-1 px-2 text-xs"
+                >
+                  {acting[item.requestId] === 'approve' ? 'Aprobando…' : 'Aprobar'}
+                </button>
+                <button
+                  onClick={() => act(item, 'decline')}
+                  disabled={Boolean(acting[item.requestId])}
+                  className="btn btn-ghost py-1 px-2 text-xs text-accent-400"
+                >
+                  {acting[item.requestId] === 'decline' ? 'Rechazando…' : 'Rechazar'}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {tab === 'salvadas' && (
+          mySalvados.length > 0
+            ? <SalvadosGrid items={mySalvados} compact />
+            : <p className="text-sm text-gray-500">Sin nada salvado del borrado.</p>
+        )}
+
+        {tab === 'overrides' && (
+          <div>
+            <p className="text-xs text-gray-500 mb-3">
+              Overrides propios de este usuario (vacío = herencia normal: grupo &gt; rol &gt; biblioteca).
+            </p>
+            <div className="flex flex-col gap-2">
+              {libraries.map((l) => {
+                const saved = overrides.find((o) => o.library_id === l.id);
+                const dirty =
+                  String(limits[l.id] ?? '') !== String(saved?.limit_override ?? '') ||
+                  String(expiries[l.id] ?? '') !== String(saved?.expiry_override ?? '') ||
+                  String(monthlyLimits[l.id] ?? '') !== String(saved?.monthly_limit_override ?? '') ||
+                  String(notes[l.id] ?? '') !== String(saved?.note ?? '');
+                return (
+                  <div key={l.id} className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="text-gray-400 w-24 truncate">{l.name}</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={limits[l.id] ?? ''}
+                      onChange={(e) => setLimits({ ...limits, [l.id]: e.target.value })}
+                      className="input w-16 py-1"
+                      title="Límite"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      value={expiries[l.id] ?? ''}
+                      onChange={(e) => setExpiries({ ...expiries, [l.id]: e.target.value })}
+                      className="input w-16 py-1"
+                      placeholder="cad."
+                      title="Caducidad en días (0 = no caduca; vacío = herencia)"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      value={monthlyLimits[l.id] ?? ''}
+                      onChange={(e) => setMonthlyLimits({ ...monthlyLimits, [l.id]: e.target.value })}
+                      className="input w-16 py-1"
+                      placeholder="mes"
+                      title="Cupo mensual (0 = bloquear el mes; vacío = herencia)"
+                    />
+                    <input
+                      value={notes[l.id] ?? ''}
+                      onChange={(e) => setNotes({ ...notes, [l.id]: e.target.value })}
+                      placeholder="nota"
+                      className="input w-28 py-1"
+                    />
+                    {dirty && (
+                      <button onClick={() => saveLimit(l.id)} className="btn btn-primary py-1 px-2.5 text-xs">
+                        Guardar
+                      </button>
+                    )}
+                    {!dirty && saved && (
+                      <button onClick={() => clearLimit(l.id)} className="text-accent-400 text-xs">
+                        quitar
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              {libraries.length === 0 && <p className="text-sm text-gray-500">Sin bibliotecas activas.</p>}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -570,8 +773,6 @@ export default function Users() {
     load();
     setApplyingBulk(false);
   }
-
-  const libName = (id) => libraries.find((l) => l.id === id)?.name ?? `#${id}`;
 
   return (
     <div>
@@ -714,7 +915,6 @@ export default function Users() {
           role={roles.find((r) => r.members.includes(selectedUser.id))}
           overrides={overrides.filter((o) => o.user_id === selectedUser.id)}
           libraries={libraries}
-          libName={libName}
           onChanged={load}
           onClose={() => setSelectedUser(null)}
         />
