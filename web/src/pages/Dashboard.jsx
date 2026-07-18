@@ -10,6 +10,9 @@ import Notifications from './Notifications.jsx';
 import WhatsNewModal from '../components/WhatsNewModal.jsx';
 import { Wordmark } from '../components/Brand.jsx';
 import { IconGauge, IconSave, IconFilm, IconUsers, IconClock, IconBell, IconGear, IconLogout } from '../icons.jsx';
+import { DirtyGuardProvider, useAnyDirty } from '../DirtyGuard.jsx';
+
+const UNSAVED_WARNING = 'Hay cambios sin guardar en esta pestaña. ¿Salir igualmente?';
 
 const TABS = {
   quota: { label: 'Cupo', Icon: IconGauge, Component: Quota },
@@ -22,15 +25,30 @@ const TABS = {
 };
 
 export default function Dashboard({ onLoggedOut }) {
+  return (
+    <DirtyGuardProvider>
+      <DashboardInner onLoggedOut={onLoggedOut} />
+    </DirtyGuardProvider>
+  );
+}
+
+function DashboardInner({ onLoggedOut }) {
   const [tab, setTab] = useState('quota');
   const [version, setVersion] = useState(null);
   const { Component, label } = TABS[tab];
+  const anyDirty = useAnyDirty();
 
   useEffect(() => {
     api.version().then(setVersion).catch(() => {});
   }, []);
 
+  function goTab(key) {
+    if (key !== tab && anyDirty() && !window.confirm(UNSAVED_WARNING)) return;
+    setTab(key);
+  }
+
   async function logout() {
+    if (anyDirty() && !window.confirm(UNSAVED_WARNING)) return;
     await api.logout();
     onLoggedOut();
   }
@@ -46,7 +64,7 @@ export default function Dashboard({ onLoggedOut }) {
           {Object.entries(TABS).map(([key, { label, Icon }]) => (
             <button
               key={key}
-              onClick={() => setTab(key)}
+              onClick={() => goTab(key)}
               className={`relative flex items-center gap-5 w-full text-left px-5 py-4 rounded-xl text-[24px] leading-none font-extrabold tracking-tight transition-all ${
                 tab === key
                   ? 'bg-gradient-to-r from-accent-700 via-accent-600 to-accent-500 text-white shadow-glow'
@@ -117,7 +135,7 @@ export default function Dashboard({ onLoggedOut }) {
         {Object.entries(TABS).map(([key, { label, Icon }]) => (
           <button
             key={key}
-            onClick={() => setTab(key)}
+            onClick={() => goTab(key)}
             className={`flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] transition-colors ${
               tab === key ? 'text-accent-300' : 'text-gray-500'
             }`}

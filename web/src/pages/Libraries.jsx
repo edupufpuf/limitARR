@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { useDirty } from '../DirtyGuard.jsx';
 
 // Ajuste global de verdad (no por biblioteca): el % de episodios para dar una
 // temporada por vista aplica igual a todas las bibliotecas de series. Vive
@@ -67,6 +68,18 @@ function LibraryCard({ lib, expanded, onToggle, onSaved }) {
   const [oneSeasonPerRequest, setOneSeasonPerRequest] = useState(Boolean(lib.one_season_per_request));
   const [sequentialSeasons, setSequentialSeasons] = useState(Boolean(lib.sequential_seasons));
   const [saving, setSaving] = useState(false);
+
+  const dirty =
+    kind !== lib.kind ||
+    enabled !== Boolean(lib.enabled) ||
+    Number(defaultLimit) !== lib.default_limit ||
+    expiryEnabled !== (lib.expiry_days !== 0) ||
+    (expiryEnabled && Number(expiryDays || 0) !== (lib.expiry_days > 0 ? lib.expiry_days : 0)) ||
+    monthlyEnabled !== Boolean(lib.monthly_quota_enabled) ||
+    Number(monthlyLimit) !== lib.monthly_limit ||
+    oneSeasonPerRequest !== Boolean(lib.one_season_per_request) ||
+    sequentialSeasons !== Boolean(lib.sequential_seasons);
+  useDirty(`library-${lib.id}`, dirty);
 
   async function save() {
     setSaving(true);

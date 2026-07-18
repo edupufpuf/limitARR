@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { SalvadosGrid } from '../components/Salvados.jsx';
+import { useDirty } from '../DirtyGuard.jsx';
 
 function FichaRow({ label, children }) {
   return (
@@ -65,6 +66,16 @@ function GroupCard({ group, users, libraries, onChanged }) {
       )
     );
   }, [group, libraries]);
+
+  const overridesDirty = libraries.some((l) => {
+    const savedOverride = group.overrides.find((o) => o.library_id === l.id);
+    return (
+      String(limits[l.id] ?? '') !== String(savedOverride?.limit_override ?? '') ||
+      String(expiries[l.id] ?? '') !== String(savedOverride?.expiry_override ?? '') ||
+      String(monthlyLimits[l.id] ?? '') !== String(savedOverride?.monthly_limit_override ?? '')
+    );
+  });
+  useDirty(`group-${group.id}`, overridesDirty);
 
   async function toggleMember(userId) {
     const next = group.members.includes(userId)
@@ -231,6 +242,16 @@ function RoleCard({ role, users, libraries, onChanged }) {
     );
   }, [role, libraries]);
 
+  const overridesDirty = libraries.some((l) => {
+    const savedOverride = role.overrides.find((o) => o.library_id === l.id);
+    return (
+      String(limits[l.id] ?? '') !== String(savedOverride?.limit_override ?? '') ||
+      String(expiries[l.id] ?? '') !== String(savedOverride?.expiry_override ?? '') ||
+      String(monthlyLimits[l.id] ?? '') !== String(savedOverride?.monthly_limit_override ?? '')
+    );
+  });
+  useDirty(`role-${role.id}`, overridesDirty);
+
   async function toggleMember(userId) {
     const next = role.members.includes(userId)
       ? role.members.filter((id) => id !== userId)
@@ -386,6 +407,22 @@ function UserFichaModal({ user, group, role, allGroups, allRoles, overrides, lib
     setNotes(Object.fromEntries(libraries.map((l) => [l.id, overrides.find((o) => o.library_id === l.id)?.note ?? ''])));
   }, [overrides, libraries]);
 
+  const overridesDirty = libraries.some((l) => {
+    const saved = overrides.find((o) => o.library_id === l.id);
+    return (
+      String(limits[l.id] ?? '') !== String(saved?.limit_override ?? '') ||
+      String(expiries[l.id] ?? '') !== String(saved?.expiry_override ?? '') ||
+      String(monthlyLimits[l.id] ?? '') !== String(saved?.monthly_limit_override ?? '') ||
+      String(notes[l.id] ?? '') !== String(saved?.note ?? '')
+    );
+  });
+  useDirty(`user-ficha-${user.id}`, overridesDirty);
+
+  function requestClose() {
+    if (overridesDirty && !window.confirm('Hay overrides sin guardar. ¿Cerrar igualmente?')) return;
+    onClose();
+  }
+
   async function saveLimit(libraryId) {
     const value = limits[libraryId];
     if (value === '') {
@@ -517,7 +554,7 @@ function UserFichaModal({ user, group, role, allGroups, allRoles, overrides, lib
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-2 sm:p-4" onClick={requestClose}>
       <div
         className="card w-full max-w-4xl max-h-[90vh] overflow-y-auto p-4 sm:p-6"
         style={{ maxHeight: '90dvh' }}
@@ -536,7 +573,7 @@ function UserFichaModal({ user, group, role, allGroups, allRoles, overrides, lib
               <div className="text-xs text-gray-500 mt-0.5">Id de usuario: {user.id}</div>
             </div>
           </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-200 text-xl leading-none flex-shrink-0">✕</button>
+          <button onClick={requestClose} className="text-gray-500 hover:text-gray-200 text-xl leading-none flex-shrink-0">✕</button>
         </div>
 
         <div className="flex gap-1 mb-4 border-b border-bg-700 overflow-x-auto">

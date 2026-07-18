@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { useDirty } from '../DirtyGuard.jsx';
 
 function StatusDot({ result }) {
   if (!result) return null;
@@ -33,6 +34,22 @@ export default function Settings() {
   const [webhookUrl, setWebhookUrl] = useState('');
   const [configuringWebhook, setConfiguringWebhook] = useState(false);
   const [webhookMessage, setWebhookMessage] = useState(null);
+
+  const formDirty = Boolean(
+    settings &&
+      (form.seerr_url !== (settings.seerr_url ?? '') ||
+        form.seerr_public_url !== (settings.seerr_public_url ?? '') ||
+        form.tautulli_url !== (settings.tautulli_url ?? '') ||
+        form.tautulli_public_url !== (settings.tautulli_public_url ?? '') ||
+        form.plex_url !== (settings.plex_url ?? '') ||
+        form.seerr_api_key !== '' ||
+        form.tautulli_api_key !== '' ||
+        form.plex_token !== '')
+  );
+  useDirty('settings-connections', formDirty);
+
+  const pwDirty = Boolean(pwForm.current || pwForm.next || pwForm.confirm);
+  useDirty('settings-password', pwDirty);
 
   function load() {
     api.settings().then((s) => {

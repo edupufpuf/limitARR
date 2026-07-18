@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { useDirty } from '../DirtyGuard.jsx';
 
 function Chevron({ open }) {
   return (
@@ -98,6 +99,34 @@ export default function Notifications() {
   const [discovering, setDiscovering] = useState(false);
   const [pickUser, setPickUser] = useState({});
   const [testResult, setTestResult] = useState({});
+
+  const agentDirty = Boolean(
+    botSettings &&
+      (tokenInput !== '' ||
+        mode !== (botSettings.mode ?? 'dm') ||
+        groupChatId !== (botSettings.groupChatId ?? '') ||
+        groupTopicId !== (botSettings.groupTopicId ?? '') ||
+        noQuotaMessage !== (botSettings.noQuotaMessage ?? '') ||
+        notifyNoQuota !== (botSettings.notifyNoQuota ?? true) ||
+        notifyApproved !== (botSettings.notifyApproved ?? true) ||
+        notifyFreed !== (botSettings.notifyFreed ?? true))
+  );
+  useDirty('notifications-agent', agentDirty);
+
+  const normalizePairs = (map) => JSON.stringify(Object.entries(map).sort());
+  const mntDirty = Boolean(
+    mnt &&
+      (mntToken !== '' ||
+        mntUrl !== (mnt.url ?? '') ||
+        mntChatId !== (mnt.chatId ?? '') ||
+        mntTopicId !== (mnt.topicId ?? '') ||
+        mntSilent !== Boolean(mnt.silent) ||
+        mntSavedMessage !== (mnt.savedMessage ?? '') ||
+        mntDeleteMessage !== (mnt.deleteMessage ?? '') ||
+        mntDeleteMessageTv !== (mnt.deleteMessageTv ?? '') ||
+        normalizePairs(mntPairsMap) !== normalizePairs(Object.fromEntries((mnt.pairs ?? []).map((p) => [p.source, p.target]))))
+  );
+  useDirty('notifications-maintainerr', mntDirty);
 
   function loadLinks() {
     api.notificationLinks().then(setLinks);
