@@ -56,7 +56,7 @@ function GlobalSettings() {
   );
 }
 
-function LibraryCard({ lib, onSaved }) {
+function LibraryCard({ lib, expanded, onToggle, onSaved }) {
   const [kind, setKind] = useState(lib.kind);
   const [enabled, setEnabled] = useState(Boolean(lib.enabled));
   const [defaultLimit, setDefaultLimit] = useState(lib.default_limit);
@@ -84,19 +84,31 @@ function LibraryCard({ lib, onSaved }) {
   }
 
   return (
-    <div className="card p-4 flex flex-col">
-      <div className="flex items-center justify-between mb-3">
+    <div className="card overflow-hidden">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center justify-between gap-3 p-4 text-left hover:bg-bg-700/40 transition-colors"
+      >
         <h3 className="font-semibold">
           {lib.name} <span className="text-gray-500 text-xs">#{lib.id}</span>
           <span className="ml-2 text-gray-500 text-xs">
             {lib.section_type === 'show' ? 'serie' : 'película'}
           </span>
+          {!enabled && (
+            <span className="ml-2 text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-bg-700 text-gray-500 align-middle">
+              desactivada
+            </span>
+          )}
         </h3>
-        <label className="flex items-center gap-1 text-sm">
-          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-          activa
-        </label>
-      </div>
+        <span className="text-gray-500 text-xs flex-shrink-0">{expanded ? '▲' : '▼'}</span>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-bg-700 p-4">
+      <label className="flex items-center gap-1 text-sm mb-3">
+        <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+        activa
+      </label>
 
       <div className="flex flex-wrap items-center gap-4 mb-4">
         <div>
@@ -191,9 +203,11 @@ function LibraryCard({ lib, onSaved }) {
         </div>
       )}
 
-      <button onClick={save} disabled={saving} className="btn btn-primary mt-4 self-start">
-        {saving ? 'Guardando…' : 'Guardar'}
-      </button>
+          <button onClick={save} disabled={saving} className="btn btn-primary mt-4">
+            {saving ? 'Guardando…' : 'Guardar'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -201,6 +215,7 @@ function LibraryCard({ lib, onSaved }) {
 export default function Libraries() {
   const [libs, setLibs] = useState([]);
   const [syncing, setSyncing] = useState(false);
+  const [expanded, setExpanded] = useState(new Set());
 
   function load() {
     api.libraries().then(setLibs);
@@ -213,6 +228,14 @@ export default function Libraries() {
     await api.syncLibraries();
     load();
     setSyncing(false);
+  }
+
+  function toggle(id) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
   }
 
   return (
@@ -228,7 +251,13 @@ export default function Libraries() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {libs.map((lib) => (
-          <LibraryCard key={lib.id} lib={lib} onSaved={load} />
+          <LibraryCard
+            key={lib.id}
+            lib={lib}
+            expanded={expanded.has(lib.id)}
+            onToggle={() => toggle(lib.id)}
+            onSaved={load}
+          />
         ))}
       </div>
       {libs.length === 0 && (
