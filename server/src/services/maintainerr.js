@@ -1,6 +1,6 @@
 import { db } from '../db.js';
 import { getRawSetting, setRawSetting, mask } from '../settings.js';
-import { getSeasonInfo } from './tautulli.js';
+import { getSeasonInfo, getMediaTitle } from './tautulli.js';
 
 // Módulo Maintainerr: cuando Maintainerr mete una película en una colección de
 // borrado, avisa por Telegram con un botón "Salvar" que la mueve a la colección
@@ -218,6 +218,10 @@ async function notifyDeletionCandidate(source, target, item, { fallbackTitle = n
       seasonNumber = info.seasonNumber;
       itemTitle = `${showName} - Temporada ${seasonNumber}`;
     }
+  } else if (!itemTitle) {
+    // El regex sobre el mensaje de Maintainerr puede no matchear (formato
+    // distinto, sin comillas...) — mismo fallback por Tautulli que series.
+    itemTitle = await getMediaTitle(item.mediaServerId);
   }
   // Serie: nombrar explícitamente "la serie X (temporada N)" en vez de dejar
   // que el guion de itemTitle ("X - Temporada N") se lea ambiguo en el aviso.
@@ -437,12 +441,17 @@ async function handleSaveCallback(query) {
     const cached = pendingTitles.get(String(mediaServerId)) ?? {};
     pendingTitles.delete(String(mediaServerId));
     // Mismo motivo que el título por caché: si el proceso reinició entre el
-    // aviso y el clic no hay "Serie - Temporada N" guardado. Se recalcula en
-    // vivo contra Tautulli (igual que el webhook) en vez de guardar sin temporada.
+    // aviso y el clic no hay título guardado (ni "Serie - Temporada N" ni el
+    // de la película). Se recalcula en vivo contra Tautulli (igual que el
+    // webhook) en vez de guardar el salvado sin título.
     let liveTitle = null;
-    if (!cached.title && sourceCollection?.type !== 'movie') {
-      const info = await getSeasonInfo(mediaServerId);
-      if (info) liveTitle = `${info.showTitle} - Temporada ${info.seasonNumber}`;
+    if (!cached.title) {
+      if (sourceCollection?.type !== 'movie') {
+        const info = await getSeasonInfo(mediaServerId);
+        if (info) liveTitle = `${info.showTitle} - Temporada ${info.seasonNumber}`;
+      } else {
+        liveTitle = await getMediaTitle(mediaServerId);
+      }
     }
     const meta = {
       title: cached.title ?? liveTitle,

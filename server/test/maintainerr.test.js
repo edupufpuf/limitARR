@@ -256,6 +256,58 @@ test('webhook: temporada sin Tautulli configurado cae al título del mensaje, si
   assert.match(text, /«Breaking Bad» se borrará en 7 días/);
 });
 
+test('webhook: película sin título extraíble del mensaje se resuelve por Tautulli en vez de quedarse sin título', async () => {
+  upsertSetting.run('tautulli_url', 'http://tautulli.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
+
+  const calls = [];
+  global.fetch = async (url, options = {}) => {
+    const u = String(url);
+    calls.push({ url: u, options });
+    if (u.endsWith('/api/collections')) {
+      return new Response(JSON.stringify(COLLECTIONS), { status: 200 });
+    }
+    if (u.startsWith('http://tautulli.test')) {
+      const cmd = new URL(u).searchParams.get('cmd');
+      if (cmd === 'get_metadata') {
+        return new Response(
+          JSON.stringify({ response: { result: 'success', data: { media_type: 'movie', title: 'The Batman' } } }),
+          { status: 200 }
+        );
+      }
+      throw new Error(`unexpected tautulli cmd ${cmd}`);
+    }
+    if (u.includes('api.telegram.org')) {
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200 });
+    }
+    throw new Error(`fetch inesperado en test: ${u}`);
+  };
+
+  try {
+    await request(app)
+      .post(`/api/webhook/maintainerr/${getWebhookSecret()}`)
+      .send({
+        collectionName: 'Peliculas eliminadas en 7 días',
+        // Sin comillas: el regex del título no matchea nada.
+        message: 'A new item has been handled.',
+        dayAmount: 7,
+        mediaItems: JSON.stringify([{ mediaServerId: '9010' }]),
+      })
+      .expect(200);
+    await new Promise((r) => setTimeout(r, 50));
+
+    const tautulliCall = calls.find((c) => c.url.includes('cmd=get_metadata'));
+    assert.ok(tautulliCall, 'debería haber consultado Tautulli por el título');
+
+    const telegram = calls.find((c) => c.url.includes('api.telegram.org'));
+    const payload = JSON.parse(telegram.options.body);
+    const text = payload.caption ?? payload.text;
+    assert.match(text, /«The Batman» se borrará en 7 días/);
+  } finally {
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key')").run();
+  }
+});
+
 // --- Sondeo de respaldo: altas manuales que Maintainerr no notifica solo ---
 
 test('pollMaintainerrCollections: avisa de un ítem manual que el webhook nunca notificó, y no lo repite', async () => {

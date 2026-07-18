@@ -163,6 +163,21 @@ export async function getSeasonInfo(ratingKey) {
   }
 }
 
+// Título de una película (u otro ítem) por su rating_key — fallback en vivo
+// para el módulo Maintainerr cuando el título del mensaje de Maintainerr no
+// se pudo extraer y el proceso ya no tiene la caché en memoria de cuando se
+// mandó el aviso (reinicio de por medio). Mismo motivo que getSeasonInfo,
+// pero para el caso "no es una temporada".
+export async function getMediaTitle(ratingKey) {
+  if (!ratingKey) return null;
+  try {
+    const data = await call('get_metadata', { rating_key: ratingKey });
+    return data?.title || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getSeasonEpisodes(showRatingKey, seasonNumber) {
   if (!showRatingKey || !seasonNumber) return [];
   const seasons = await call('get_children_metadata', { rating_key: showRatingKey });
