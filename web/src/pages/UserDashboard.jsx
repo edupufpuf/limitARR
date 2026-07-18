@@ -23,14 +23,6 @@ function LibraryCard({ library, onDetail }) {
       <div className="h-2 rounded-full bg-bg-950 mt-4 overflow-hidden">
         <div className="h-full rounded-full bg-accent-500" style={{ width: `${percent}%` }} />
       </div>
-      {library.monthly?.enabled && (
-        <div
-          className={`text-[11px] mt-1.5 tabular-nums ${library.monthly.used >= library.monthly.limit ? 'text-accent-400' : 'text-gray-500'}`}
-          title="Cupo mensual: cosas aprobadas este mes, aunque se vean"
-        >
-          mensual {library.monthly.used}/{library.monthly.limit}
-        </div>
-      )}
       {library.pendingItems?.length > 0 && (
         <div className="grid grid-cols-3 sm:grid-cols-5 gap-3 mt-5">
           {library.pendingItems.map((item, index) => (
@@ -205,6 +197,40 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
           ))}
         </div>
         {quota && quota.libraries?.length === 0 && <div className="card p-6 text-gray-400">Todavía no hay cupo calculado para tu cuenta.</div>}
+
+        {quota?.libraries?.some((l) => l.monthly?.enabled) && (
+          <section className="card p-5 mt-8">
+            <h2 className="font-extrabold text-xl mb-1">📅 Cupo mensual</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Cosas aprobadas este mes por biblioteca, aunque las hayas visto ya.
+            </p>
+            <div className="grid sm:grid-cols-2 gap-4">
+              {quota.libraries
+                .filter((l) => l.monthly?.enabled)
+                .map((l) => {
+                  const pct = l.monthly.limit > 0 ? Math.max(0, Math.min(100, (l.monthly.used / l.monthly.limit) * 100)) : 0;
+                  const maxed = l.monthly.used >= l.monthly.limit;
+                  return (
+                    <div key={l.libraryId} className="rounded-xl bg-bg-950/60 p-4">
+                      <div className="flex items-center justify-between gap-4">
+                        <span className="font-semibold">{l.libraryName}</span>
+                        <div className={`text-2xl font-black tabular-nums ${maxed ? 'text-accent-400' : 'text-white'}`}>
+                          {l.monthly.used}<span className="text-sm text-gray-500 font-bold">/{l.monthly.limit}</span>
+                        </div>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-bg-800 mt-3 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${maxed ? 'bg-accent-500' : 'bg-sky-400'}`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      {maxed && <p className="text-xs text-accent-400 mt-2">Cupo del mes agotado</p>}
+                    </div>
+                  );
+                })}
+            </div>
+          </section>
+        )}
 
         {salvados.length > 0 && (
           <section className="card p-5 mt-8">
