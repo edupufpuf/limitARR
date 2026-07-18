@@ -4,7 +4,7 @@ import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { db } from '../src/db.js';
 import { getWebhookSecret } from '../src/auth.js';
-import { getSalvadosByUser, getAllSalvados } from '../src/services/maintainerr.js';
+import { getSalvadosByUser, getAllSalvados, pollMaintainerrCollections } from '../src/services/maintainerr.js';
 
 // Tests del módulo Maintainerr con la DB en memoria y global.fetch mockeado
 // (estilo eliminarr.test.js: nada de red real, ni Maintainerr ni Telegram).
@@ -201,6 +201,55 @@ test('webhook: temporada sin Plex configurado cae al título del mensaje, sin re
   const payload = JSON.parse(telegram.options.body);
   const text = payload.caption ?? payload.text;
   assert.match(text, /«Breaking Bad» se borrará en 7 días/);
+});
+
+// --- Sondeo de respaldo: altas manuales que Maintainerr no notifica solo ---
+
+test('pollMaintainerrCollections: avisa de un ítem manual que el webhook nunca notificó, y no lo repite', async () => {
+  // Por si un test anterior (el webhook normal) ya marcó 9010 como avisado.
+  db.prepare("DELETE FROM maintainerr_notified WHERE media_server_id = '9010' AND collection_id = 1").run();
+
+  const calls = [];
+  global.fetch = async (url, options = {}) => {
+    const u = String(url);
+    calls.push({ url: u, options });
+    if (u.endsWith('/api/collections')) {
+      return new Response(JSON.stringify(COLLECTIONS), { status: 200 });
+    }
+    if (u.includes('api.telegram.org')) {
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200 });
+    }
+    throw new Error(`fetch inesperado en test: ${u}`);
+  };
+
+  // mediaServerId 9010 (The Batman) ya está en COLLECTIONS (colección movie,
+  // id 1) pero nunca se marcó como avisado — simula una alta manual.
+  await pollMaintainerrCollections();
+  const telegramCalls = calls.filter((c) => c.url.includes('api.telegram.org'));
+  assert.equal(telegramCalls.length, 1);
+
+  const marked = db.prepare('SELECT 1 FROM maintainerr_notified WHERE media_server_id = ? AND collection_id = 1').get('9010');
+  assert.ok(marked, 'debería quedar marcado como avisado');
+
+  // Segunda pasada: mismo estado de la colección, no debería volver a avisar.
+  await pollMaintainerrCollections();
+  assert.equal(calls.filter((c) => c.url.includes('api.telegram.org')).length, 1);
+});
+
+test('pollMaintainerrCollections: si el ítem sale de la colección, se limpia la marca (avisaría de nuevo si vuelve)', async () => {
+  db.prepare("INSERT OR IGNORE INTO maintainerr_notified (media_server_id, collection_id) VALUES ('9099', 1)").run();
+
+  global.fetch = async (url) => {
+    const u = String(url);
+    if (u.endsWith('/api/collections')) {
+      return new Response(JSON.stringify(COLLECTIONS), { status: 200 }); // 9099 no está en su media[]
+    }
+    throw new Error(`fetch inesperado en test: ${u}`);
+  };
+
+  await pollMaintainerrCollections();
+  const marked = db.prepare("SELECT 1 FROM maintainerr_notified WHERE media_server_id = '9099' AND collection_id = 1").get();
+  assert.equal(marked, undefined);
 });
 
 test('webhook: alta en la propia colección de salvados se ignora (sin bucle)', async () => {

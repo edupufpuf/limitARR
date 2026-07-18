@@ -131,6 +131,20 @@ db.exec(`
     text TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- Maintainerr solo dispara su webhook "Media Added" cuando es su propio
+  -- motor de reglas el que mete el media en la colección de borrado — una
+  -- alta manual (arrastrar un ítem a la colección a mano) no lo dispara y se
+  -- quedaba sin aviso de Telegram. Este registro es la marca de "ya avisado"
+  -- para el sondeo de respaldo (pollMaintainerrCollections en maintainerr.js),
+  -- que revisa las colecciones origen periódicamente y avisa de lo que el
+  -- webhook se haya saltado, sin duplicar avisos ya mandados.
+  CREATE TABLE IF NOT EXISTS maintainerr_notified (
+    media_server_id TEXT NOT NULL,
+    collection_id INTEGER NOT NULL,
+    notified_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (media_server_id, collection_id)
+  );
 `);
 
 // Migraciones para bases de datos ya desplegadas antes de que existiera la columna.

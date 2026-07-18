@@ -164,6 +164,75 @@ function parseMediaItems(body) {
   }
 }
 
+const getNotifiedIds = db.prepare('SELECT media_server_id FROM maintainerr_notified WHERE collection_id = ?');
+const insertNotified = db.prepare(`
+  INSERT OR IGNORE INTO maintainerr_notified (media_server_id, collection_id) VALUES (?, ?)
+`);
+const deleteNotified = db.prepare(
+  'DELETE FROM maintainerr_notified WHERE media_server_id = ? AND collection_id = ?'
+);
+
+// Título/póster + envío del aviso de Telegram para UN ítem candidato a
+// borrarse. La usan tanto el webhook (altas por regla) como el sondeo de
+// respaldo pollMaintainerrCollections más abajo (altas manuales, que
+// Maintainerr no notifica solo — ver esa función). fallbackTitle es el
+// título suelto del mensaje del webhook si lo hay; el sondeo no tiene
+// mensaje, así que siempre resuelve por Plex o se queda sin título.
+async function notifyDeletionCandidate(source, target, item, { fallbackTitle = null, deleteDaysOverride } = {}) {
+  const { deleteMessage } = getMaintainerrSettings();
+  const sourceMedia = source.media?.find((m) => m.mediaServerId === item.mediaServerId);
+  const deleteDays = deleteDaysOverride ?? source.deleteAfterDays;
+  const diasTexto = deleteDays ? ` en ${deleteDays} días` : '';
+  const isSeason = source.type !== 'movie';
+
+  // Issue: Salvadas para series, siempre por temporada. Maintainerr no da
+  // seasonNumber ni el título de la serie sueltos en su "media" (solo
+  // tmdbId a nivel de serie), así que "Serie - Temporada N" sale de
+  // consultar Plex por el ratingKey (mediaServerId) del ítem: parentTitle
+  // = nombre de la serie, index = número de temporada. Sin Plex configurado
+  // o si falla, se cae al título compartido del mensaje (sin temporada).
+  let itemTitle = fallbackTitle ?? null;
+  if (isSeason) {
+    const meta = await getPlexMetadata(item.mediaServerId);
+    if (meta?.parentTitle && Number.isFinite(meta.index)) {
+      itemTitle = `${meta.parentTitle} - Temporada ${meta.index}`;
+    }
+  }
+  const tituloTexto = itemTitle ? `«${itemTitle}»` : isSeason ? 'Esta temporada' : 'Esta película';
+
+  const text = target
+    ? deleteMessage
+        .replace(/{titulo}/g, tituloTexto)
+        .replace(/{dias}/g, diasTexto)
+        .replace(/{diasSalvado}/g, String(target.deleteAfterDays ?? ''))
+    : `🎬 ${tituloTexto} se borrará${diasTexto}.\n\n⚠️ Sin colección de salvados configurada para "${source.title}" — no se puede salvar.`;
+  const replyMarkup = target
+    ? {
+        inline_keyboard: [
+          [{ text: '💾 Salvar', callback_data: `save:${item.mediaServerId}:${source.id}:${target.id}` }],
+        ],
+      }
+    : undefined;
+
+  try {
+    // El título viaja también en el registro de salvados al pulsar el botón,
+    // así que se guarda aparte del mensaje (el caption es editable por Telegram).
+    pendingTitles.set(String(item.mediaServerId), {
+      title: itemTitle,
+      tmdbId: sourceMedia?.tmdbId ?? null,
+      posterUrl: sourceMedia?.image_path ?? null,
+      libraryId: source.libraryId != null ? Number(source.libraryId) : null,
+    });
+    if (sourceMedia?.image_path) {
+      await sendPhotoToGroup(sourceMedia.image_path, text, replyMarkup);
+    } else {
+      await sendToGroup(text, replyMarkup);
+    }
+  } catch (err) {
+    console.error('[maintainerr] error mandando mensaje Telegram:', err.message);
+  }
+}
+
 export async function handleMaintainerrWebhook(body) {
   if (!isEnabled()) return;
   const mediaItems = parseMediaItems(body);
@@ -172,7 +241,7 @@ export async function handleMaintainerrWebhook(body) {
     return;
   }
 
-  const { pairs, deleteMessage } = getMaintainerrSettings();
+  const { pairs } = getMaintainerrSettings();
   // Ignorar altas en las propias colecciones de salvados (evita bucle:
   // salvar → add → webhook → otro aviso).
   if (pairs.some((p) => p.target === body.collectionName)) return;
@@ -190,63 +259,57 @@ export async function handleMaintainerrWebhook(body) {
 
   // Maintainerr no manda el título suelto, solo embebido en su mensaje:
   // "'Título' has been added to 'Colección'. ..." — el ancla tras la última
-  // comilla aguanta títulos con apóstrofes. Sirve tal cual para película (un
-  // único item por aviso); para series (colección type 'season') es solo un
-  // fallback compartido — cada item se resuelve aparte más abajo, porque el
-  // mismo mensaje puede llegar a cubrir temporadas distintas.
+  // comilla aguanta títulos con apóstrofes.
   const fallbackTitle = /'(.+)' has been added to '/.exec(body.message ?? '')?.[1];
-  const deleteDays = body.dayAmount ?? source.deleteAfterDays;
-  const diasTexto = deleteDays ? ` en ${deleteDays} días` : '';
-  const isSeason = source.type !== 'movie';
 
   for (const item of mediaItems) {
-    const sourceMedia = source.media?.find((m) => m.mediaServerId === item.mediaServerId);
+    await notifyDeletionCandidate(source, target, item, { fallbackTitle, deleteDaysOverride: body.dayAmount });
+    // Marca "ya avisado" para que el sondeo de respaldo no lo repita.
+    insertNotified.run(String(item.mediaServerId), source.id);
+  }
+}
 
-    // Issue: Salvadas para series, siempre por temporada. Maintainerr no da
-    // seasonNumber ni el título de la serie sueltos en su "media" (solo
-    // tmdbId a nivel de serie), así que "Serie - Temporada N" sale de
-    // consultar Plex por el ratingKey (mediaServerId) del ítem: parentTitle
-    // = nombre de la serie, index = número de temporada. Sin Plex configurado
-    // o si falla, se cae al título compartido del mensaje (sin temporada).
-    let itemTitle = fallbackTitle ?? null;
-    if (isSeason) {
-      const meta = await getPlexMetadata(item.mediaServerId);
-      if (meta?.parentTitle && Number.isFinite(meta.index)) {
-        itemTitle = `${meta.parentTitle} - Temporada ${meta.index}`;
-      }
+// Maintainerr solo dispara su webhook "Media Added To Collection" cuando es
+// su propio motor de reglas el que mete el ítem en la colección de borrado —
+// una alta MANUAL (arrastrar/añadir un ítem a mano en su panel) no lo
+// dispara, y se quedaba sin aviso de Telegram (confirmado en logs: la alta
+// por regla loguea "WebhookAgent: Sending webhook notification" justo
+// después de añadir el media; una alta manual no). Este sondeo de respaldo
+// (cada 5 min, ver startMaintainerrPoller) revisa las colecciones origen
+// configuradas y avisa de lo que encuentre sin avisar todavía, marcándolo en
+// maintainerr_notified para no duplicar avisos ni con el webhook ni entre
+// sondeos. Si un ítem sale de la colección (salvado o quitado a mano) se
+// limpia su marca, así que si vuelve a entrar se avisa de nuevo.
+export async function pollMaintainerrCollections() {
+  if (!isEnabled()) return;
+  const { pairs } = getMaintainerrSettings();
+  if (pairs.length === 0) return;
+
+  let collections;
+  try {
+    collections = await listCollections();
+  } catch (err) {
+    console.error('[maintainerr] sondeo de colecciones falló:', err.message);
+    return;
+  }
+
+  for (const pair of pairs) {
+    const source = collections.find((c) => c.title === pair.source);
+    if (!source) continue;
+    const target = collections.find((c) => c.title === pair.target) ?? null;
+    const media = source.media ?? [];
+    const currentIds = new Set(media.map((m) => String(m.mediaServerId)));
+    const notifiedIds = getNotifiedIds.all(source.id).map((r) => r.media_server_id);
+
+    for (const id of notifiedIds) {
+      if (!currentIds.has(id)) deleteNotified.run(id, source.id);
     }
-    const tituloTexto = itemTitle ? `«${itemTitle}»` : isSeason ? 'Esta temporada' : 'Esta película';
 
-    const text = target
-      ? deleteMessage
-          .replace(/{titulo}/g, tituloTexto)
-          .replace(/{dias}/g, diasTexto)
-          .replace(/{diasSalvado}/g, String(target.deleteAfterDays ?? ''))
-      : `🎬 ${tituloTexto} se borrará${diasTexto}.\n\n⚠️ Sin colección de salvados configurada para "${body.collectionName}" — no se puede salvar.`;
-    const replyMarkup = target
-      ? {
-          inline_keyboard: [
-            [{ text: '💾 Salvar', callback_data: `save:${item.mediaServerId}:${source.id}:${target.id}` }],
-          ],
-        }
-      : undefined;
-
-    try {
-      // El título viaja también en el registro de salvados al pulsar el botón,
-      // así que se guarda aparte del mensaje (el caption es editable por Telegram).
-      pendingTitles.set(String(item.mediaServerId), {
-        title: itemTitle,
-        tmdbId: sourceMedia?.tmdbId ?? null,
-        posterUrl: sourceMedia?.image_path ?? null,
-        libraryId: source.libraryId != null ? Number(source.libraryId) : null,
-      });
-      if (sourceMedia?.image_path) {
-        await sendPhotoToGroup(sourceMedia.image_path, text, replyMarkup);
-      } else {
-        await sendToGroup(text, replyMarkup);
-      }
-    } catch (err) {
-      console.error('[maintainerr] error mandando mensaje Telegram:', err.message);
+    for (const item of media) {
+      const id = String(item.mediaServerId);
+      if (notifiedIds.includes(id)) continue;
+      await notifyDeletionCandidate(source, target, item);
+      insertNotified.run(id, source.id);
     }
   }
 }
@@ -440,4 +503,10 @@ export function startMaintainerrPoller() {
     setTimeout(loop, token ? 500 : 5000);
   }
   loop();
+
+  // Sondeo de respaldo cada 5 min para altas manuales (ver pollMaintainerrCollections);
+  // no compite con el long-poll de arriba, que es solo para los clics del botón Salvar.
+  setInterval(() => {
+    pollMaintainerrCollections().catch((err) => console.error('[maintainerr] sondeo de colecciones falló:', err.message));
+  }, 5 * 60 * 1000);
 }
