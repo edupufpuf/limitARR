@@ -42,36 +42,42 @@ function isBlocked(user) {
 const STAT_TILES = {
   all: {
     label: 'usuarios',
+    description: 'Usuarios de Tautulli con cupo calculado.',
     tone: 'from-sky-500/25 via-sky-500/10 to-bg-800 border-sky-400/30 text-sky-100',
     icon: 'bg-sky-400/20 text-sky-100',
   },
   pending: {
     label: 'sin ver',
+    description: 'Cosas aprobadas que el usuario todavía no se ha visto (siguen ocupando cupo).',
     tone: 'from-amber-400/25 via-amber-500/10 to-bg-800 border-amber-300/30 text-amber-100',
     icon: 'bg-amber-300/20 text-amber-100',
   },
   blocked: {
     label: 'sin saldo',
+    description: 'Usuarios que ahora mismo tienen el cupo a 0 en alguna biblioteca: la próxima solicitud se rechazaría.',
     tone: 'from-accent-500/30 via-accent-500/10 to-bg-800 border-accent-400/40 text-red-100',
     icon: 'bg-accent-400/20 text-red-100',
   },
   approved7d: {
     label: 'aprobadas · 7d',
+    description: 'Solicitudes que limitARR aprobó automáticamente en los últimos 7 días.',
     tone: 'from-emerald-400/25 via-emerald-500/10 to-bg-800 border-emerald-300/30 text-emerald-100',
     icon: 'bg-emerald-300/20 text-emerald-100',
   },
   blocked7d: {
     label: 'sin cupo · 7d',
+    description: 'Aprobaciones NO hechas en los últimos 7 días por falta de saldo (el usuario ya no tenía cupo cuando pidió esto).',
     tone: 'from-fuchsia-400/25 via-fuchsia-500/10 to-bg-800 border-fuchsia-300/30 text-fuchsia-100',
     icon: 'bg-fuchsia-300/20 text-fuchsia-100',
   },
 };
 
-function StatTile({ label, value, Icon, tone, iconTone, active, onClick }) {
+function StatTile({ label, description, value, Icon, tone, iconTone, active, onClick }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      title={description}
       className={`card px-4 py-3 flex items-center gap-3 min-w-0 text-left bg-gradient-to-br transition-all hover:-translate-y-0.5 hover:border-white/20 ${tone} ${active ? 'ring-2 ring-white/30' : ''}`}
     >
       <span className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${iconTone}`}>
@@ -1055,6 +1061,7 @@ export default function Quota() {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-3">
             <StatTile
               label={STAT_TILES.all.label}
+              description={STAT_TILES.all.description}
               value={stats.users}
               Icon={IconUsers}
               tone={STAT_TILES.all.tone}
@@ -1064,6 +1071,7 @@ export default function Quota() {
             />
             <StatTile
               label={STAT_TILES.pending.label}
+              description={STAT_TILES.pending.description}
               value={stats.outstanding}
               Icon={IconEye}
               tone={STAT_TILES.pending.tone}
@@ -1073,6 +1081,7 @@ export default function Quota() {
             />
             <StatTile
               label={STAT_TILES.blocked.label}
+              description={STAT_TILES.blocked.description}
               value={stats.usersBlocked}
               Icon={IconBan}
               tone={STAT_TILES.blocked.tone}
@@ -1082,6 +1091,7 @@ export default function Quota() {
             />
             <StatTile
               label={STAT_TILES.approved7d.label}
+              description={STAT_TILES.approved7d.description}
               value={stats.approved7d}
               Icon={IconCheckCircle}
               tone={STAT_TILES.approved7d.tone}
@@ -1091,6 +1101,7 @@ export default function Quota() {
             />
             <StatTile
               label={STAT_TILES.blocked7d.label}
+              description={STAT_TILES.blocked7d.description}
               value={stats.blocked7d}
               Icon={IconXCircle}
               tone={STAT_TILES.blocked7d.tone}
