@@ -72,28 +72,13 @@ const STAT_TILES = {
   },
 };
 
-// Botoncito "?" en vez de tooltip por hover: en móvil el hover no existe, y
-// aquí se mira mucho desde el móvil.
-function StatTile({ label, description, value, Icon, tone, iconTone, active, onClick }) {
-  const [showInfo, setShowInfo] = useState(false);
+function StatTile({ label, value, Icon, tone, iconTone, active, onClick }) {
   return (
-    <div
-      role="button"
-      tabIndex={0}
+    <button
+      type="button"
       onClick={onClick}
-      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onClick()}
-      className={`relative card px-4 py-3 flex items-center gap-3 min-w-0 text-left bg-gradient-to-br transition-all hover:-translate-y-0.5 hover:border-white/20 cursor-pointer ${tone} ${active ? 'ring-2 ring-white/30' : ''}`}
+      className={`card px-4 py-3 flex items-center gap-3 min-w-0 text-left bg-gradient-to-br transition-all hover:-translate-y-0.5 hover:border-white/20 ${tone} ${active ? 'ring-2 ring-white/30' : ''}`}
     >
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          setShowInfo((v) => !v);
-        }}
-        className="absolute top-1.5 right-1.5 w-3.5 h-3.5 rounded-full bg-black/30 text-current/90 text-[8px] leading-none flex items-center justify-center hover:bg-black/50"
-      >
-        ?
-      </button>
       <span className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${iconTone}`}>
         <Icon className="w-5 h-5" />
       </span>
@@ -101,15 +86,7 @@ function StatTile({ label, description, value, Icon, tone, iconTone, active, onC
         <div className="text-2xl font-bold tabular-nums leading-tight">{value}</div>
         <div className="text-[11px] uppercase tracking-wider text-current/70 truncate">{label}</div>
       </div>
-      {showInfo && (
-        <div
-          onClick={(e) => e.stopPropagation()}
-          className="absolute z-10 top-full left-0 mt-1 w-56 p-2 rounded-lg bg-bg-950 border border-bg-600 text-[11px] normal-case tracking-normal text-gray-300 shadow-lg"
-        >
-          {description}
-        </div>
-      )}
-    </div>
+    </button>
   );
 }
 
@@ -1083,7 +1060,6 @@ export default function Quota() {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-3">
             <StatTile
               label={STAT_TILES.all.label}
-              description={STAT_TILES.all.description}
               value={stats.users}
               Icon={IconUsers}
               tone={STAT_TILES.all.tone}
@@ -1093,7 +1069,6 @@ export default function Quota() {
             />
             <StatTile
               label={STAT_TILES.pending.label}
-              description={STAT_TILES.pending.description}
               value={stats.outstanding}
               Icon={IconEye}
               tone={STAT_TILES.pending.tone}
@@ -1103,7 +1078,6 @@ export default function Quota() {
             />
             <StatTile
               label={STAT_TILES.blocked.label}
-              description={STAT_TILES.blocked.description}
               value={stats.usersBlocked}
               Icon={IconBan}
               tone={STAT_TILES.blocked.tone}
@@ -1113,7 +1087,6 @@ export default function Quota() {
             />
             <StatTile
               label={STAT_TILES.approved7d.label}
-              description={STAT_TILES.approved7d.description}
               value={stats.approved7d}
               Icon={IconCheckCircle}
               tone={STAT_TILES.approved7d.tone}
@@ -1123,7 +1096,6 @@ export default function Quota() {
             />
             <StatTile
               label={STAT_TILES.blocked7d.label}
-              description={STAT_TILES.blocked7d.description}
               value={stats.blocked7d}
               Icon={IconXCircle}
               tone={STAT_TILES.blocked7d.tone}
@@ -1132,13 +1104,14 @@ export default function Quota() {
               onClick={() => selectFilter('blocked7d')}
             />
           </div>
-          {activeFilter !== 'all' && (
-            <div className="mb-4">
-              <button onClick={() => setActiveFilter('all')} className="text-xs text-gray-400 hover:text-gray-200">
-                Mostrando {STAT_TILES[activeFilter].label.toLowerCase()} · quitar filtro
+          <div className="mb-4 text-xs text-gray-500">
+            {STAT_TILES[activeFilter].description}
+            {activeFilter !== 'all' && (
+              <button onClick={() => setActiveFilter('all')} className="ml-2 text-gray-400 hover:text-gray-200 underline">
+                quitar filtro
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </>
       )}
 
