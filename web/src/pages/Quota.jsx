@@ -72,14 +72,28 @@ const STAT_TILES = {
   },
 };
 
+// Botoncito "?" en vez de tooltip por hover: en móvil el hover no existe, y
+// aquí se mira mucho desde el móvil.
 function StatTile({ label, description, value, Icon, tone, iconTone, active, onClick }) {
+  const [showInfo, setShowInfo] = useState(false);
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
-      title={description}
-      className={`card px-4 py-3 flex items-center gap-3 min-w-0 text-left bg-gradient-to-br transition-all hover:-translate-y-0.5 hover:border-white/20 ${tone} ${active ? 'ring-2 ring-white/30' : ''}`}
+      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onClick()}
+      className={`relative card px-4 py-3 flex items-center gap-3 min-w-0 text-left bg-gradient-to-br transition-all hover:-translate-y-0.5 hover:border-white/20 cursor-pointer ${tone} ${active ? 'ring-2 ring-white/30' : ''}`}
     >
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setShowInfo((v) => !v);
+        }}
+        className="absolute top-1.5 right-1.5 w-3.5 h-3.5 rounded-full bg-black/30 text-current/90 text-[8px] leading-none flex items-center justify-center hover:bg-black/50"
+      >
+        ?
+      </button>
       <span className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${iconTone}`}>
         <Icon className="w-5 h-5" />
       </span>
@@ -87,7 +101,15 @@ function StatTile({ label, description, value, Icon, tone, iconTone, active, onC
         <div className="text-2xl font-bold tabular-nums leading-tight">{value}</div>
         <div className="text-[11px] uppercase tracking-wider text-current/70 truncate">{label}</div>
       </div>
-    </button>
+      {showInfo && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="absolute z-10 top-full left-0 mt-1 w-56 p-2 rounded-lg bg-bg-950 border border-bg-600 text-[11px] normal-case tracking-normal text-gray-300 shadow-lg"
+        >
+          {description}
+        </div>
+      )}
+    </div>
   );
 }
 
