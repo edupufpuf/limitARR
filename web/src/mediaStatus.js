@@ -20,7 +20,7 @@ const QUEUE_STATUS = {
 };
 const PENDING = { label: 'Pendiente de descarga', color: 'text-yellow-300', bg: 'bg-yellow-600', chipText: 'text-yellow-950' };
 const NONE = { label: 'Sin descargar', color: 'text-gray-300', bg: 'bg-gray-600', chipText: 'text-white' };
-// item.radarrLabel: el status de Radarr tal cual (En cines/Anunciada/...),
+// item.radarrLabel: el "Estado" de Radarr tal cual (No disponible/Falta/...),
 // cuando no hay nada en cola — más preciso que el "pendiente" genérico.
 // Requiere radarr_url/radarr_api_key en Configuración (opcional); sin eso
 // llega null y se cae a PENDING como antes. Ver movieAvailability en seerr.js.

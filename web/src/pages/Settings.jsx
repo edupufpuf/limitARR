@@ -225,7 +225,7 @@ export default function Settings() {
           <legend className="text-sm font-semibold text-accent-400 mb-2">Radarr <span className="text-gray-600 font-normal">(opcional)</span></legend>
           <p className="text-xs text-gray-500 mb-2">
             Solo para la etiqueta de estado de pendientes: sin nada descargándose, muestra
-            lo que dice Radarr (En cines, Anunciada...) en vez de un "pendiente" genérico.
+            lo que dice Radarr (No disponible, Falta...) en vez de un "pendiente" genérico.
           </p>
           <label className="label">URL</label>
           <input

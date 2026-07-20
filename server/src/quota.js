@@ -233,7 +233,7 @@ export function computeBalance(limit, approvedRows, watchedTitles, unavailableTm
       // ver movieAvailability. null = nada en cola ahora mismo.
       queueStatus: r.tmdb_id != null ? availability?.get(r.tmdb_id)?.queueStatus ?? null : null,
       // Estado real de Radarr (opcional, requiere radarr_url/radarr_api_key en
-      // Configuración) cuando no hay nada en cola — "En cines", "Anunciada"...
+      // Configuración) cuando no hay nada en cola — "No disponible", "Falta"...
       // en vez de un "pendiente de descarga" genérico. Ver movieAvailability.
       radarrLabel: r.tmdb_id != null ? availability?.get(r.tmdb_id)?.radarrLabel ?? null : null,
       // Issue #7: % de avance del solicitante, para la rueda de la carátula.

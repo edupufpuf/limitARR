@@ -68,11 +68,12 @@ test('getMovieAvailability: status 3 sin downloadStatus no trae queueStatus', as
 });
 
 // Bug real (caso Toy Story 5): sin nada en cola, se caía a un "pendiente de
-// descarga" genérico aunque Radarr sepa perfectamente por qué (en cines pero
-// sin estreno digital todavía) — ahora, si Radarr está configurado, se usa su
-// propio status tal cual. Verificado contra Radarr real de producción antes de
-// implementar (curl a /api/v3/movie/31: status "inCinemas", hasFile false).
-test('getMovieAvailability: con Radarr configurado, usa su status cuando no hay cola', async () => {
+// descarga" genérico. La app de Radarr real muestra "Estado: No Disponible"
+// para esta película (isAvailable=false) — NO es el status de estreno
+// (inCinemas/released), es un campo aparte según isAvailable/monitored/hasFile.
+// Verificado contra Radarr real de producción antes de implementar (curl a
+// /api/v3/movie/31: isAvailable false, monitored true, hasFile false).
+test('getMovieAvailability: con Radarr configurado, usa su "Estado" cuando no hay cola', async () => {
   updateSettings({ radarr_url: 'http://radarr.test', radarr_api_key: 'k' });
   const originalFetch = global.fetch;
   global.fetch = async (input) => {
@@ -83,14 +84,40 @@ test('getMovieAvailability: con Radarr configurado, usa su status cuando no hay 
       }), { status: 200 });
     }
     if (url === 'http://radarr.test/api/v3/movie/42') {
-      return new Response(JSON.stringify({ status: 'inCinemas', hasFile: false }), { status: 200 });
+      return new Response(JSON.stringify({ status: 'inCinemas', isAvailable: false, monitored: true, hasFile: false }), { status: 200 });
     }
     throw new Error(`unexpected fetch ${url}`);
   };
 
   try {
     const availability = await getMovieAvailability([800], false);
-    assert.equal(availability.get(800).radarrLabel, 'En cines');
+    assert.equal(availability.get(800).radarrLabel, 'No disponible');
+  } finally {
+    global.fetch = originalFetch;
+    setRawSetting('radarr_url', '');
+    setRawSetting('radarr_api_key', '');
+  }
+});
+
+test('getMovieAvailability: Radarr "Falta" cuando ya cumple isAvailable pero sin archivo', async () => {
+  updateSettings({ radarr_url: 'http://radarr.test', radarr_api_key: 'k' });
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url === 'http://seerr.test/api/v1/movie/802') {
+      return new Response(JSON.stringify({
+        mediaInfo: { status: 3, downloadStatus: [], externalServiceId: 44 },
+      }), { status: 200 });
+    }
+    if (url === 'http://radarr.test/api/v3/movie/44') {
+      return new Response(JSON.stringify({ status: 'released', isAvailable: true, monitored: true, hasFile: false }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const availability = await getMovieAvailability([802], false);
+    assert.equal(availability.get(802).radarrLabel, 'Falta');
   } finally {
     global.fetch = originalFetch;
     setRawSetting('radarr_url', '');
