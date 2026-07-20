@@ -9,11 +9,11 @@ const QUEUE_STATUS = {
   queued: { label: 'En cola', color: 'text-yellow-300', bg: 'bg-yellow-500/20 ring-1 ring-inset ring-yellow-500/40' },
   paused: { label: 'Pausado', color: 'text-gray-300', bg: 'bg-gray-500/20 ring-1 ring-inset ring-gray-500/40' },
   delay: { label: 'Retrasado', color: 'text-orange-300', bg: 'bg-orange-500/20 ring-1 ring-inset ring-orange-500/40' },
-  downloadClientUnavailable: { label: 'Cliente caído', color: 'text-red-300', bg: 'bg-red-500/20 ring-1 ring-inset ring-red-500/40' },
+  downloadClientUnavailable: { label: 'Cliente caído', color: 'text-rose-300', bg: 'bg-rose-500/20 ring-1 ring-inset ring-rose-500/40' },
   completed: { label: 'Importando', color: 'text-teal-300', bg: 'bg-teal-500/20 ring-1 ring-inset ring-teal-500/40' },
   failed: { label: 'Fallo de descarga', color: 'text-red-300', bg: 'bg-red-500/20 ring-1 ring-inset ring-red-500/40' },
-  warning: { label: 'Aviso', color: 'text-orange-300', bg: 'bg-orange-500/20 ring-1 ring-inset ring-orange-500/40' },
-  fallback: { label: 'Buscando alternativa', color: 'text-yellow-300', bg: 'bg-yellow-500/20 ring-1 ring-inset ring-yellow-500/40' },
+  warning: { label: 'Aviso', color: 'text-fuchsia-300', bg: 'bg-fuchsia-500/20 ring-1 ring-inset ring-fuchsia-500/40' },
+  fallback: { label: 'Buscando alternativa', color: 'text-lime-300', bg: 'bg-lime-500/20 ring-1 ring-inset ring-lime-500/40' },
 };
 const PENDING = { label: 'Pendiente de descarga', color: 'text-yellow-300', bg: 'bg-yellow-500/20 ring-1 ring-inset ring-yellow-500/40' };
 const NONE = { label: 'Sin descargar', color: 'text-gray-300', bg: 'bg-gray-500/20 ring-1 ring-inset ring-gray-500/40' };
