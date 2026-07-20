@@ -184,7 +184,7 @@ function PendingPoster({ item, onDetail, onDismiss }) {
           <span className="min-w-0 max-w-full truncate rounded bg-indigo-600 px-1 py-0.5 text-[7px] leading-none font-semibold uppercase tracking-wide text-white">
             no cuenta
           </span>
-          <span className={`min-w-0 max-w-full truncate rounded px-1 py-0.5 text-[7px] leading-none font-semibold uppercase tracking-wide ${downloadStatusBg(item)} ${downloadStatusChipText(item)}`}>
+          <span className={`min-w-0 max-w-full line-clamp-2 rounded px-1 py-0.5 text-[7px] leading-tight font-semibold uppercase tracking-wide ${downloadStatusBg(item)} ${downloadStatusChipText(item)}`}>
             {downloadStatusLabel(item)}
           </span>
         </div>
