@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { IconSearch, IconUsers, IconEye, IconBan, IconCheckCircle, IconXCircle } from '../icons.jsx';
 import { SalvadosGrid } from '../components/Salvados.jsx';
-import { downloadStatusLabel, downloadStatusColor } from '../mediaStatus.js';
+import { downloadStatusLabel, downloadStatusColor, downloadStatusBg } from '../mediaStatus.js';
 
 // Recarga entera tras suplantar: la sesión (cookie) ya quedó en role='user' en
 // el servidor, y App.jsx solo lee /auth/me al montar — el reload es más simple
@@ -175,16 +175,16 @@ function PendingPoster({ item, onDetail, onDismiss }) {
         <div className="w-full h-full bg-gradient-to-br from-bg-600 to-bg-700 flex items-center justify-center text-xl">🎬</div>
       )}
       {item.pendingApproval && (
-        <span className="absolute top-1 left-1 rounded bg-black/75 px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-violet-300 pointer-events-none">
+        <span className="absolute top-1 left-1 rounded bg-violet-500/20 ring-1 ring-inset ring-violet-500/40 px-1 py-px text-[6px] font-semibold uppercase tracking-wide text-violet-300 pointer-events-none">
           Pdte. Aprobar
         </span>
       )}
       {item.unavailable && (
-        <div className="absolute top-1 left-1 flex flex-col items-start gap-1 pointer-events-none">
-          <span className="rounded bg-black/75 px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-amber-300">
+        <div className="absolute top-1 left-1 flex flex-col items-start gap-0.5 pointer-events-none">
+          <span className="rounded bg-amber-500/20 ring-1 ring-inset ring-amber-500/40 px-1 py-px text-[6px] font-semibold uppercase tracking-wide text-amber-300">
             no cuenta
           </span>
-          <span className={`rounded bg-black/75 px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide ${downloadStatusColor(item)}`}>
+          <span className={`rounded px-1 py-px text-[6px] font-semibold uppercase tracking-wide ${downloadStatusColor(item)} ${downloadStatusBg(item)}`}>
             {downloadStatusLabel(item)}
           </span>
         </div>

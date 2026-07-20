@@ -4,7 +4,7 @@ import { Wordmark } from '../components/Brand.jsx';
 import { IconBell, IconLogout } from '../icons.jsx';
 import { PendingDetailModal } from './Quota.jsx';
 import { SalvadosGrid } from '../components/Salvados.jsx';
-import { downloadStatusLabel, downloadStatusColor } from '../mediaStatus.js';
+import { downloadStatusLabel, downloadStatusColor, downloadStatusBg } from '../mediaStatus.js';
 
 function LibraryCard({ library, onDetail }) {
   const percent = library.limitApplied > 0 ? Math.max(0, Math.min(100, (library.balance / library.limitApplied) * 100)) : 0;
@@ -47,11 +47,11 @@ function LibraryCard({ library, onDetail }) {
                   />
                 ) : <div className="h-full w-full bg-gradient-to-br from-bg-600 to-bg-800" />}
                 {(item.unavailable || item.pendingApproval) && (
-                  <div className="absolute left-1 top-1 flex max-w-[calc(100%-0.5rem)] flex-col items-start gap-1">
-                    <span className="rounded bg-black/80 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-300">
+                  <div className="absolute left-1 top-1 flex max-w-[calc(100%-0.5rem)] flex-col items-start gap-0.5">
+                    <span className="rounded bg-amber-500/20 ring-1 ring-inset ring-amber-500/40 px-1 py-px text-[6px] font-bold uppercase tracking-wide text-amber-300">
                       No cuenta
                     </span>
-                    <span className={`rounded bg-black/80 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${item.pendingApproval ? 'text-violet-300' : downloadStatusColor(item)}`}>
+                    <span className={`rounded px-1 py-px text-[6px] font-semibold uppercase tracking-wide ${item.pendingApproval ? 'text-violet-300 bg-violet-500/20 ring-1 ring-inset ring-violet-500/40' : `${downloadStatusColor(item)} ${downloadStatusBg(item)}`}`}>
                       {item.pendingApproval ? 'Pdte. de aprobar' : downloadStatusLabel(item)}
                     </span>
                   </div>
