@@ -32,3 +32,37 @@ test('getMovieAvailability: usa status4k para bibliotecas 4K, status para están
     global.fetch = originalFetch;
   }
 });
+
+// Bug real (caso Toy Story 5, sin estrenar): status 3 (PROCESSING) solo dice
+// que Radarr monitoriza la petición, no que haya descarga activa. Sin mirar
+// downloadStatus (cola real de Radarr/Sonarr) el panel decía "Descargando"
+// para algo que ni siquiera se puede empezar a bajar todavía.
+test('getMovieAvailability: status 3 sin downloadStatus no cuenta como "downloading"', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url === 'http://seerr.test/api/v1/movie/700') {
+      return new Response(JSON.stringify({
+        mediaInfo: { status: 3, downloadStatus: [] },
+      }), { status: 200 });
+    }
+    if (url === 'http://seerr.test/api/v1/movie/701') {
+      return new Response(JSON.stringify({
+        mediaInfo: { status: 3, downloadStatus: [{ status: 'downloading', title: 'X' }] },
+      }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const notYet = await getMovieAvailability([700], false);
+    assert.equal(notYet.get(700).status, 3);
+    assert.equal(notYet.get(700).downloading, false);
+    assert.equal(notYet.get(700).unavailable, true);
+
+    const active = await getMovieAvailability([701], false);
+    assert.equal(active.get(701).downloading, true);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});

@@ -230,16 +230,24 @@ async function movieAvailability(tmdbId, is4k) {
     const data = await call(`/movie/${tmdbId}`);
     const status = Number((is4k ? data.mediaInfo?.status4k : data.mediaInfo?.status) ?? 0);
     const unavailable = status < 4; // 4 parcial / 5 disponible = ya se puede ver
+    // status 3 (PROCESSING) solo significa que Radarr tiene la petición
+    // monitorizada — NO que haya una descarga en curso (p.ej. película sin
+    // estrenar aún: Radarr la vigila pero no hay nada que bajar todavía). El
+    // progreso real de Radarr/Sonarr viene aparte en downloadStatus(4k), que
+    // Seerr rellena en vivo consultando la cola; vacío = nada descargando de
+    // verdad pase lo que pase el status.
+    const downloadList = is4k ? data.mediaInfo?.downloadStatus4k : data.mediaInfo?.downloadStatus;
+    const downloading = Array.isArray(downloadList) && downloadList.length > 0;
     // Issue #14: cuándo llegó a Plex (mediaAddedAt de Seerr), para mostrarla en
     // el detalle y contar la caducidad desde ahí en vez de desde la aprobación.
     // Seerr no tiene un mediaAddedAt4k separado, así que se usa el mismo campo
     // para ambas calidades — es la mejor aproximación disponible por API.
     const since = unavailable ? NaN : Date.parse(data.mediaInfo?.mediaAddedAt ?? '');
-    const entry = { unavailable, status, availableSince: Number.isFinite(since) ? since : null, at: Date.now() };
+    const entry = { unavailable, status, downloading, availableSince: Number.isFinite(since) ? since : null, at: Date.now() };
     availabilityCache.set(cacheKey, entry);
     return entry;
   } catch {
-    return { unavailable: false, status: null, availableSince: null };
+    return { unavailable: false, status: null, downloading: false, availableSince: null };
   }
 }
 
@@ -248,8 +256,8 @@ async function movieAvailability(tmdbId, is4k) {
 export async function getMovieAvailability(tmdbIds, is4k = false) {
   const out = new Map();
   for (const tmdbId of new Set(tmdbIds.filter((id) => id != null))) {
-    const { unavailable, status, availableSince } = await movieAvailability(tmdbId, is4k);
-    out.set(tmdbId, { unavailable, status, availableSince });
+    const { unavailable, status, downloading, availableSince } = await movieAvailability(tmdbId, is4k);
+    out.set(tmdbId, { unavailable, status, downloading, availableSince });
   }
   return out;
 }

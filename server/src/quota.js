@@ -228,6 +228,9 @@ export function computeBalance(limit, approvedRows, watchedTitles, unavailableTm
       posterUrl: r.poster_url ?? null,
       unavailable: isUnavailable(r),
       mediaStatus: r.tmdb_id != null ? availability?.get(r.tmdb_id)?.status ?? null : null,
+      // Descarga realmente en curso en Radarr (no solo "monitorizada" por Seerr,
+      // ver movieAvailability) — distingue "Descargando" de "aún sin estrenar".
+      downloading: r.tmdb_id != null ? availability?.get(r.tmdb_id)?.downloading ?? false : false,
       // Issue #7: % de avance del solicitante, para la rueda de la carátula.
       watchedPercent: Math.round(percentByTitle.get(key) ?? 0),
       availableSince,
