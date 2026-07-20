@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { getMovieAvailability } from '../src/services/seerr.js';
+import { getMovieAvailability, getShowDetails } from '../src/services/seerr.js';
 import { updateSettings } from '../src/settings.js';
 
 updateSettings({ seerr_url: 'http://seerr.test', seerr_api_key: 'k' });
@@ -37,7 +37,7 @@ test('getMovieAvailability: usa status4k para bibliotecas 4K, status para están
 // que Radarr monitoriza la petición, no que haya descarga activa. Sin mirar
 // downloadStatus (cola real de Radarr/Sonarr) el panel decía "Descargando"
 // para algo que ni siquiera se puede empezar a bajar todavía.
-test('getMovieAvailability: status 3 sin downloadStatus no cuenta como "downloading"', async () => {
+test('getMovieAvailability: status 3 sin downloadStatus no trae queueStatus', async () => {
   const originalFetch = global.fetch;
   global.fetch = async (input) => {
     const url = String(input);
@@ -57,11 +57,40 @@ test('getMovieAvailability: status 3 sin downloadStatus no cuenta como "download
   try {
     const notYet = await getMovieAvailability([700], false);
     assert.equal(notYet.get(700).status, 3);
-    assert.equal(notYet.get(700).downloading, false);
+    assert.equal(notYet.get(700).queueStatus, null);
     assert.equal(notYet.get(700).unavailable, true);
 
     const active = await getMovieAvailability([701], false);
-    assert.equal(active.get(701).downloading, true);
+    assert.equal(active.get(701).queueStatus, 'downloading');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('getShowDetails: queueStatus de Sonarr por temporada, vía episode.seasonNumber', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url === 'http://seerr.test/api/v1/tv/900') {
+      return new Response(JSON.stringify({
+        name: 'La nena',
+        seasons: [],
+        mediaInfo: {
+          seasons: [{ seasonNumber: 1, status: 3 }, { seasonNumber: 2, status: 3 }],
+          downloadStatus: [
+            { status: 'downloading', episode: { seasonNumber: 1 } },
+            { status: 'queued', episode: { seasonNumber: 1 } }, // primer episodio de la temporada manda
+          ],
+        },
+      }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const details = await getShowDetails(900);
+    assert.equal(details.seasonQueueStatus[1], 'downloading');
+    assert.equal(details.seasonQueueStatus[2], undefined); // sin cola activa
   } finally {
     global.fetch = originalFetch;
   }

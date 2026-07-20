@@ -228,9 +228,10 @@ export function computeBalance(limit, approvedRows, watchedTitles, unavailableTm
       posterUrl: r.poster_url ?? null,
       unavailable: isUnavailable(r),
       mediaStatus: r.tmdb_id != null ? availability?.get(r.tmdb_id)?.status ?? null : null,
-      // Descarga realmente en curso en Radarr (no solo "monitorizada" por Seerr,
-      // ver movieAvailability) — distingue "Descargando" de "aún sin estrenar".
-      downloading: r.tmdb_id != null ? availability?.get(r.tmdb_id)?.downloading ?? false : false,
+      // Estado real de la cola de Radarr ("downloading", "queued", "paused"...),
+      // no el status 2/3 de Seerr (que solo dice "solicitada"/"monitorizada") —
+      // ver movieAvailability. null = nada en cola ahora mismo.
+      queueStatus: r.tmdb_id != null ? availability?.get(r.tmdb_id)?.queueStatus ?? null : null,
       // Issue #7: % de avance del solicitante, para la rueda de la carátula.
       watchedPercent: Math.round(percentByTitle.get(key) ?? 0),
       availableSince,
@@ -344,6 +345,8 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatc
       const status = details?.seasonStatuses?.[row.season_number];
       row.unavailable = details?.seasonStatuses != null && (status ?? 0) < 4;
       row.media_status = status ?? null;
+      // Estado real de la cola de Sonarr para esa temporada (ver getShowDetails).
+      row.queue_status = details?.seasonQueueStatus?.[row.season_number] ?? null;
       // Issue #14: caducidad desde que la temporada está disponible (si Seerr
       // da la fecha); una no disponible no caduca. Una caducada ni se lista.
       row.available_since = row.unavailable ? null : details?.seasonAvailableSince?.[row.season_number] ?? null;
@@ -369,6 +372,7 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatc
     posterUrl: r.poster_url ?? null,
     unavailable: r.unavailable ?? false,
     mediaStatus: r.media_status ?? null,
+    queueStatus: r.queue_status ?? null,
     watchedPercent: r.watched_percent ?? 0,
     episodesWatched: r.episodes_watched ?? null,
     episodesTotal: r.episodes_total ?? null,

@@ -190,15 +190,23 @@ export async function getShowDetails(tmdbId, seasonNumber = null) {
         seasonAvailableSince[Number(s.seasonNumber)] = Number.isFinite(since) ? since : null;
       }
     }
+    // Mismo criterio que en películas: el status de Sonarr (queue item) tal
+    // cual, no traducido — primer episodio en cola de cada temporada manda.
+    const seasonQueueStatus = {};
+    for (const d of data.mediaInfo?.downloadStatus || []) {
+      const sn = d.episode?.seasonNumber;
+      if (sn != null && !(Number(sn) in seasonQueueStatus)) seasonQueueStatus[Number(sn)] = d.status ?? null;
+    }
     return {
       title: data.name || null,
       posterUrl: posterPath ? `https://image.tmdb.org/t/p/w185${posterPath}` : null,
       showRatingKey: data.mediaInfo?.ratingKey ? String(data.mediaInfo.ratingKey) : null,
       seasonStatuses,
       seasonAvailableSince,
+      seasonQueueStatus,
     };
   } catch {
-    return { title: null, posterUrl: null, showRatingKey: null, seasonStatuses: null, seasonAvailableSince: null };
+    return { title: null, posterUrl: null, showRatingKey: null, seasonStatuses: null, seasonAvailableSince: null, seasonQueueStatus: null };
   }
 }
 
@@ -236,18 +244,23 @@ async function movieAvailability(tmdbId, is4k) {
     // progreso real de Radarr/Sonarr viene aparte en downloadStatus(4k), que
     // Seerr rellena en vivo consultando la cola; vacío = nada descargando de
     // verdad pase lo que pase el status.
+    // El propio `status` de Radarr/Sonarr (queue item), reenviado por Seerr tal
+    // cual sin traducir: "downloading", "queued", "paused", "delay", "completed"
+    // (importando), "downloadClientUnavailable", "failed", "warning"... null si
+    // no hay nada en cola ahora mismo. Esto es lo que pinta la etiqueta, no el
+    // status 2/3 de Seerr (que solo dice "solicitada"/"monitorizada").
     const downloadList = is4k ? data.mediaInfo?.downloadStatus4k : data.mediaInfo?.downloadStatus;
-    const downloading = Array.isArray(downloadList) && downloadList.length > 0;
+    const queueStatus = Array.isArray(downloadList) && downloadList.length > 0 ? downloadList[0].status ?? null : null;
     // Issue #14: cuándo llegó a Plex (mediaAddedAt de Seerr), para mostrarla en
     // el detalle y contar la caducidad desde ahí en vez de desde la aprobación.
     // Seerr no tiene un mediaAddedAt4k separado, así que se usa el mismo campo
     // para ambas calidades — es la mejor aproximación disponible por API.
     const since = unavailable ? NaN : Date.parse(data.mediaInfo?.mediaAddedAt ?? '');
-    const entry = { unavailable, status, downloading, availableSince: Number.isFinite(since) ? since : null, at: Date.now() };
+    const entry = { unavailable, status, queueStatus, availableSince: Number.isFinite(since) ? since : null, at: Date.now() };
     availabilityCache.set(cacheKey, entry);
     return entry;
   } catch {
-    return { unavailable: false, status: null, downloading: false, availableSince: null };
+    return { unavailable: false, status: null, queueStatus: null, availableSince: null };
   }
 }
 
@@ -256,8 +269,8 @@ async function movieAvailability(tmdbId, is4k) {
 export async function getMovieAvailability(tmdbIds, is4k = false) {
   const out = new Map();
   for (const tmdbId of new Set(tmdbIds.filter((id) => id != null))) {
-    const { unavailable, status, downloading, availableSince } = await movieAvailability(tmdbId, is4k);
-    out.set(tmdbId, { unavailable, status, downloading, availableSince });
+    const { unavailable, status, queueStatus, availableSince } = await movieAvailability(tmdbId, is4k);
+    out.set(tmdbId, { unavailable, status, queueStatus, availableSince });
   }
   return out;
 }
