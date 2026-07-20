@@ -322,10 +322,14 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatc
       pending.push(row);
       continue;
     }
-    if (!showDetailsCache.has(row.tmdb_id)) {
-      showDetailsCache.set(row.tmdb_id, await getMediaDetails('tv', row.tmdb_id, row.season_number));
+    // Cacheada por tmdb_id+temporada, no solo tmdb_id: posterUrl (carátula de
+    // la temporada) y sonarrLabel dependen de qué temporada se pide, y un
+    // mismo show puede tener varias temporadas pendientes a la vez.
+    const detailsCacheKey = `${row.tmdb_id}:${row.season_number}`;
+    if (!showDetailsCache.has(detailsCacheKey)) {
+      showDetailsCache.set(detailsCacheKey, await getMediaDetails('tv', row.tmdb_id, row.season_number));
     }
-    const details = showDetailsCache.get(row.tmdb_id);
+    const details = showDetailsCache.get(detailsCacheKey);
     const showRatingKey = details?.showRatingKey;
     const cacheKey = `${showRatingKey || 'missing'}:${row.season_number}`;
     if (!seasonEpisodesCache.has(cacheKey)) {
@@ -351,6 +355,8 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatc
       row.media_status = status ?? null;
       // Estado real de la cola de Sonarr para esa temporada (ver getShowDetails).
       row.queue_status = details?.seasonQueueStatus?.[row.season_number] ?? null;
+      // Estado real de Sonarr (derivado, sin cola activa) — ver getShowDetails.
+      row.sonarr_label = details?.sonarrLabel ?? null;
       // Issue #14: caducidad desde que la temporada está disponible (si Seerr
       // da la fecha); una no disponible no caduca. Una caducada ni se lista.
       row.available_since = row.unavailable ? null : details?.seasonAvailableSince?.[row.season_number] ?? null;
@@ -377,6 +383,7 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatc
     unavailable: r.unavailable ?? false,
     mediaStatus: r.media_status ?? null,
     queueStatus: r.queue_status ?? null,
+    sonarrLabel: r.sonarr_label ?? null,
     watchedPercent: r.watched_percent ?? 0,
     episodesWatched: r.episodes_watched ?? null,
     episodesTotal: r.episodes_total ?? null,

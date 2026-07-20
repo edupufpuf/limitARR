@@ -20,15 +20,16 @@ const QUEUE_STATUS = {
 };
 const PENDING = { label: 'Pendiente de descarga', color: 'text-yellow-300', bg: 'bg-yellow-600', chipText: 'text-yellow-950' };
 const NONE = { label: 'Sin descargar', color: 'text-gray-300', bg: 'bg-gray-600', chipText: 'text-white' };
-// item.radarrLabel: el "Estado" de Radarr tal cual (No disponible/Falta/...),
-// cuando no hay nada en cola — más preciso que el "pendiente" genérico.
-// Requiere radarr_url/radarr_api_key en Configuración (opcional); sin eso
-// llega null y se cae a PENDING como antes. Ver movieAvailability en seerr.js.
-const RADARR = { color: 'text-cyan-300', bg: 'bg-cyan-600', chipText: 'text-white' };
+// item.radarrLabel (película) / item.sonarrLabel (serie): el estado real de
+// Radarr/Sonarr cuando no hay nada en cola — más preciso que el "pendiente"
+// genérico. Requieren radarr_url/sonarr_url en Configuración (opcionales); sin
+// eso llegan null y se cae a PENDING como antes. Ver movieAvailability y
+// getShowDetails en seerr.js.
+const EXTERNAL = { color: 'text-cyan-300', bg: 'bg-cyan-600', chipText: 'text-white' };
 
 function resolve(item) {
   if (item.queueStatus && QUEUE_STATUS[item.queueStatus]) return QUEUE_STATUS[item.queueStatus];
-  if (item.radarrLabel) return { label: item.radarrLabel, ...RADARR };
+  if (item.radarrLabel || item.sonarrLabel) return { label: item.radarrLabel ?? item.sonarrLabel, ...EXTERNAL };
   if (Number(item.mediaStatus) === 2 || Number(item.mediaStatus) === 3) return PENDING;
   return NONE;
 }

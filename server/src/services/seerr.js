@@ -1,5 +1,6 @@
 import { getSettings } from '../settings.js';
 import { getRadarrStatus } from './radarr.js';
+import { getSonarrSeasonStatus } from './sonarr.js';
 
 async function call(path, options = {}) {
   const { seerr_url: baseUrl, seerr_api_key: apiKey } = getSettings();
@@ -198,6 +199,14 @@ export async function getShowDetails(tmdbId, seasonNumber = null) {
       const sn = d.episode?.seasonNumber;
       if (sn != null && !(Number(sn) in seasonQueueStatus)) seasonQueueStatus[Number(sn)] = d.status ?? null;
     }
+    // Sin nada en cola para ESTA temporada, Sonarr igual sabe por qué (no
+    // monitorizada, sin estrenar, faltan episodios) — igual que radarrLabel en
+    // movieAvailability. Solo se consulta cuando hace falta (temporada pedida,
+    // no disponible, sin cola activa) para no golpear Sonarr en cada búsqueda.
+    let sonarrLabel = null;
+    if (seasonNumber != null && (seasonStatuses[Number(seasonNumber)] ?? 0) < 4 && !seasonQueueStatus[Number(seasonNumber)]) {
+      sonarrLabel = await getSonarrSeasonStatus(data.mediaInfo?.externalServiceId, seasonNumber);
+    }
     return {
       title: data.name || null,
       posterUrl: posterPath ? `https://image.tmdb.org/t/p/w185${posterPath}` : null,
@@ -205,9 +214,10 @@ export async function getShowDetails(tmdbId, seasonNumber = null) {
       seasonStatuses,
       seasonAvailableSince,
       seasonQueueStatus,
+      sonarrLabel,
     };
   } catch {
-    return { title: null, posterUrl: null, showRatingKey: null, seasonStatuses: null, seasonAvailableSince: null, seasonQueueStatus: null };
+    return { title: null, posterUrl: null, showRatingKey: null, seasonStatuses: null, seasonAvailableSince: null, seasonQueueStatus: null, sonarrLabel: null };
   }
 }
 

@@ -173,3 +173,82 @@ test('getShowDetails: queueStatus de Sonarr por temporada, vía episode.seasonNu
     global.fetch = originalFetch;
   }
 });
+
+// Sonarr no tiene un "Estado" único por temporada como Radarr por película —
+// se deriva de sus estadísticas reales. Verificado contra Sonarr real de
+// producción: serie "Silo" temporada 2, monitored=false, 0/10 episodios.
+test('getShowDetails: con Sonarr configurado, deriva sonarrLabel para la temporada pedida', async () => {
+  updateSettings({ sonarr_url: 'http://sonarr.test', sonarr_api_key: 'k' });
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url === 'http://seerr.test/api/v1/tv/901') {
+      return new Response(JSON.stringify({
+        name: 'Silo',
+        seasons: [],
+        mediaInfo: {
+          externalServiceId: 40,
+          seasons: [{ seasonNumber: 1, status: 5 }, { seasonNumber: 2, status: 1 }],
+          downloadStatus: [],
+        },
+      }), { status: 200 });
+    }
+    if (url === 'http://sonarr.test/api/v3/series/40') {
+      return new Response(JSON.stringify({
+        seasons: [
+          { seasonNumber: 1, monitored: true, statistics: { episodeFileCount: 10 } },
+          { seasonNumber: 2, monitored: false, statistics: { episodeFileCount: 0 } },
+        ],
+      }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const s1 = await getShowDetails(901, 1);
+    assert.equal(s1.sonarrLabel, null); // status 5 = disponible, ni se consulta Sonarr
+
+    const s2 = await getShowDetails(901, 2);
+    assert.equal(s2.sonarrLabel, 'No monitorizada');
+  } finally {
+    global.fetch = originalFetch;
+    setRawSetting('sonarr_url', '');
+    setRawSetting('sonarr_api_key', '');
+  }
+});
+
+test('getShowDetails: sonarrLabel "Faltan episodios" si ya emitió pero sin monitorizar el archivo', async () => {
+  updateSettings({ sonarr_url: 'http://sonarr.test', sonarr_api_key: 'k' });
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url === 'http://seerr.test/api/v1/tv/902') {
+      return new Response(JSON.stringify({
+        name: 'X-Men 97',
+        seasons: [],
+        mediaInfo: {
+          externalServiceId: 35,
+          seasons: [{ seasonNumber: 1, status: 1 }],
+          downloadStatus: [],
+        },
+      }), { status: 200 });
+    }
+    if (url === 'http://sonarr.test/api/v3/series/35') {
+      return new Response(JSON.stringify({
+        seasons: [
+          { seasonNumber: 1, monitored: true, statistics: { episodeFileCount: 0, previousAiring: '2024-01-01T00:00:00Z' } },
+        ],
+      }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const details = await getShowDetails(902, 1);
+    assert.equal(details.sonarrLabel, 'Faltan episodios');
+  } finally {
+    global.fetch = originalFetch;
+    setRawSetting('sonarr_url', '');
+    setRawSetting('sonarr_api_key', '');
+  }
+});

@@ -12,8 +12,10 @@ const KEYS = [
   'tv_season_watched_percent',
   'radarr_url',
   'radarr_api_key',
+  'sonarr_url',
+  'sonarr_api_key',
 ];
-const URL_KEYS = new Set(['seerr_url', 'seerr_public_url', 'tautulli_url', 'tautulli_public_url', 'plex_url', 'radarr_url']);
+const URL_KEYS = new Set(['seerr_url', 'seerr_public_url', 'tautulli_url', 'tautulli_public_url', 'plex_url', 'radarr_url', 'sonarr_url']);
 // Claves opcionales: enviar cadena vacía las borra (en el resto, vacío = "no cambiar",
 // para poder guardar sin reenviar API keys ya configuradas).
 const CLEARABLE_KEYS = new Set(['seerr_public_url', 'tautulli_public_url', 'tv_season_watched_percent']);
@@ -112,5 +114,8 @@ export function getSettingsForDisplay() {
     radarr_url: s.radarr_url,
     radarr_api_key_set: Boolean(s.radarr_api_key),
     radarr_api_key_masked: mask(s.radarr_api_key),
+    sonarr_url: s.sonarr_url,
+    sonarr_api_key_set: Boolean(s.sonarr_api_key),
+    sonarr_api_key_masked: mask(s.sonarr_api_key),
   };
 }

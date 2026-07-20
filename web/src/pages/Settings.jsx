@@ -24,6 +24,8 @@ export default function Settings() {
     plex_token: '',
     radarr_url: '',
     radarr_api_key: '',
+    sonarr_url: '',
+    sonarr_api_key: '',
   });
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -45,10 +47,12 @@ export default function Settings() {
         form.tautulli_public_url !== (settings.tautulli_public_url ?? '') ||
         form.plex_url !== (settings.plex_url ?? '') ||
         form.radarr_url !== (settings.radarr_url ?? '') ||
+        form.sonarr_url !== (settings.sonarr_url ?? '') ||
         form.seerr_api_key !== '' ||
         form.tautulli_api_key !== '' ||
         form.plex_token !== '' ||
-        form.radarr_api_key !== '')
+        form.radarr_api_key !== '' ||
+        form.sonarr_api_key !== '')
   );
   useDirty('settings-connections', formDirty);
 
@@ -66,6 +70,7 @@ export default function Settings() {
         tautulli_public_url: s.tautulli_public_url ?? '',
         plex_url: s.plex_url ?? '',
         radarr_url: s.radarr_url ?? '',
+        sonarr_url: s.sonarr_url ?? '',
       }));
     });
     api.webhookInfo().then((r) => setWebhookUrl(r.url));
@@ -77,7 +82,7 @@ export default function Settings() {
     e.preventDefault();
     setSaving(true);
     await api.updateSettings(form);
-    setForm((f) => ({ ...f, seerr_api_key: '', tautulli_api_key: '', plex_token: '', radarr_api_key: '' }));
+    setForm((f) => ({ ...f, seerr_api_key: '', tautulli_api_key: '', plex_token: '', radarr_api_key: '', sonarr_api_key: '' }));
     load();
     setSaving(false);
   }
@@ -246,6 +251,31 @@ export default function Settings() {
           />
         </fieldset>
 
+        <fieldset>
+          <legend className="text-sm font-semibold text-accent-400 mb-2">Sonarr <span className="text-gray-600 font-normal">(opcional)</span></legend>
+          <p className="text-xs text-gray-500 mb-2">
+            Igual que Radarr pero para series: sin nada descargándose, muestra por qué
+            (No monitorizada, Sin estrenar, Faltan episodios) en vez del "pendiente" genérico.
+          </p>
+          <label className="label">URL</label>
+          <input
+            value={form.sonarr_url}
+            onChange={(e) => setForm({ ...form, sonarr_url: e.target.value })}
+            placeholder="http://sonarr:8989"
+            className="input mb-3"
+          />
+          <label className="label">
+            API key {settings.sonarr_api_key_set && <span className="text-gray-600">(guardada: {settings.sonarr_api_key_masked})</span>}
+          </label>
+          <input
+            type="password"
+            value={form.sonarr_api_key}
+            onChange={(e) => setForm({ ...form, sonarr_api_key: e.target.value })}
+            placeholder={settings.sonarr_api_key_set ? '•••• dejar en blanco para no cambiar' : ''}
+            className="input"
+          />
+        </fieldset>
+
         <div className="flex flex-wrap items-center gap-3 pt-2">
           <button
             type="submit"
@@ -270,6 +300,7 @@ export default function Settings() {
             <div>Seerr <StatusDot result={testResult.seerr} /></div>
             <div>Plex <StatusDot result={testResult.plex} /></div>
             {testResult.radarr && <div>Radarr <StatusDot result={testResult.radarr} /></div>}
+            {testResult.sonarr && <div>Sonarr <StatusDot result={testResult.sonarr} /></div>}
           </div>
         )}
       </form>
