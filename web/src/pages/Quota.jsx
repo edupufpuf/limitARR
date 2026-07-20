@@ -175,7 +175,7 @@ function PendingPoster({ item, onDetail, onDismiss }) {
         <div className="w-full h-full bg-gradient-to-br from-bg-600 to-bg-700 flex items-center justify-center text-xl">🎬</div>
       )}
       {item.pendingApproval && (
-        <span className="absolute top-1 left-1 right-1 truncate rounded bg-violet-600 px-1 py-0.5 text-[7px] leading-none font-semibold uppercase tracking-wide text-white pointer-events-none">
+        <span className="absolute top-1 left-1 right-1 line-clamp-2 rounded bg-violet-600 px-1 py-0.5 text-[7px] leading-tight font-semibold uppercase tracking-wide text-white pointer-events-none">
           Pdte. Aprobar
         </span>
       )}
