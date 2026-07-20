@@ -856,6 +856,119 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
   );
 }
 
+// Cargo manual con buscador contra Plex (vía Tautulli): para películas que ya
+// están en la biblioteca pero nunca se pidieron en Seerr. Elegir el resultado
+// real evita el problema del título a mano (si no coincide letra a letra con
+// Tautulli, el visionado nunca se detecta solo, ver addManualCharge). Se deja
+// también un campo de título libre por si la película buscada no aparece.
+function ManualChargeModal({ username, onClose, onSubmit }) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [selected, setSelected] = useState(null); // { title, posterUrl } | null
+  const [manualTitle, setManualTitle] = useState('');
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function search() {
+    if (!query.trim()) return;
+    setSearching(true);
+    setSelected(null);
+    try {
+      const { movies } = await api.plexSearch(query.trim());
+      setResults(movies);
+    } finally {
+      setSearching(false);
+      setSearched(true);
+    }
+  }
+
+  const title = selected?.title || manualTitle.trim();
+
+  async function confirm() {
+    if (!title) return;
+    setSaving(true);
+    await onSubmit(title, note.trim() || null, selected?.posterUrl || null);
+    setSaving(false);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
+      <div
+        className="card w-full max-w-md max-h-[85vh] overflow-y-auto p-4 sm:p-5"
+        style={{ maxHeight: '85dvh' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="font-bold text-lg mb-1">Cargo manual — {username}</h3>
+        <p className="text-xs text-gray-400 mb-3">
+          Para algo bajado/visto fuera de Seerr, incluidas películas ya disponibles en Plex que nunca se pidieron ahí.
+        </p>
+
+        <div className="flex gap-2">
+          <input
+            autoFocus
+            className="input flex-1"
+            placeholder="Buscar en tu Plex…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && search()}
+          />
+          <button type="button" className="btn btn-ghost" onClick={search} disabled={searching || !query.trim()}>
+            {searching ? 'Buscando…' : 'Buscar'}
+          </button>
+        </div>
+
+        {searched && !searching && results.length === 0 && (
+          <p className="text-xs text-gray-500 mt-2">Sin resultados en Plex — usa el título a mano abajo.</p>
+        )}
+
+        {results.length > 0 && (
+          <div className="flex flex-col gap-1 mt-3 max-h-52 overflow-y-auto">
+            {results.map((m, i) => (
+              <button
+                key={`${m.title}-${i}`}
+                type="button"
+                onClick={() => setSelected(m)}
+                className={`flex items-center gap-2 rounded-lg p-1.5 text-left hover:bg-bg-700 ${selected?.title === m.title ? 'bg-accent-600/20 ring-1 ring-accent-500' : ''}`}
+              >
+                <div className="w-8 h-12 rounded bg-bg-600 overflow-hidden flex-shrink-0">
+                  {m.posterUrl && <img src={m.posterUrl} alt="" className="w-full h-full object-cover" />}
+                </div>
+                <span className="text-sm">{m.title}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="mt-3">
+          <label className="block text-xs text-gray-400 mb-1">
+            {results.length > 0 ? 'O título a mano (si no está arriba)' : 'Título'}
+          </label>
+          <input
+            className="input w-full"
+            placeholder="Título exacto de lo que se bajó/vio"
+            value={manualTitle}
+            onChange={(e) => { setManualTitle(e.target.value); setSelected(null); }}
+          />
+        </div>
+
+        <div className="mt-3">
+          <label className="block text-xs text-gray-400 mb-1">Nota (opcional)</label>
+          <textarea className="input w-full" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
+        </div>
+
+        <div className="flex justify-end gap-2 mt-4">
+          <button type="button" className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+          <button type="button" className="btn btn-primary" onClick={confirm} disabled={!title || saving}>
+            {saving ? 'Cargando…' : 'Cargar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Quota() {
   const [users, setUsers] = useState([]);
   const [stats, setStats] = useState(null);
@@ -871,6 +984,8 @@ export default function Quota() {
   const [activeFilter, setActiveFilter] = useState('all');
   // Pendiente abierto en la ventana de detalle: { user, lib, item } o null.
   const [detailTarget, setDetailTarget] = useState(null);
+  // Cargo manual abierto: { userId, libraryId, username } o null.
+  const [chargeModal, setChargeModal] = useState(null);
   // Base para enlazar pósters con Tautulli: la URL pública si está configurada
   // (la interna suele ser un hostname docker que el navegador no resuelve).
   const [statsBase, setStatsBase] = useState('');
@@ -1001,13 +1116,16 @@ export default function Quota() {
     setResetting((r) => ({ ...r, [key]: false }));
   }
 
-  async function manualCharge(userId, libraryId, username) {
-    const title = prompt('Título de lo que se bajó/vio fuera de Seerr (restará un hueco de cupo):');
-    if (!title?.trim()) return;
-    const note = prompt('Nota: ¿por qué se usa este cargo manual? (opcional)');
+  function manualCharge(userId, libraryId, username) {
+    setChargeModal({ userId, libraryId, username });
+  }
+
+  async function submitManualCharge(title, note, posterUrl) {
+    const { userId, libraryId } = chargeModal;
     const key = `${userId}-${libraryId}`;
     setCharging((c) => ({ ...c, [key]: true }));
-    await api.manualCharge(userId, libraryId, title.trim(), username, note?.trim() || null);
+    await api.manualCharge(userId, libraryId, title, chargeModal.username, note, posterUrl);
+    setChargeModal(null);
     load();
     setCharging((c) => ({ ...c, [key]: false }));
   }
@@ -1178,6 +1296,14 @@ export default function Quota() {
             load();
             setDetailTarget(null);
           }}
+        />
+      )}
+
+      {chargeModal && (
+        <ManualChargeModal
+          username={chargeModal.username}
+          onClose={() => setChargeModal(null)}
+          onSubmit={submitManualCharge}
         />
       )}
 

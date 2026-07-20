@@ -559,3 +559,68 @@ test('notifications: probar grupo sin nada guardado ni en el body devuelve 404',
     .send({ groupChatId: '-100999', groupTopicId: '3' });
   assert.notEqual(res.status, 404);
 });
+
+// --- cargo manual desde el buscador de Plex ---
+
+test('GET /media/plex-search: busca en Tautulli y resuelve el poster por tmdbId vía Seerr', async () => {
+  const upsertSetting = db.prepare(`
+    INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+  `);
+  upsertSetting.run('tautulli_url', 'http://tautulli.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
+  upsertSetting.run('seerr_url', 'http://seerr.test');
+  upsertSetting.run('seerr_api_key', 'test-key');
+
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes('cmd=search')) {
+      return new Response(JSON.stringify({
+        response: {
+          result: 'success',
+          data: { results_list: { movie: [{ rating_key: '555', title: 'Interestelar', guids: ['tmdb://157336'] }] } },
+        },
+      }), { status: 200 });
+    }
+    if (url === 'http://seerr.test/api/v1/movie/157336') {
+      return new Response(JSON.stringify({ title: 'Interestelar', posterPath: '/interestelar.jpg' }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const res = await agent.get('/api/media/plex-search?q=interestelar').expect(200);
+    assert.deepEqual(res.body.movies, [
+      { title: 'Interestelar', posterUrl: 'https://image.tmdb.org/t/p/w185/interestelar.jpg' },
+    ]);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
+  }
+});
+
+test('POST /quota/manual-charge: acepta posterUrl y no lo pisa a null', async () => {
+  // enabled=0 a propósito: refreshQuotaCache corta antes de llamar a Tautulli/Seerr
+  // (ver comentario de cabecera del archivo) — aquí solo interesa comprobar que la
+  // ruta pasa posterUrl a addManualCharge, no el recálculo completo del cupo.
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (1888, 'Películas', 'movie', 'standard', 0, 4)
+  `).run();
+
+  await agent
+    .post('/api/quota/manual-charge/9001/1888')
+    .send({ title: 'Interestelar', note: 'ya en Plex', posterUrl: 'https://image.tmdb.org/t/p/w185/interestelar.jpg' })
+    .expect(200);
+
+  const row = db.prepare(
+    "SELECT tmdb_id, poster_url FROM decisions_log WHERE user_id = 9001 AND library_id = 1888"
+  ).get();
+  assert.equal(row.tmdb_id, null);
+  assert.equal(row.poster_url, 'https://image.tmdb.org/t/p/w185/interestelar.jpg');
+
+  db.prepare('DELETE FROM decisions_log WHERE user_id = 9001').run();
+  db.prepare('DELETE FROM quota_cache WHERE user_id = 9001').run();
+  db.prepare('DELETE FROM libraries WHERE id = 1888').run();
+});

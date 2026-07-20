@@ -16,6 +16,7 @@ import {
   getRequestHold,
   setRequestHold,
   clearRequestHold,
+  addManualCharge,
 } from '../src/quota.js';
 import { setRawSetting } from '../src/settings.js';
 import { db } from '../src/db.js';
@@ -262,6 +263,27 @@ test('listStaleOutstandingPairs: el umbral de minutos se respeta', () => {
 
   assert.equal(listStaleOutstandingPairs(5).some((p) => p.user_id === 110), false);
   assert.equal(listStaleOutstandingPairs(2).some((p) => p.user_id === 110), true);
+});
+
+// --- cargo manual desde el buscador de Plex (película ya en Plex, nunca pedida en Seerr) ---
+
+test('addManualCharge: guarda posterUrl pero tmdb_id siempre null (no dispara chequeo de Seerr)', () => {
+  insertLibrary.run(60, 'Películas', 1);
+  addManualCharge(200, 60, 'Interestelar', 'ana', 'ya estaba en Plex', 'https://image.tmdb.org/t/p/w185/x.jpg');
+
+  const row = db.prepare(
+    "SELECT tmdb_id, poster_url, note, decision FROM decisions_log WHERE user_id = 200 AND library_id = 60"
+  ).get();
+  assert.equal(row.tmdb_id, null);
+  assert.equal(row.poster_url, 'https://image.tmdb.org/t/p/w185/x.jpg');
+  assert.equal(row.note, 'ya estaba en Plex');
+  assert.equal(row.decision, 'approved');
+
+  // Sin tmdb_id, computeBalance nunca la marca "no disponible": no depende de Seerr.
+  const approved = [{ media_title: 'Interestelar', tmdb_id: null, poster_url: row.poster_url }];
+  const r = computeBalance(4, approved, new Set());
+  assert.equal(r.pendingItems[0].unavailable, false);
+  assert.equal(r.pendingItems[0].posterUrl, row.poster_url);
 });
 
 // --- issue #4: cupo grupal agregado (el grupo cuenta como un solo usuario) ---

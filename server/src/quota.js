@@ -643,14 +643,21 @@ export async function getPendingItemDetail(userId, libraryId, { tmdbId, seasonNu
 }
 
 // Cargo manual: algo que se bajó/vio fuera de Seerr (a mano) y aun así debe
-// restar cupo. Sin tmdb_id/season_number cae en la misma rama de "fila legada
-// sin tmdb" que ya usan las filas antiguas importadas antes del issue #14: no
-// se resuelve sola por visionado (no hay tmdb con el que consultar Seerr ni
-// comparar episodios), solo caduca por fecha (expiry_days de la biblioteca) o
-// se quita a mano con el mismo botón ✕ que un pendiente normal.
+// restar cupo — incluye películas ya en Plex que nunca se pidieron en Seerr
+// (buscador GET /media/plex-search, ver routes/api.js), con posterUrl resuelto
+// ahí desde TMDB una sola vez al hacer el cargo. tmdb_id se deja SIEMPRE null
+// a propósito, aunque venga de una búsqueda real en Plex: si se guardara,
+// computeBalance consultaría a Seerr su disponibilidad y, como nunca se pidió
+// ahí, Seerr no tiene mediaInfo → status 0 → "no disponible", marcando como
+// "no cuenta" algo que YA está en Plex. Sin tmdb_id/season_number cae en la
+// misma rama de "fila legada" que las importadas antes del issue #14: no se
+// resuelve sola por visionado en series (no hay tmdb con el que comparar
+// episodios — en películas SÍ se resuelve, es por título normalizado), solo
+// caduca por fecha (expiry_days de la biblioteca) o se quita a mano con el
+// mismo botón ✕ que un pendiente normal.
 // En grupo agregado se atribuye al primer miembro (el saldo es compartido
 // igualmente, y decisions_log necesita un user_id real, no el -group_id).
-export function addManualCharge(userId, libraryId, title, username = null, note = null) {
+export function addManualCharge(userId, libraryId, title, username = null, note = null, posterUrl = null) {
   const identity = quotaIdentity(userId);
   const attributedUserId = identity.memberIds[0];
   const library = getLibrary.get(libraryId);
@@ -663,7 +670,7 @@ export function addManualCharge(userId, libraryId, title, username = null, note 
     mediaType: library?.section_type === 'show' ? 'tv' : 'movie',
     tmdbId: null,
     seasonNumber: null,
-    posterUrl: null,
+    posterUrl: posterUrl || null,
     note: note || null,
     createdAt: toSqliteDateTime(new Date().toISOString()),
   });

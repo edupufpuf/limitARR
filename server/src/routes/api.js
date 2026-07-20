@@ -7,7 +7,7 @@ import { config } from '../config.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { needsSetup, setPassword, checkPassword, getWebhookSecret } from '../auth.js';
-import { getUsers, getLibraries } from '../services/tautulli.js';
+import { getUsers, getLibraries, searchMedia } from '../services/tautulli.js';
 import {
   listPendingRequests,
   getSeerrUsers,
@@ -920,6 +920,29 @@ router.post('/quota/dismiss/:userId/:libraryId', ah(async (req, res) => {
   res.json({ ok: true, dismissed, ...result });
 }));
 
+// Buscador para el cargo manual: películas que YA están en Plex (vía Tautulli,
+// tu propia biblioteca) sin pasar por el título a mano — así el título coincide
+// con el de Tautulli al carácter y el visionado se resuelve solo (issue del
+// cargo manual de texto libre: si no coincide letra a letra con Tautulli, nunca
+// se detecta como vista). El poster se resuelve aparte por tmdbId (guid de Plex
+// "tmdb://<id>") consultando solo el catálogo de TMDB vía Seerr — no dice nada
+// sobre si se pidió o no en Seerr, así que no hay riesgo de marcarla como no
+// disponible por esto.
+router.get('/media/plex-search', ah(async (req, res) => {
+  const q = (req.query.q || '').trim();
+  if (!q) return res.json({ movies: [] });
+  const { movies } = await searchMedia(q);
+  const results = await Promise.all(
+    movies.slice(0, 8).map(async (m) => {
+      const tmdbGuid = m.guids.find((g) => g.startsWith('tmdb://'));
+      const tmdbId = tmdbGuid ? Number(tmdbGuid.slice('tmdb://'.length)) : null;
+      const { posterUrl } = tmdbId != null ? await getMediaDetails('movie', tmdbId) : { posterUrl: null };
+      return { title: m.title, posterUrl };
+    })
+  );
+  res.json({ movies: results });
+}));
+
 // Cargo manual: algo consumido fuera de Seerr (bajado/visto a mano) que aun
 // así debe restar cupo. Sin tmdbId no se resuelve solo por visionado — se
 // queda contando hasta que caduque por fecha o se quite con el ✕ normal.
@@ -928,8 +951,9 @@ router.post('/quota/manual-charge/:userId/:libraryId', ah(async (req, res) => {
   const title = (req.body?.title || '').trim();
   const username = (req.body?.username || '').trim() || null;
   const note = (req.body?.note || '').trim() || null;
+  const posterUrl = (req.body?.posterUrl || '').trim() || null;
   if (!title) return res.status(400).json({ error: 'title_required' });
-  addManualCharge(userId, libraryId, title, username, note);
+  addManualCharge(userId, libraryId, title, username, note, posterUrl);
   const result = await refreshQuotaCache(userId, libraryId);
   res.json({ ok: true, ...result });
 }));
