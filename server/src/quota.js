@@ -441,7 +441,7 @@ export async function getBalance(userId, libraryId) {
 
   // Issue #14: la disponibilidad se consulta antes de filtrar caducadas porque
   // el plazo cuenta desde que la película llegó a Plex, no desde la aprobación.
-  const availability = await getMovieAvailability(allApproved.map((r) => r.tmdb_id));
+  const availability = await getMovieAvailability(allApproved.map((r) => r.tmdb_id), library.kind === '4k');
   // Issue #10: las aprobadas que han caducado sin verse ni se listan ni cuentan.
   const approved = dropExpiredRows(allApproved, expiryDays, Date.now(), availability);
   const history = [];

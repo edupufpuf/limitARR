@@ -215,21 +215,28 @@ export async function getMediaDetails(mediaType, tmdbId, seasonNumber = null) {
 // TTL corto: lo justo para no repetir la misma consulta por cada usuario dentro
 // de un ciclo de sondeo, sin retrasar apenas el "ya está en Plex".
 const AVAILABILITY_TTL_MS = 60_000;
-const availabilityCache = new Map(); // tmdbId -> { unavailable, availableSince, at }
+const availabilityCache = new Map(); // `${tmdbId}:${is4k}` -> { unavailable, availableSince, at }
 
-async function movieAvailability(tmdbId) {
-  const cached = availabilityCache.get(tmdbId);
+// Seerr guarda estado y disponibilidad por separado para estándar y 4K
+// (`status`/`status4k` en su Media entity) — hay que leer el campo que
+// corresponde a la biblioteca de la fila, si no una petición 4K muestra el
+// estado de la versión estándar (o al revés).
+async function movieAvailability(tmdbId, is4k) {
+  const cacheKey = `${tmdbId}:${is4k}`;
+  const cached = availabilityCache.get(cacheKey);
   if (cached && Date.now() - cached.at < AVAILABILITY_TTL_MS) return cached;
 
   try {
     const data = await call(`/movie/${tmdbId}`);
-    const status = Number(data.mediaInfo?.status ?? 0);
+    const status = Number((is4k ? data.mediaInfo?.status4k : data.mediaInfo?.status) ?? 0);
     const unavailable = status < 4; // 4 parcial / 5 disponible = ya se puede ver
     // Issue #14: cuándo llegó a Plex (mediaAddedAt de Seerr), para mostrarla en
     // el detalle y contar la caducidad desde ahí en vez de desde la aprobación.
+    // Seerr no tiene un mediaAddedAt4k separado, así que se usa el mismo campo
+    // para ambas calidades — es la mejor aproximación disponible por API.
     const since = unavailable ? NaN : Date.parse(data.mediaInfo?.mediaAddedAt ?? '');
     const entry = { unavailable, status, availableSince: Number.isFinite(since) ? since : null, at: Date.now() };
-    availabilityCache.set(tmdbId, entry);
+    availabilityCache.set(cacheKey, entry);
     return entry;
   } catch {
     return { unavailable: false, status: null, availableSince: null };
@@ -238,10 +245,10 @@ async function movieAvailability(tmdbId) {
 
 // Disponibilidad de cada tmdbId según Seerr: si aún no está en Plex y, si ya
 // está, desde cuándo. Map tmdbId -> { unavailable, availableSince (ms|null) }.
-export async function getMovieAvailability(tmdbIds) {
+export async function getMovieAvailability(tmdbIds, is4k = false) {
   const out = new Map();
   for (const tmdbId of new Set(tmdbIds.filter((id) => id != null))) {
-    const { unavailable, status, availableSince } = await movieAvailability(tmdbId);
+    const { unavailable, status, availableSince } = await movieAvailability(tmdbId, is4k);
     out.set(tmdbId, { unavailable, status, availableSince });
   }
   return out;
