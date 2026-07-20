@@ -4,7 +4,7 @@ import { Wordmark } from '../components/Brand.jsx';
 import { IconBell, IconLogout } from '../icons.jsx';
 import { PendingDetailModal } from './Quota.jsx';
 import { SalvadosGrid } from '../components/Salvados.jsx';
-import { downloadStatusLabel, downloadStatusColor, downloadStatusBg } from '../mediaStatus.js';
+import { downloadStatusLabel, downloadStatusBg, downloadStatusChipText } from '../mediaStatus.js';
 
 function LibraryCard({ library, onDetail }) {
   const percent = library.limitApplied > 0 ? Math.max(0, Math.min(100, (library.balance / library.limitApplied) * 100)) : 0;
@@ -48,10 +48,10 @@ function LibraryCard({ library, onDetail }) {
                 ) : <div className="h-full w-full bg-gradient-to-br from-bg-600 to-bg-800" />}
                 {(item.unavailable || item.pendingApproval) && (
                   <div className="absolute left-1 top-1 right-1 flex flex-col items-start gap-0.5">
-                    <span className="min-w-0 max-w-full truncate rounded bg-indigo-500/20 ring-1 ring-inset ring-indigo-500/40 px-1 py-0.5 text-[7px] leading-none font-bold uppercase tracking-wide text-indigo-300">
+                    <span className="min-w-0 max-w-full truncate rounded bg-indigo-600 px-1 py-0.5 text-[7px] leading-none font-bold uppercase tracking-wide text-white">
                       No cuenta
                     </span>
-                    <span className={`min-w-0 max-w-full truncate rounded px-1 py-0.5 text-[7px] leading-none font-semibold uppercase tracking-wide ${item.pendingApproval ? 'text-violet-300 bg-violet-500/20 ring-1 ring-inset ring-violet-500/40' : `${downloadStatusColor(item)} ${downloadStatusBg(item)}`}`}>
+                    <span className={`min-w-0 max-w-full truncate rounded px-1 py-0.5 text-[7px] leading-none font-semibold uppercase tracking-wide ${item.pendingApproval ? 'text-white bg-violet-600' : `${downloadStatusBg(item)} ${downloadStatusChipText(item)}`}`}>
                       {item.pendingApproval ? 'Pdte. de aprobar' : downloadStatusLabel(item)}
                     </span>
                   </div>

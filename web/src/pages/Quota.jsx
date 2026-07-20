@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { IconSearch, IconUsers, IconEye, IconBan, IconCheckCircle, IconXCircle } from '../icons.jsx';
 import { SalvadosGrid } from '../components/Salvados.jsx';
-import { downloadStatusLabel, downloadStatusColor, downloadStatusBg } from '../mediaStatus.js';
+import { downloadStatusLabel, downloadStatusColor, downloadStatusBg, downloadStatusChipText } from '../mediaStatus.js';
 
 // Recarga entera tras suplantar: la sesión (cookie) ya quedó en role='user' en
 // el servidor, y App.jsx solo lee /auth/me al montar — el reload es más simple
@@ -175,16 +175,16 @@ function PendingPoster({ item, onDetail, onDismiss }) {
         <div className="w-full h-full bg-gradient-to-br from-bg-600 to-bg-700 flex items-center justify-center text-xl">🎬</div>
       )}
       {item.pendingApproval && (
-        <span className="absolute top-1 left-1 right-1 truncate rounded bg-violet-500/20 ring-1 ring-inset ring-violet-500/40 px-1 py-0.5 text-[7px] leading-none font-semibold uppercase tracking-wide text-violet-300 pointer-events-none">
+        <span className="absolute top-1 left-1 right-1 truncate rounded bg-violet-600 px-1 py-0.5 text-[7px] leading-none font-semibold uppercase tracking-wide text-white pointer-events-none">
           Pdte. Aprobar
         </span>
       )}
       {item.unavailable && (
         <div className="absolute top-1 left-1 right-1 flex flex-col items-start gap-0.5 pointer-events-none">
-          <span className="min-w-0 max-w-full truncate rounded bg-indigo-500/20 ring-1 ring-inset ring-indigo-500/40 px-1 py-0.5 text-[7px] leading-none font-semibold uppercase tracking-wide text-indigo-300">
+          <span className="min-w-0 max-w-full truncate rounded bg-indigo-600 px-1 py-0.5 text-[7px] leading-none font-semibold uppercase tracking-wide text-white">
             no cuenta
           </span>
-          <span className={`min-w-0 max-w-full truncate rounded px-1 py-0.5 text-[7px] leading-none font-semibold uppercase tracking-wide ${downloadStatusColor(item)} ${downloadStatusBg(item)}`}>
+          <span className={`min-w-0 max-w-full truncate rounded px-1 py-0.5 text-[7px] leading-none font-semibold uppercase tracking-wide ${downloadStatusBg(item)} ${downloadStatusChipText(item)}`}>
             {downloadStatusLabel(item)}
           </span>
         </div>
