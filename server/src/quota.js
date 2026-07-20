@@ -15,6 +15,8 @@ import {
   getApprovedRequestsForUser,
   getMediaDetails,
   getMovieAvailability,
+  approveRequest,
+  declineRequest,
 } from './services/seerr.js';
 import { matchByEmailOrUsername } from './userMatch.js';
 
@@ -101,8 +103,23 @@ const insertQuotaActionLog = db.prepare(`
   INSERT INTO decisions_log (request_id, user_id, username, library_id, media_title, poster_url, decision, undo_data, created_at)
   VALUES (@requestId, @userId, @username, @libraryId, @mediaTitle, @posterUrl, @decision, @undoData, datetime('now'))
 `);
+// Atajo para loguear una acción admin deshacible — todas las variantes
+// (override, hold, aprobar/rechazar...) comparten esta forma.
+function logAdminChange({ decision, userId = null, libraryId = null, username = null, mediaTitle = null, posterUrl = null, undoData }) {
+  insertQuotaActionLog.run({
+    requestId: -Date.now(),
+    userId,
+    username,
+    libraryId: libraryId != null ? Number(libraryId) : null,
+    mediaTitle,
+    posterUrl,
+    decision,
+    undoData: JSON.stringify(undoData),
+  });
+}
 const getDecisionRow = db.prepare('SELECT * FROM decisions_log WHERE id = ?');
 const markUndone = db.prepare(`UPDATE decisions_log SET undone_at = datetime('now') WHERE id = ?`);
+const setUndoData = db.prepare(`UPDATE decisions_log SET undo_data = ? WHERE id = ?`);
 const getLibraryForRequest = db.prepare(`
   SELECT * FROM libraries WHERE section_type = ? AND kind = ? AND enabled = 1 LIMIT 1
 `);
@@ -518,6 +535,149 @@ export function resetQuota(userId, libraryId, username = null) {
   });
 }
 
+// --- Overrides de límite/caducidad, con registro + deshacer (petición de
+// Edu, 20 jul 2026, ampliando el issue de jesusgarrigues a "cualquier cambio
+// admin"). Mismo patrón en los tres niveles: se guarda la fila ANTERIOR
+// completa (o null si no existía) en undo_data — deshacer solo la reinserta
+// tal cual, o borra si no había nada antes. La escritura real vive aquí (antes
+// estaba inline en la ruta) para que capturar el "antes" y loguear queden
+// atómicos con el cambio, no repartidos entre quota.js y routes/api.js.
+const getGroupOverrideRaw = db.prepare('SELECT * FROM group_overrides WHERE group_id = ? AND library_id = ?');
+const getRoleOverrideRaw = db.prepare('SELECT * FROM role_overrides WHERE role_id = ? AND library_id = ?');
+
+function restoreOverride(userId, libraryId, previous) {
+  if (!previous) {
+    db.prepare('DELETE FROM overrides WHERE user_id = ? AND library_id = ?').run(userId, libraryId);
+    return;
+  }
+  db.prepare(`
+    INSERT INTO overrides (user_id, library_id, limit_override, note, expiry_override, monthly_limit_override, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT (user_id, library_id) DO UPDATE SET
+      limit_override = excluded.limit_override, note = excluded.note,
+      expiry_override = excluded.expiry_override, monthly_limit_override = excluded.monthly_limit_override,
+      updated_at = excluded.updated_at
+  `).run(userId, libraryId, previous.limit_override, previous.note, previous.expiry_override, previous.monthly_limit_override);
+}
+
+function restoreGroupOverride(groupId, libraryId, previous) {
+  if (!previous) {
+    db.prepare('DELETE FROM group_overrides WHERE group_id = ? AND library_id = ?').run(groupId, libraryId);
+    return;
+  }
+  db.prepare(`
+    INSERT INTO group_overrides (group_id, library_id, limit_override, expiry_override, monthly_limit_override, updated_at)
+    VALUES (?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT (group_id, library_id) DO UPDATE SET
+      limit_override = excluded.limit_override, expiry_override = excluded.expiry_override,
+      monthly_limit_override = excluded.monthly_limit_override, updated_at = excluded.updated_at
+  `).run(groupId, libraryId, previous.limit_override, previous.expiry_override, previous.monthly_limit_override);
+}
+
+function restoreRoleOverride(roleId, libraryId, previous) {
+  if (!previous) {
+    db.prepare('DELETE FROM role_overrides WHERE role_id = ? AND library_id = ?').run(roleId, libraryId);
+    return;
+  }
+  db.prepare(`
+    INSERT INTO role_overrides (role_id, library_id, limit_override, expiry_override, monthly_limit_override, updated_at)
+    VALUES (?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT (role_id, library_id) DO UPDATE SET
+      limit_override = excluded.limit_override, expiry_override = excluded.expiry_override,
+      monthly_limit_override = excluded.monthly_limit_override, updated_at = excluded.updated_at
+  `).run(roleId, libraryId, previous.limit_override, previous.expiry_override, previous.monthly_limit_override);
+}
+
+export function setOverride(userId, libraryId, { limitOverride, note, expiryOverride, monthlyLimitOverride }, actorUsername = null) {
+  const previous = getOverride.get(userId, libraryId) ?? null;
+  db.prepare(`
+    INSERT INTO overrides (user_id, library_id, limit_override, note, expiry_override, monthly_limit_override, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT (user_id, library_id) DO UPDATE SET
+      limit_override = excluded.limit_override, note = excluded.note,
+      expiry_override = excluded.expiry_override, monthly_limit_override = excluded.monthly_limit_override,
+      updated_at = excluded.updated_at
+  `).run(userId, libraryId, limitOverride, note || null, expiryOverride ?? null, monthlyLimitOverride ?? null);
+  logAdminChange({
+    decision: 'override_changed',
+    userId: Number(userId),
+    libraryId,
+    username: actorUsername,
+    undoData: { userId: Number(userId), libraryId: Number(libraryId), previous },
+  });
+}
+
+export function deleteOverride(userId, libraryId, actorUsername = null) {
+  const previous = getOverride.get(userId, libraryId) ?? null;
+  db.prepare('DELETE FROM overrides WHERE user_id = ? AND library_id = ?').run(userId, libraryId);
+  if (!previous) return; // nada que había, nada que deshacer
+  logAdminChange({
+    decision: 'override_changed',
+    userId: Number(userId),
+    libraryId,
+    username: actorUsername,
+    undoData: { userId: Number(userId), libraryId: Number(libraryId), previous },
+  });
+}
+
+export function setGroupOverride(groupId, libraryId, { limitOverride, expiryOverride, monthlyLimitOverride }, groupName = null) {
+  const previous = getGroupOverrideRaw.get(groupId, libraryId) ?? null;
+  db.prepare(`
+    INSERT INTO group_overrides (group_id, library_id, limit_override, expiry_override, monthly_limit_override, updated_at)
+    VALUES (?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT (group_id, library_id) DO UPDATE SET
+      limit_override = excluded.limit_override, expiry_override = excluded.expiry_override,
+      monthly_limit_override = excluded.monthly_limit_override, updated_at = excluded.updated_at
+  `).run(groupId, libraryId, limitOverride, expiryOverride ?? null, monthlyLimitOverride ?? null);
+  logAdminChange({
+    decision: 'group_override_changed',
+    libraryId,
+    username: groupName,
+    undoData: { groupId: Number(groupId), libraryId: Number(libraryId), previous },
+  });
+}
+
+export function deleteGroupOverride(groupId, libraryId, groupName = null) {
+  const previous = getGroupOverrideRaw.get(groupId, libraryId) ?? null;
+  db.prepare('DELETE FROM group_overrides WHERE group_id = ? AND library_id = ?').run(groupId, libraryId);
+  if (!previous) return;
+  logAdminChange({
+    decision: 'group_override_changed',
+    libraryId,
+    username: groupName,
+    undoData: { groupId: Number(groupId), libraryId: Number(libraryId), previous },
+  });
+}
+
+export function setRoleOverride(roleId, libraryId, { limitOverride, expiryOverride, monthlyLimitOverride }, roleName = null) {
+  const previous = getRoleOverrideRaw.get(roleId, libraryId) ?? null;
+  db.prepare(`
+    INSERT INTO role_overrides (role_id, library_id, limit_override, expiry_override, monthly_limit_override, updated_at)
+    VALUES (?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT (role_id, library_id) DO UPDATE SET
+      limit_override = excluded.limit_override, expiry_override = excluded.expiry_override,
+      monthly_limit_override = excluded.monthly_limit_override, updated_at = excluded.updated_at
+  `).run(roleId, libraryId, limitOverride, expiryOverride ?? null, monthlyLimitOverride ?? null);
+  logAdminChange({
+    decision: 'role_override_changed',
+    libraryId,
+    username: roleName,
+    undoData: { roleId: Number(roleId), libraryId: Number(libraryId), previous },
+  });
+}
+
+export function deleteRoleOverride(roleId, libraryId, roleName = null) {
+  const previous = getRoleOverrideRaw.get(roleId, libraryId) ?? null;
+  db.prepare('DELETE FROM role_overrides WHERE role_id = ? AND library_id = ?').run(roleId, libraryId);
+  if (!previous) return;
+  logAdminChange({
+    decision: 'role_override_changed',
+    libraryId,
+    username: roleName,
+    undoData: { roleId: Number(roleId), libraryId: Number(libraryId), previous },
+  });
+}
+
 // rating_key de Plex para enlazar cada pendiente con su página de estadísticas
 // en Tautulli. Se matchea primero por TMDB id (los guids de Plex incluyen
 // "tmdb://<id>", independiente del idioma) y si no por título normalizado.
@@ -704,7 +864,7 @@ export function addManualCharge(userId, libraryId, title, username = null, note 
   const identity = quotaIdentity(userId);
   const attributedUserId = identity.memberIds[0];
   const library = getLibrary.get(libraryId);
-  insertImportedApproval.run({
+  const info = insertImportedApproval.run({
     requestId: -Date.now(),
     userId: attributedUserId,
     username,
@@ -717,6 +877,10 @@ export function addManualCharge(userId, libraryId, title, username = null, note 
     note: note || null,
     createdAt: toSqliteDateTime(new Date().toISOString()),
   });
+  // Deshacer un cargo manual (issue de jesusgarrigues, 20 jul 2026, ampliado a
+  // "cualquier cambio admin") es anular esta misma fila — no hace falta una
+  // fila de registro aparte, la propia 'approved' lleva su undo_data.
+  setUndoData.run(JSON.stringify({ selfIds: [info.lastInsertRowid] }), info.lastInsertRowid);
 }
 
 // v2: temporizador de aprobación — aplaza UNA solicitud concreta hasta
@@ -735,12 +899,45 @@ export function getRequestHold(requestId) {
   return { holdUntil: Date.parse(row.hold_until.replace(' ', 'T') + 'Z') };
 }
 
-export function setRequestHold(requestId, days) {
+// `context` es opcional a propósito: el scheduler también llama a estas dos
+// funciones (plazo cumplido, limpieza automática) y esos casos NO deben
+// aparecer en el Registro como si fueran una acción del admin — solo se
+// loguea cuando quien llama pasa contexto (el botón del panel sí lo pasa).
+export function setRequestHold(requestId, days, context = {}) {
   upsertRequestHold.run(requestId, toSqliteDateTime(new Date(Date.now() + days * DAY_MS).toISOString()));
+  if (context.userId != null) {
+    logAdminChange({
+      decision: 'held',
+      userId: context.userId,
+      libraryId: context.libraryId,
+      username: context.username,
+      mediaTitle: context.title,
+      posterUrl: context.posterUrl,
+      undoData: { requestId },
+    });
+  }
 }
 
-export function clearRequestHold(requestId) {
+export function clearRequestHold(requestId, context = {}) {
+  const existing = getRequestHold(requestId);
   deleteRequestHold.run(requestId);
+  if (context.userId != null && existing) {
+    logAdminChange({
+      decision: 'hold_cleared',
+      userId: context.userId,
+      libraryId: context.libraryId,
+      username: context.username,
+      mediaTitle: context.title,
+      posterUrl: context.posterUrl,
+      undoData: { requestId, holdUntil: existing.holdUntil },
+    });
+  }
+}
+
+// Restaura un hold_until concreto (deshacer un "quitar aplazamiento"), a
+// diferencia de setRequestHold que siempre cuenta N días desde ahora.
+function restoreRequestHold(requestId, holdUntilMs) {
+  upsertRequestHold.run(requestId, toSqliteDateTime(new Date(holdUntilMs).toISOString()));
 }
 
 // Quita a mano UN pendiente del cupo de un usuario (botón ✕ del panel), sin
@@ -787,18 +984,66 @@ export function dismissPendingItem(userId, libraryId, { tmdbId, seasonNumber, ti
 // jul 2026): limpia voided_at de las filas afectadas, o restaura el reset_at
 // anterior. No se puede deshacer dos veces (undone_at) ni nada que no sea uno
 // de estos dos tipos.
-export function undoQuotaAction(logId) {
+// Ampliado (petición de Edu, 20 jul 2026) de solo dismiss/reset a "cualquier
+// cambio admin": cargo manual, aprobar/rechazar/aplazar solicitudes, y
+// overrides de límite/caducidad (individual/grupo/rol). approved/declined
+// también deshacen el lado de Seerr (approveRequest/declineRequest) — no es
+// solo un cambio local, es literalmente "deshacer la aprobación/rechazo de
+// verdad", así que cancela/reactiva la descarga en Radarr/Sonarr vía Seerr.
+// async por eso (approve/decline pegan a la red); el resto es solo DB.
+export async function undoQuotaAction(logId) {
   const row = getDecisionRow.get(logId);
-  if (!row || row.undone_at || (row.decision !== 'dismissed' && row.decision !== 'reset')) return null;
-  const data = JSON.parse(row.undo_data || '{}');
-  if (row.decision === 'dismissed') {
-    for (const id of data.voidedIds || []) clearVoided.run(id);
-  } else {
-    if (data.previousResetAt) restoreResetAt.run(row.user_id, row.library_id, data.previousResetAt);
-    else deleteReset.run(row.user_id, row.library_id);
+  if (!row || row.undone_at || !row.undo_data) return null;
+  const data = JSON.parse(row.undo_data);
+  let result;
+  switch (row.decision) {
+    case 'dismissed':
+      for (const id of data.voidedIds || []) clearVoided.run(id);
+      result = { kind: 'user', userId: row.user_id, libraryId: row.library_id };
+      break;
+    case 'reset':
+      if (data.previousResetAt) restoreResetAt.run(row.user_id, row.library_id, data.previousResetAt);
+      else deleteReset.run(row.user_id, row.library_id);
+      result = { kind: 'user', userId: row.user_id, libraryId: row.library_id };
+      break;
+    case 'approved':
+      // Cargo manual (selfIds propios) o aprobación admin de una solicitud de
+      // Seerr (selfIds + requestId: además de anular localmente, se rechaza
+      // en Seerr para que de verdad se cancele la descarga).
+      for (const id of data.selfIds || []) markVoided.run(id);
+      if (data.requestId) await declineRequest(data.requestId);
+      result = { kind: 'user', userId: row.user_id, libraryId: row.library_id };
+      break;
+    case 'declined':
+      for (const id of data.voidedIds || []) clearVoided.run(id);
+      if (data.requestId) await approveRequest(data.requestId);
+      result = { kind: 'user', userId: row.user_id, libraryId: row.library_id };
+      break;
+    case 'held':
+      if (data.requestId != null) clearRequestHold(data.requestId);
+      result = { kind: 'user', userId: row.user_id, libraryId: row.library_id };
+      break;
+    case 'hold_cleared':
+      if (data.requestId != null && data.holdUntil != null) restoreRequestHold(data.requestId, data.holdUntil);
+      result = { kind: 'user', userId: row.user_id, libraryId: row.library_id };
+      break;
+    case 'override_changed':
+      restoreOverride(data.userId, data.libraryId, data.previous);
+      result = { kind: 'user', userId: data.userId, libraryId: data.libraryId };
+      break;
+    case 'group_override_changed':
+      restoreGroupOverride(data.groupId, data.libraryId, data.previous);
+      result = { kind: 'group', groupId: data.groupId, libraryId: data.libraryId };
+      break;
+    case 'role_override_changed':
+      restoreRoleOverride(data.roleId, data.libraryId, data.previous);
+      result = { kind: 'role', roleId: data.roleId, libraryId: data.libraryId };
+      break;
+    default:
+      return null;
   }
   markUndone.run(logId);
-  return { userId: row.user_id, libraryId: row.library_id };
+  return result;
 }
 
 // Sin esto, una aprobada que nunca llega a ver la luz (cancelada por el usuario, o

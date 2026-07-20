@@ -18,7 +18,12 @@ import {
   getMediaDetails,
 } from '../services/seerr.js';
 import { getSettings, getSettingsForDisplay, updateSettings } from '../settings.js';
-import { resetQuota, importSeerrHistory, refreshQuotaCache, dismissPendingItem, undoQuotaAction, addManualCharge, getPendingItemDetail, quotaIdentity, getBalance, getRequestHold, setRequestHold, clearRequestHold, pruneStaleQuotaCache } from '../quota.js';
+import {
+  resetQuota, importSeerrHistory, refreshQuotaCache, dismissPendingItem, undoQuotaAction, addManualCharge,
+  getPendingItemDetail, quotaIdentity, getBalance, getRequestHold, setRequestHold, clearRequestHold,
+  pruneStaleQuotaCache, setOverride, deleteOverride, setGroupOverride, deleteGroupOverride, setRoleOverride,
+  deleteRoleOverride,
+} from '../quota.js';
 import { matchByEmailOrUsername } from '../userMatch.js';
 import { runPollCycle } from '../scheduler.js';
 import { getVersionInfo } from '../services/version.js';
@@ -493,24 +498,15 @@ router.get('/overrides', (req, res) => {
 
 router.put('/overrides/:userId/:libraryId', ah(async (req, res) => {
   const { userId, libraryId } = req.params;
-  const { limitOverride, note, expiryOverride, monthlyLimitOverride } = req.body || {};
-  db.prepare(`
-    INSERT INTO overrides (user_id, library_id, limit_override, note, expiry_override, monthly_limit_override, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-    ON CONFLICT (user_id, library_id) DO UPDATE SET
-      limit_override = excluded.limit_override,
-      note = excluded.note,
-      expiry_override = excluded.expiry_override,
-      monthly_limit_override = excluded.monthly_limit_override,
-      updated_at = excluded.updated_at
-  `).run(userId, libraryId, limitOverride, note || null, expiryOverride ?? null, monthlyLimitOverride ?? null);
+  const { limitOverride, note, expiryOverride, monthlyLimitOverride, username } = req.body || {};
+  setOverride(userId, libraryId, { limitOverride, note, expiryOverride, monthlyLimitOverride }, username || null);
   await refreshQuotaCache(userId, libraryId);
   res.json({ ok: true });
 }));
 
 router.delete('/overrides/:userId/:libraryId', ah(async (req, res) => {
   const { userId, libraryId } = req.params;
-  db.prepare('DELETE FROM overrides WHERE user_id = ? AND library_id = ?').run(userId, libraryId);
+  deleteOverride(userId, libraryId, (req.body?.username || '').trim() || null);
   await refreshQuotaCache(userId, libraryId);
   res.json({ ok: true });
 }));
@@ -669,24 +665,16 @@ router.put('/groups/:id/members', ah(async (req, res) => {
 router.put('/groups/:id/overrides/:libraryId', ah(async (req, res) => {
   const { id, libraryId } = req.params;
   if (!groupExists.get(id)) return res.status(404).json({ error: 'group_not_found' });
-  const { limitOverride, expiryOverride, monthlyLimitOverride } = req.body || {};
+  const { limitOverride, expiryOverride, monthlyLimitOverride, groupName } = req.body || {};
   if (limitOverride === undefined) return res.status(400).json({ error: 'limitOverride_required' });
-  db.prepare(`
-    INSERT INTO group_overrides (group_id, library_id, limit_override, expiry_override, monthly_limit_override, updated_at)
-    VALUES (?, ?, ?, ?, ?, datetime('now'))
-    ON CONFLICT (group_id, library_id) DO UPDATE SET
-      limit_override = excluded.limit_override,
-      expiry_override = excluded.expiry_override,
-      monthly_limit_override = excluded.monthly_limit_override,
-      updated_at = excluded.updated_at
-  `).run(id, libraryId, limitOverride, expiryOverride ?? null, monthlyLimitOverride ?? null);
+  setGroupOverride(id, libraryId, { limitOverride, expiryOverride, monthlyLimitOverride }, groupName || null);
   await refreshAffected(groupMemberIds.all(id).map((r) => r.user_id), [libraryId]);
   res.json({ ok: true });
 }));
 
 router.delete('/groups/:id/overrides/:libraryId', ah(async (req, res) => {
   const { id, libraryId } = req.params;
-  db.prepare('DELETE FROM group_overrides WHERE group_id = ? AND library_id = ?').run(id, libraryId);
+  deleteGroupOverride(id, libraryId, (req.body?.groupName || '').trim() || null);
   await refreshAffected(groupMemberIds.all(id).map((r) => r.user_id), [libraryId]);
   res.json({ ok: true });
 }));
@@ -766,24 +754,16 @@ router.put('/roles/:id/members', ah(async (req, res) => {
 router.put('/roles/:id/overrides/:libraryId', ah(async (req, res) => {
   const { id, libraryId } = req.params;
   if (!roleExists.get(id)) return res.status(404).json({ error: 'role_not_found' });
-  const { limitOverride, expiryOverride, monthlyLimitOverride } = req.body || {};
+  const { limitOverride, expiryOverride, monthlyLimitOverride, roleName } = req.body || {};
   if (limitOverride === undefined) return res.status(400).json({ error: 'limitOverride_required' });
-  db.prepare(`
-    INSERT INTO role_overrides (role_id, library_id, limit_override, expiry_override, monthly_limit_override, updated_at)
-    VALUES (?, ?, ?, ?, ?, datetime('now'))
-    ON CONFLICT (role_id, library_id) DO UPDATE SET
-      limit_override = excluded.limit_override,
-      expiry_override = excluded.expiry_override,
-      monthly_limit_override = excluded.monthly_limit_override,
-      updated_at = excluded.updated_at
-  `).run(id, libraryId, limitOverride, expiryOverride ?? null, monthlyLimitOverride ?? null);
+  setRoleOverride(id, libraryId, { limitOverride, expiryOverride, monthlyLimitOverride }, roleName || null);
   await refreshAffected(roleMemberIds.all(id).map((r) => r.user_id), [libraryId]);
   res.json({ ok: true });
 }));
 
 router.delete('/roles/:id/overrides/:libraryId', ah(async (req, res) => {
   const { id, libraryId } = req.params;
-  db.prepare('DELETE FROM role_overrides WHERE role_id = ? AND library_id = ?').run(id, libraryId);
+  deleteRoleOverride(id, libraryId, (req.body?.roleName || '').trim() || null);
   await refreshAffected(roleMemberIds.all(id).map((r) => r.user_id), [libraryId]);
   res.json({ ok: true });
 }));
@@ -947,10 +927,18 @@ router.post('/quota/dismiss/:userId/:libraryId', ah(async (req, res) => {
 // jesusgarrigues, 20 jul 2026). Refresca la caché del usuario+biblioteca
 // afectados para que el panel de Cupo lo refleje al momento.
 router.post('/decisions/:id/undo', ah(async (req, res) => {
-  const result = undoQuotaAction(req.params.id);
+  const result = await undoQuotaAction(req.params.id);
   if (!result) return res.status(404).json({ error: 'not_undoable' });
-  const refreshed = await refreshQuotaCache(result.userId, result.libraryId);
-  res.json({ ok: true, ...refreshed });
+  // Los de grupo/rol no tienen un único usuario que refrescar — se recalcula
+  // el cupo de todos los miembros afectados (igual que al editar el override).
+  if (result.kind === 'group') {
+    await refreshAffected(groupMemberIds.all(result.groupId).map((r) => r.user_id), [result.libraryId]);
+  } else if (result.kind === 'role') {
+    await refreshAffected(roleMemberIds.all(result.roleId).map((r) => r.user_id), [result.libraryId]);
+  } else {
+    await refreshQuotaCache(result.userId, result.libraryId);
+  }
+  res.json({ ok: true });
 }));
 
 // Buscador para el cargo manual: algo que YA está en Plex (vía Tautulli, tu
@@ -1044,6 +1032,10 @@ const insertManualDecision = db.prepare(`
   VALUES
     (@requestId, @userId, @username, @libraryId, @mediaTitle, @mediaType, @tmdbId, @seasonNumber, @posterUrl, @balanceBefore, @limitApplied, @decision)
 `);
+// Deshacer un aprobar/rechazar admin no es solo local: se rechaza/aprueba
+// también en Seerr (declineRequest/approveRequest), para que la descarga
+// real se cancele/reactive de verdad, no solo el cupo. undo_data se rellena
+// aparte (setUndoDataById) tras insertar, cuando ya se sabe el id o los ids.
 const approvedAlreadyLogged = db.prepare(`
   SELECT 1 FROM decisions_log
   WHERE request_id = ? AND decision = 'approved' AND voided_at IS NULL
@@ -1057,6 +1049,12 @@ const voidApprovedByRequest = db.prepare(`
   UPDATE decisions_log SET voided_at = datetime('now')
   WHERE request_id = ? AND decision = 'approved' AND voided_at IS NULL
 `);
+// Ids concretos que va a anular un rechazo — para poder restaurarlos exactos
+// si se deshace (approvedPairsForRequest de arriba solo da user/library, no ids).
+const approvedIdsForRequest = db.prepare(`
+  SELECT id FROM decisions_log WHERE request_id = ? AND decision = 'approved' AND voided_at IS NULL
+`);
+const setUndoDataById = db.prepare('UPDATE decisions_log SET undo_data = ? WHERE id = ?');
 const lastRowForRequest = db.prepare(
   'SELECT * FROM decisions_log WHERE request_id = ? ORDER BY id DESC LIMIT 1'
 );
@@ -1131,10 +1129,11 @@ router.post('/requests/:id/approve', ah(async (req, res) => {
     } catch { /* sin saldo no se bloquea la aprobación manual */ }
   }
   const seasons = request.mediaType === 'tv' && request.seasons.length > 0 ? request.seasons : [null];
+  const insertedIds = [];
   for (const seasonNumber of seasons) {
     if (approvedAlreadyLogged.get(requestId, seasonNumber ?? null)) continue;
     const details = await getMediaDetails(request.mediaType, request.tmdbId, seasonNumber);
-    insertManualDecision.run({
+    const info = insertManualDecision.run({
       requestId,
       userId: tautulliUser?.id ?? null,
       username: tautulliUser?.username ?? request.requestedBy?.username ?? 'unknown',
@@ -1148,6 +1147,13 @@ router.post('/requests/:id/approve', ah(async (req, res) => {
       limitApplied,
       decision: 'approved',
     });
+    insertedIds.push(info.lastInsertRowid);
+  }
+  // Solo la primera fila lleva undo_data (deshacer anula TODAS las de este
+  // clic, ver undoQuotaAction) — así solo sale un botón "deshacer" en el
+  // Registro por cada vez que se pulsa Aprobar, no uno por temporada.
+  if (insertedIds.length > 0 && library && tautulliUser) {
+    setUndoDataById.run(JSON.stringify({ selfIds: insertedIds, requestId }), insertedIds[0]);
   }
   if (library && tautulliUser) await refreshQuotaCache(tautulliUser.id, library.id);
   res.json({ ok: true });
@@ -1157,13 +1163,13 @@ router.post('/requests/:id/approve', ah(async (req, res) => {
 // disponible" del detalle), sus filas se anulan y el cupo se libera al momento.
 router.post('/requests/:id/decline', ah(async (req, res) => {
   const requestId = Number(req.params.id);
-  await declineRequest(requestId);
-
+  const voidedIds = approvedIdsForRequest.all(requestId).map((r) => r.id);
   const affected = approvedPairsForRequest.all(requestId);
+  await declineRequest(requestId);
   voidApprovedByRequest.run(requestId);
 
   const lastRow = lastRowForRequest.get(requestId);
-  insertManualDecision.run({
+  const info = insertManualDecision.run({
     requestId,
     userId: lastRow?.user_id ?? null,
     username: lastRow?.username ?? 'unknown',
@@ -1177,6 +1183,7 @@ router.post('/requests/:id/decline', ah(async (req, res) => {
     limitApplied: null,
     decision: 'declined',
   });
+  setUndoDataById.run(JSON.stringify({ requestId, voidedIds }), info.lastInsertRowid);
 
   for (const pair of affected) {
     if (pair.user_id != null && pair.library_id != null) {
@@ -1188,16 +1195,21 @@ router.post('/requests/:id/decline', ah(async (req, res) => {
 
 // v2: temporizador de aprobación — aplaza ESTA solicitud concreta (acción
 // puntual, no una norma general del usuario) hasta dentro de N días; el ciclo
-// de sondeo la respeta y la limpia sola al cumplirse el plazo.
+// de sondeo la respeta y la limpia sola al cumplirse el plazo. El contexto
+// (userId/libraryId/username/title/posterUrl) es opcional y lo manda el panel
+// cuando lo tiene (detalle de un pendiente) — sin él no sale en el Registro
+// (p.ej. desde el banner de solicitudes sin usuario emparejado).
 router.post('/requests/:id/hold', (req, res) => {
   const days = Number(req.body?.days);
   if (!Number.isFinite(days) || days <= 0) return res.status(400).json({ error: 'days_required' });
-  setRequestHold(Number(req.params.id), days);
+  const { userId, libraryId, username, title, posterUrl } = req.body || {};
+  setRequestHold(Number(req.params.id), days, { userId, libraryId, username, title, posterUrl });
   res.json({ ok: true, holdUntil: getRequestHold(Number(req.params.id)).holdUntil });
 });
 
 router.delete('/requests/:id/hold', (req, res) => {
-  clearRequestHold(Number(req.params.id));
+  const { userId, libraryId, username, title, posterUrl } = req.body || {};
+  clearRequestHold(Number(req.params.id), { userId, libraryId, username, title, posterUrl });
   res.json({ ok: true });
 });
 
@@ -1265,8 +1277,11 @@ router.get('/decisions', (req, res) => {
   }
   const salvadosWhereSql = salvadosWhere.length ? `WHERE ${salvadosWhere.join(' AND ')}` : '';
 
-  const decisionsSelect = `SELECT id, created_at, username, media_title, poster_url, balance_before, limit_applied, decision, note, undone_at FROM decisions_log ${decisionsWhereSql}`;
-  const salvadosSelect = `SELECT id, saved_at AS created_at, telegram_name AS username, title AS media_title, poster_url, NULL AS balance_before, NULL AS limit_applied, 'salvado' AS decision, NULL AS note, NULL AS undone_at FROM salvados ${salvadosWhereSql}`;
+  // undoable: tiene undo_data guardado, no el propio decision (p.ej. 'approved'
+  // vale tanto para una aprobación normal de Seerr -sin undo_data- como para un
+  // cargo manual o una aprobación admin -con undo_data-, ver undoQuotaAction).
+  const decisionsSelect = `SELECT id, created_at, username, media_title, poster_url, balance_before, limit_applied, decision, note, undone_at, (undo_data IS NOT NULL) AS undoable FROM decisions_log ${decisionsWhereSql}`;
+  const salvadosSelect = `SELECT id, saved_at AS created_at, telegram_name AS username, title AS media_title, poster_url, NULL AS balance_before, NULL AS limit_applied, 'salvado' AS decision, NULL AS note, NULL AS undone_at, 0 AS undoable FROM salvados ${salvadosWhereSql}`;
 
   let unionSql;
   let unionParams;

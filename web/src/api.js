@@ -42,8 +42,8 @@ export const api = {
   overrides: () => request('/overrides'),
   setOverride: (userId, libraryId, body) =>
     request(`/overrides/${userId}/${libraryId}`, { method: 'PUT', body: JSON.stringify(body) }),
-  deleteOverride: (userId, libraryId) =>
-    request(`/overrides/${userId}/${libraryId}`, { method: 'DELETE' }),
+  deleteOverride: (userId, libraryId, username) =>
+    request(`/overrides/${userId}/${libraryId}`, { method: 'DELETE', body: JSON.stringify({ username }) }),
   bulkSetOverride: (libraryId, limitOverride, note) =>
     request('/overrides/bulk', { method: 'POST', body: JSON.stringify({ libraryId, limitOverride, note }) }),
 
@@ -55,8 +55,8 @@ export const api = {
     request(`/groups/${id}/members`, { method: 'PUT', body: JSON.stringify({ userIds }) }),
   setGroupOverride: (id, libraryId, body) =>
     request(`/groups/${id}/overrides/${libraryId}`, { method: 'PUT', body: JSON.stringify(body) }),
-  deleteGroupOverride: (id, libraryId) =>
-    request(`/groups/${id}/overrides/${libraryId}`, { method: 'DELETE' }),
+  deleteGroupOverride: (id, libraryId, groupName) =>
+    request(`/groups/${id}/overrides/${libraryId}`, { method: 'DELETE', body: JSON.stringify({ groupName }) }),
 
   roles: () => request('/roles'),
   createRole: (name) => request('/roles', { method: 'POST', body: JSON.stringify({ name }) }),
@@ -65,8 +65,8 @@ export const api = {
     request(`/roles/${id}/members`, { method: 'PUT', body: JSON.stringify({ userIds }) }),
   setRoleOverride: (id, libraryId, body) =>
     request(`/roles/${id}/overrides/${libraryId}`, { method: 'PUT', body: JSON.stringify(body) }),
-  deleteRoleOverride: (id, libraryId) =>
-    request(`/roles/${id}/overrides/${libraryId}`, { method: 'DELETE' }),
+  deleteRoleOverride: (id, libraryId, roleName) =>
+    request(`/roles/${id}/overrides/${libraryId}`, { method: 'DELETE', body: JSON.stringify({ roleName }) }),
 
   quota: () => request('/quota'),
   recalculateQuota: () => request('/quota/recalculate', { method: 'POST' }),
@@ -87,8 +87,10 @@ export const api = {
   pendingApprovals: () => request('/requests/pending-approval'),
   approveRequest: (id) => request(`/requests/${id}/approve`, { method: 'POST' }),
   declineRequest: (id) => request(`/requests/${id}/decline`, { method: 'POST' }),
-  holdRequest: (id, days) => request(`/requests/${id}/hold`, { method: 'POST', body: JSON.stringify({ days }) }),
-  clearRequestHold: (id) => request(`/requests/${id}/hold`, { method: 'DELETE' }),
+  holdRequest: (id, days, context = {}) =>
+    request(`/requests/${id}/hold`, { method: 'POST', body: JSON.stringify({ days, ...context }) }),
+  clearRequestHold: (id, context = {}) =>
+    request(`/requests/${id}/hold`, { method: 'DELETE', body: JSON.stringify(context) }),
   decisions: (params = {}) => request(`/decisions?${new URLSearchParams(params)}`),
   undoDecision: (id) => request(`/decisions/${id}/undo`, { method: 'POST' }),
   stats: () => request('/stats'),

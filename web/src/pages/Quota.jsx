@@ -1292,12 +1292,24 @@ export default function Quota() {
             if (!days) return;
             const n = Number(days);
             if (!Number.isFinite(n) || n <= 0) return;
-            await api.holdRequest(item.requestId, n);
+            await api.holdRequest(item.requestId, n, {
+              userId: detailTarget.user.userId,
+              libraryId: detailTarget.lib.libraryId,
+              username: detailTarget.user.username,
+              title: item.title,
+              posterUrl: item.posterUrl,
+            });
             load();
             setDetailTarget(null);
           }}
           onClearHold={async (item) => {
-            await api.clearRequestHold(item.requestId);
+            await api.clearRequestHold(item.requestId, {
+              userId: detailTarget.user.userId,
+              libraryId: detailTarget.lib.libraryId,
+              username: detailTarget.user.username,
+              title: item.title,
+              posterUrl: item.posterUrl,
+            });
             load();
             setDetailTarget(null);
           }}

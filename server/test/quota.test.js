@@ -19,8 +19,14 @@ import {
   addManualCharge,
   resetQuota,
   undoQuotaAction,
+  setOverride,
+  deleteOverride,
+  setGroupOverride,
+  deleteGroupOverride,
+  setRoleOverride,
+  deleteRoleOverride,
 } from '../src/quota.js';
-import { setRawSetting } from '../src/settings.js';
+import { setRawSetting, updateSettings } from '../src/settings.js';
 import { db } from '../src/db.js';
 
 test('resolveLimit: el primer override no-null gana, en el orden dado', () => {
@@ -363,7 +369,7 @@ test('dismissPendingItem: no toca a otros usuarios ni otras bibliotecas', () => 
 
 // --- Registro + deshacer de "quitar del cupo"/"resetear" (issue de jesusgarrigues, 20 jul 2026) ---
 
-test('dismissPendingItem: loguea una fila "dismissed" con los ids anulados, deshacer los recupera', () => {
+test('dismissPendingItem: loguea una fila "dismissed" con los ids anulados, deshacer los recupera', async () => {
   insertDecision.run(60, 300, 1, 'Matrix', 603);
   insertDecision.run(61, 300, 1, 'Matrix', 603); // duplicada, misma película
 
@@ -379,12 +385,12 @@ test('dismissPendingItem: loguea una fila "dismissed" con los ids anulados, desh
   assert.equal(JSON.parse(logRow.undo_data).voidedIds.length, 2);
   assert.equal(logRow.undone_at, null);
 
-  const result = undoQuotaAction(logRow.id);
-  assert.deepEqual(result, { userId: 300, libraryId: 1 });
+  const result = await undoQuotaAction(logRow.id);
+  assert.deepEqual(result, { kind: 'user', userId: 300, libraryId: 1 });
   assert.equal(pendingCount.get(300, 1).n, 2); // las dos vuelven a contar
 
   // no se puede deshacer dos veces
-  assert.equal(undoQuotaAction(logRow.id), null);
+  assert.equal(await undoQuotaAction(logRow.id), null);
 });
 
 // Bug real: la fila 'dismissed' del registro salía sin carátula porque
@@ -408,19 +414,19 @@ test('dismissPendingItem: sin coincidencias no loguea nada', () => {
   assert.equal(after, before);
 });
 
-test('resetQuota: loguea "reset" con el reset_at anterior (null la primera vez), deshacer lo quita', () => {
+test('resetQuota: loguea "reset" con el reset_at anterior (null la primera vez), deshacer lo quita', async () => {
   resetQuota(302, 1, 'ana');
   const logRow = db.prepare("SELECT * FROM decisions_log WHERE user_id = 302 AND decision = 'reset'").get();
   assert.equal(JSON.parse(logRow.undo_data).previousResetAt, null);
   assert.ok(db.prepare('SELECT reset_at FROM quota_resets WHERE user_id = 302 AND library_id = 1').get());
 
-  const result = undoQuotaAction(logRow.id);
-  assert.deepEqual(result, { userId: 302, libraryId: 1 });
+  const result = await undoQuotaAction(logRow.id);
+  assert.deepEqual(result, { kind: 'user', userId: 302, libraryId: 1 });
   // era la primera vez (sin reset anterior) → deshacer quita la fila entera
   assert.equal(db.prepare('SELECT reset_at FROM quota_resets WHERE user_id = 302 AND library_id = 1').get(), undefined);
 });
 
-test('resetQuota: un segundo reset guarda el reset_at anterior, deshacer lo restaura', () => {
+test('resetQuota: un segundo reset guarda el reset_at anterior, deshacer lo restaura', async () => {
   resetQuota(303, 1);
   const firstResetAt = db.prepare('SELECT reset_at FROM quota_resets WHERE user_id = 303 AND library_id = 1').get().reset_at;
 
@@ -430,18 +436,171 @@ test('resetQuota: un segundo reset guarda el reset_at anterior, deshacer lo rest
   ).get();
   assert.equal(JSON.parse(secondLog.undo_data).previousResetAt, firstResetAt);
 
-  undoQuotaAction(secondLog.id);
+  await undoQuotaAction(secondLog.id);
   assert.equal(
     db.prepare('SELECT reset_at FROM quota_resets WHERE user_id = 303 AND library_id = 1').get().reset_at,
     firstResetAt
   );
 });
 
-test('undoQuotaAction: null si el id no existe o la decisión no es deshacible', () => {
-  assert.equal(undoQuotaAction(999999), null);
+test('undoQuotaAction: null si el id no existe o la decisión no es deshacible', async () => {
+  assert.equal(await undoQuotaAction(999999), null);
   insertDecision.run(70, 304, 1, 'Matrix', 603); // decision 'approved', no deshacible
   const approvedRow = db.prepare("SELECT id FROM decisions_log WHERE user_id = 304 AND decision = 'approved'").get();
-  assert.equal(undoQuotaAction(approvedRow.id), null);
+  assert.equal(await undoQuotaAction(approvedRow.id), null);
+});
+
+test('addManualCharge: la fila queda deshacible (undo = anularse a sí misma)', async () => {
+  insertLibrary.run(65, 'Películas', 1);
+  addManualCharge(400, 65, 'Interestelar', 'ana');
+  const logRow = db.prepare("SELECT * FROM decisions_log WHERE user_id = 400 AND decision = 'approved'").get();
+  assert.equal(JSON.parse(logRow.undo_data).selfIds.length, 1);
+  assert.equal(pendingCount.get(400, 65).n, 1);
+
+  const result = await undoQuotaAction(logRow.id);
+  assert.deepEqual(result, { kind: 'user', userId: 400, libraryId: 65 });
+  assert.equal(pendingCount.get(400, 65).n, 0);
+});
+
+test('setOverride/deleteOverride: guardan el valor anterior y lo restauran al deshacer', async () => {
+  // Primera vez: no había override → previous null → deshacer lo borra entero.
+  setOverride(500, 70, { limitOverride: 3, note: 'primero' }, 'ana');
+  let logRow = db.prepare("SELECT * FROM decisions_log WHERE decision = 'override_changed' AND username = 'ana'").get();
+  assert.equal(JSON.parse(logRow.undo_data).previous, null);
+  await undoQuotaAction(logRow.id);
+  assert.equal(db.prepare('SELECT * FROM overrides WHERE user_id = 500 AND library_id = 70').get(), undefined);
+
+  // Segunda vez: ya hay un valor (3) → cambiarlo a 7 guarda el 3 como "previous".
+  setOverride(500, 70, { limitOverride: 3, note: 'primero' }, 'ana');
+  setOverride(500, 70, { limitOverride: 7, note: 'segundo' }, 'ana');
+  const secondLog = db.prepare(
+    "SELECT * FROM decisions_log WHERE decision = 'override_changed' AND username = 'ana' ORDER BY id DESC LIMIT 1"
+  ).get();
+  assert.equal(JSON.parse(secondLog.undo_data).previous.limit_override, 3);
+  await undoQuotaAction(secondLog.id);
+  assert.equal(db.prepare('SELECT limit_override FROM overrides WHERE user_id = 500 AND library_id = 70').get().limit_override, 3);
+
+  // deleteOverride también loguea y deshacerlo restaura el override borrado.
+  const beforeDelete = db.prepare('SELECT COUNT(*) AS n FROM decisions_log WHERE decision = \'override_changed\'').get().n;
+  deleteOverride(500, 70, 'ana');
+  assert.equal(db.prepare('SELECT * FROM overrides WHERE user_id = 500 AND library_id = 70').get(), undefined);
+  const deleteLog = db.prepare(
+    "SELECT * FROM decisions_log WHERE decision = 'override_changed' ORDER BY id DESC LIMIT 1"
+  ).get();
+  assert.ok(db.prepare('SELECT COUNT(*) AS n FROM decisions_log WHERE decision = \'override_changed\'').get().n > beforeDelete);
+  await undoQuotaAction(deleteLog.id);
+  // deleteOverride capturó "previous" justo antes de borrar (3, tras el undo
+  // anterior), así que deshacerlo restaura 3 — no el 7 de dos pasos atrás.
+  assert.equal(db.prepare('SELECT limit_override FROM overrides WHERE user_id = 500 AND library_id = 70').get().limit_override, 3);
+});
+
+test('setGroupOverride/deleteGroupOverride: mismo patrón, kind "group" al deshacer', async () => {
+  setGroupOverride(10, 70, { limitOverride: 5 }, 'Familia');
+  const logRow = db.prepare("SELECT * FROM decisions_log WHERE decision = 'group_override_changed'").get();
+  assert.equal(logRow.username, 'Familia');
+  assert.equal(JSON.parse(logRow.undo_data).previous, null);
+
+  setGroupOverride(10, 70, { limitOverride: 9 }, 'Familia');
+  deleteGroupOverride(10, 70, 'Familia');
+  const deleteLog = db.prepare(
+    "SELECT * FROM decisions_log WHERE decision = 'group_override_changed' ORDER BY id DESC LIMIT 1"
+  ).get();
+  const result = await undoQuotaAction(deleteLog.id);
+  assert.deepEqual(result, { kind: 'group', groupId: 10, libraryId: 70 });
+  assert.equal(db.prepare('SELECT limit_override FROM group_overrides WHERE group_id = 10 AND library_id = 70').get().limit_override, 9);
+});
+
+test('setRoleOverride/deleteRoleOverride: mismo patrón, kind "role" al deshacer', async () => {
+  setRoleOverride(20, 70, { limitOverride: 4 }, 'Amigo');
+  setRoleOverride(20, 70, { limitOverride: 8 }, 'Amigo');
+  const logRow = db.prepare(
+    "SELECT * FROM decisions_log WHERE decision = 'role_override_changed' ORDER BY id DESC LIMIT 1"
+  ).get();
+  assert.equal(JSON.parse(logRow.undo_data).previous.limit_override, 4);
+
+  const result = await undoQuotaAction(logRow.id);
+  assert.deepEqual(result, { kind: 'role', roleId: 20, libraryId: 70 });
+  assert.equal(db.prepare('SELECT limit_override FROM role_overrides WHERE role_id = 20 AND library_id = 70').get().limit_override, 4);
+});
+
+test('setRequestHold/clearRequestHold: con contexto quedan en el registro y se pueden deshacer', async () => {
+  setRequestHold(9001, 7, { userId: 600, libraryId: 70, username: 'ana', title: 'Dune', posterUrl: 'https://img/dune.jpg' });
+  const heldLog = db.prepare("SELECT * FROM decisions_log WHERE decision = 'held' AND user_id = 600").get();
+  assert.equal(heldLog.media_title, 'Dune');
+  assert.equal(heldLog.poster_url, 'https://img/dune.jpg');
+  assert.ok(getRequestHold(9001));
+
+  clearRequestHold(9001, { userId: 600, libraryId: 70, username: 'ana', title: 'Dune' });
+  const clearedLog = db.prepare("SELECT * FROM decisions_log WHERE decision = 'hold_cleared' AND user_id = 600").get();
+  assert.ok(JSON.parse(clearedLog.undo_data).holdUntil);
+  assert.equal(getRequestHold(9001), null);
+
+  const result = await undoQuotaAction(clearedLog.id);
+  assert.deepEqual(result, { kind: 'user', userId: 600, libraryId: 70 });
+  assert.ok(getRequestHold(9001)); // restaurado
+
+  await undoQuotaAction(heldLog.id);
+  assert.equal(getRequestHold(9001), null); // deshacer "aplazar" = quitar el aplazamiento
+});
+
+test('setRequestHold/clearRequestHold: sin contexto (uso interno del scheduler) no loguean nada', () => {
+  const before = db.prepare("SELECT COUNT(*) AS n FROM decisions_log WHERE decision IN ('held','hold_cleared')").get().n;
+  setRequestHold(9002, 3);
+  clearRequestHold(9002);
+  const after = db.prepare("SELECT COUNT(*) AS n FROM decisions_log WHERE decision IN ('held','hold_cleared')").get().n;
+  assert.equal(after, before);
+});
+
+// Deshacer aprobar/rechazar no es solo local: se rechaza/aprueba también en
+// Seerr de verdad (para cancelar/reactivar la descarga), no solo se toca la BD.
+test('undoQuotaAction: deshacer "approved" con requestId también rechaza en Seerr', async () => {
+  updateSettings({ seerr_url: 'http://seerr.test', seerr_api_key: 'k' });
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (input, options) => {
+    calls.push({ url: String(input), method: options?.method });
+    return new Response('{}', { status: 200 });
+  };
+
+  try {
+    db.prepare(`
+      INSERT INTO decisions_log (request_id, user_id, library_id, media_title, decision, undo_data)
+      VALUES (7001, 700, 1, 'Dune', 'approved', ?)
+    `).run(JSON.stringify({ selfIds: [], requestId: 7001 }));
+    const logRow = db.prepare("SELECT id FROM decisions_log WHERE request_id = 7001").get();
+
+    await undoQuotaAction(logRow.id);
+    assert.ok(calls.some((c) => c.url === 'http://seerr.test/api/v1/request/7001/decline' && c.method === 'POST'));
+  } finally {
+    global.fetch = originalFetch;
+    setRawSetting('seerr_url', '');
+    setRawSetting('seerr_api_key', '');
+  }
+});
+
+test('undoQuotaAction: deshacer "declined" con requestId también aprueba en Seerr', async () => {
+  updateSettings({ seerr_url: 'http://seerr.test', seerr_api_key: 'k' });
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (input, options) => {
+    calls.push({ url: String(input), method: options?.method });
+    return new Response('{}', { status: 200 });
+  };
+
+  try {
+    db.prepare(`
+      INSERT INTO decisions_log (request_id, user_id, library_id, media_title, decision, undo_data)
+      VALUES (7002, 701, 1, 'Dune', 'declined', ?)
+    `).run(JSON.stringify({ voidedIds: [], requestId: 7002 }));
+    const logRow = db.prepare("SELECT id FROM decisions_log WHERE request_id = 7002").get();
+
+    await undoQuotaAction(logRow.id);
+    assert.ok(calls.some((c) => c.url === 'http://seerr.test/api/v1/request/7002/approve' && c.method === 'POST'));
+  } finally {
+    global.fetch = originalFetch;
+    setRawSetting('seerr_url', '');
+    setRawSetting('seerr_api_key', '');
+  }
 });
 
 // --- Issue #9: temporadas vistas que no salían del cupo ---

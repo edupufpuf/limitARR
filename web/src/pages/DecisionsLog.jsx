@@ -17,6 +17,10 @@ const decisionBadge = {
   salvado: 'bg-sky-400/10 text-sky-400 ring-sky-400/25',
   dismissed: 'bg-orange-400/10 text-orange-400 ring-orange-400/25',
   reset: 'bg-orange-400/10 text-orange-400 ring-orange-400/25',
+  hold_cleared: 'bg-yellow-400/10 text-yellow-400 ring-yellow-400/25',
+  override_changed: 'bg-violet-400/10 text-violet-400 ring-violet-400/25',
+  group_override_changed: 'bg-violet-400/10 text-violet-400 ring-violet-400/25',
+  role_override_changed: 'bg-violet-400/10 text-violet-400 ring-violet-400/25',
 };
 
 const decisionLabel = {
@@ -32,11 +36,11 @@ const decisionLabel = {
   salvado: '💾 salvada',
   dismissed: '✕ quitada del cupo',
   reset: '↺ cupo reseteado',
+  hold_cleared: 'aplazamiento cancelado',
+  override_changed: 'override cambiado',
+  group_override_changed: 'override de grupo cambiado',
+  role_override_changed: 'override de rol cambiado',
 };
-
-// Solo estas dos se pueden deshacer (undo_data en el servidor); el resto son
-// decisiones normales del flujo de aprobación, no acciones manuales del admin.
-const UNDOABLE = new Set(['dismissed', 'reset']);
 
 // created_at viene de SQLite en UTC ('YYYY-MM-DD HH:MM:SS'); se enseña en local.
 function formatDate(createdAt) {
@@ -58,8 +62,20 @@ export default function DecisionsLog() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [undoing, setUndoing] = useState({});
 
+  function undoConfirmText(row) {
+    switch (row.decision) {
+      case 'reset': return '¿Deshacer este reseteo del cupo?';
+      case 'dismissed': return `¿Deshacer? "${row.media_title ?? 'esto'}" vuelve a contar para el cupo.`;
+      case 'approved': return `¿Deshacer la aprobación de "${row.media_title ?? 'esto'}"? Se rechaza también en Seerr (cancela la descarga si estaba en curso).`;
+      case 'declined': return `¿Deshacer el rechazo de "${row.media_title ?? 'esto'}"? Se aprueba también en Seerr.`;
+      case 'held': return `¿Quitar el aplazamiento de "${row.media_title ?? 'esta solicitud'}"?`;
+      case 'hold_cleared': return `¿Restaurar el aplazamiento de "${row.media_title ?? 'esta solicitud'}"?`;
+      default: return '¿Deshacer este cambio de override?';
+    }
+  }
+
   async function undo(row) {
-    if (!confirm(row.decision === 'reset' ? '¿Deshacer este reseteo del cupo?' : `¿Deshacer? "${row.media_title ?? 'esto'}" vuelve a contar para el cupo.`)) return;
+    if (!confirm(undoConfirmText(row))) return;
     setUndoing((u) => ({ ...u, [row.id]: true }));
     try {
       await api.undoDecision(row.id);
@@ -165,7 +181,7 @@ export default function DecisionsLog() {
                   </span>
                 </td>
                 <td className="py-2 pr-4 whitespace-nowrap">
-                  {UNDOABLE.has(r.decision) && (
+                  {Boolean(r.undoable) && (
                     r.undone_at ? (
                       <span className="text-xs text-gray-600">deshecho</span>
                     ) : (

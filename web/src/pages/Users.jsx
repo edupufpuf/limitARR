@@ -89,7 +89,7 @@ function GroupCard({ group, users, libraries, onChanged }) {
     const value = limits[libraryId];
     if (value === '') {
       if (group.overrides.some((o) => o.library_id === libraryId)) {
-        await api.deleteGroupOverride(group.id, libraryId);
+        await api.deleteGroupOverride(group.id, libraryId, group.name);
       }
     } else {
       const expiry = expiries[libraryId];
@@ -98,6 +98,7 @@ function GroupCard({ group, users, libraries, onChanged }) {
         limitOverride: Number(value),
         expiryOverride: expiry === '' ? null : Number(expiry),
         monthlyLimitOverride: monthly === '' ? null : Number(monthly),
+        groupName: group.name,
       });
     }
     onChanged();
@@ -264,7 +265,7 @@ function RoleCard({ role, users, libraries, onChanged }) {
     const value = limits[libraryId];
     if (value === '') {
       if (role.overrides.some((o) => o.library_id === libraryId)) {
-        await api.deleteRoleOverride(role.id, libraryId);
+        await api.deleteRoleOverride(role.id, libraryId, role.name);
       }
     } else {
       const expiry = expiries[libraryId];
@@ -273,6 +274,7 @@ function RoleCard({ role, users, libraries, onChanged }) {
         limitOverride: Number(value),
         expiryOverride: expiry === '' ? null : Number(expiry),
         monthlyLimitOverride: monthly === '' ? null : Number(monthly),
+        roleName: role.name,
       });
     }
     onChanged();
@@ -427,7 +429,7 @@ function UserFichaModal({ user, group, role, allGroups, allRoles, overrides, lib
     const value = limits[libraryId];
     if (value === '') {
       if (overrides.some((o) => o.library_id === libraryId)) {
-        await api.deleteOverride(user.id, libraryId);
+        await api.deleteOverride(user.id, libraryId, user.username);
       }
     } else {
       await api.setOverride(user.id, libraryId, {
@@ -435,13 +437,14 @@ function UserFichaModal({ user, group, role, allGroups, allRoles, overrides, lib
         expiryOverride: expiries[libraryId] === '' ? null : Number(expiries[libraryId]),
         monthlyLimitOverride: monthlyLimits[libraryId] === '' ? null : Number(monthlyLimits[libraryId]),
         note: notes[libraryId] || '',
+        username: user.username,
       });
     }
     onChanged();
   }
 
   async function clearLimit(libraryId) {
-    await api.deleteOverride(user.id, libraryId);
+    await api.deleteOverride(user.id, libraryId, user.username);
     onChanged();
   }
 
