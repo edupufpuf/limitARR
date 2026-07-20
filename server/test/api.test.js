@@ -342,6 +342,66 @@ test('decisions: las salvadas de Maintainerr aparecen mezcladas como pseudo-deci
   assert.equal(onlyApproved.rows.some((r) => r.decision === 'salvado'), false);
 });
 
+// --- issue de jesusgarrigues (20 jul 2026): quitar del cupo / resetear en el Registro, con deshacer ---
+
+test('quota/dismiss: loguea "dismissed" en el registro y POST /decisions/:id/undo lo deshace', async () => {
+  db.exec(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (1999, 'Películas', 'movie', 'standard', 0, 4)
+  `);
+  db.exec(`
+    INSERT INTO decisions_log (request_id, user_id, username, library_id, media_title, tmdb_id, decision) VALUES
+      (990, 8801, 'ana', 1999, 'Matrix', 603, 'approved')
+  `);
+
+  await agent
+    .post('/api/quota/dismiss/8801/1999')
+    .send({ tmdbId: 603, title: 'Matrix', username: 'ana' })
+    .expect(200);
+
+  const logged = (await agent.get('/api/decisions?q=Matrix').expect(200)).body.rows
+    .find((r) => r.decision === 'dismissed' && r.username === 'ana');
+  assert.ok(logged, 'debe aparecer una fila "dismissed" en el registro');
+  assert.equal(logged.undone_at, null);
+
+  await agent.post(`/api/decisions/${logged.id}/undo`).expect(200);
+  const afterUndo = (await agent.get('/api/decisions?q=Matrix').expect(200)).body.rows
+    .find((r) => r.id === logged.id);
+  assert.notEqual(afterUndo.undone_at, null);
+
+  const original = db.prepare('SELECT voided_at FROM decisions_log WHERE request_id = 990').get();
+  assert.equal(original.voided_at, null); // deshecho: vuelve a contar
+
+  db.prepare('DELETE FROM decisions_log WHERE user_id = 8801').run();
+  db.prepare('DELETE FROM libraries WHERE id = 1999').run();
+});
+
+test('quota/reset: loguea "reset" en el registro y se puede deshacer', async () => {
+  db.exec(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (1998, 'Películas', 'movie', 'standard', 0, 4)
+  `);
+
+  await agent.post('/api/quota/reset/8802/1998').send({ username: 'bea' }).expect(200);
+  const logged = (await agent.get('/api/decisions?q=bea').expect(200)).body.rows
+    .find((r) => r.decision === 'reset');
+  assert.ok(logged, 'debe aparecer una fila "reset" en el registro');
+  assert.ok(db.prepare('SELECT reset_at FROM quota_resets WHERE user_id = 8802 AND library_id = 1998').get());
+
+  await agent.post(`/api/decisions/${logged.id}/undo`).expect(200);
+  assert.equal(
+    db.prepare('SELECT reset_at FROM quota_resets WHERE user_id = 8802 AND library_id = 1998').get(),
+    undefined
+  );
+
+  db.prepare('DELETE FROM decisions_log WHERE user_id = 8802').run();
+  db.prepare('DELETE FROM libraries WHERE id = 1998').run();
+});
+
+test('POST /decisions/:id/undo: 404 si no existe o ya no es deshacible', async () => {
+  await agent.post('/api/decisions/999999999/undo').expect(404);
+});
+
 test('cupo: cargo manual resta un hueco sin tmdb y se quita con el ✕ normal', async () => {
   const upsertSetting = db.prepare(`
     INSERT INTO settings (key, value) VALUES (?, ?)

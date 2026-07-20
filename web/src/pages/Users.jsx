@@ -515,10 +515,11 @@ function UserFichaModal({ user, group, role, allGroups, allRoles, overrides, lib
   // quotaEntry.userId es el id de caché correcto (el del grupo si es un
   // miembro de un grupo agregado), no necesariamente user.id.
   async function resetCupo(libraryId) {
+    if (!confirm('¿Resetear el cupo? Todo lo pendiente hasta ahora deja de contar (queda en el Registro, se puede deshacer).')) return;
     const cacheId = quotaEntry.userId;
     setCupoBusy((b) => ({ ...b, [libraryId]: 'reset' }));
     try {
-      await api.resetQuota(cacheId, libraryId);
+      await api.resetQuota(cacheId, libraryId, user.username);
     } finally {
       setCupoBusy((b) => ({ ...b, [libraryId]: null }));
       loadExtra();
@@ -542,12 +543,13 @@ function UserFichaModal({ user, group, role, allGroups, allRoles, overrides, lib
   }
 
   async function dismissPending(libraryId, item) {
-    if (!confirm(`¿Quitar "${item.title ?? 'este pendiente'}" del cupo?`)) return;
+    if (!confirm(`¿Quitar "${item.title ?? 'este pendiente'}" del cupo? Queda en el Registro, se puede deshacer.`)) return;
     const cacheId = quotaEntry.userId;
     await api.dismissPending(cacheId, libraryId, {
       tmdbId: item.tmdbId,
       seasonNumber: item.seasonNumber ?? null,
       title: item.title,
+      username: user.username,
     });
     loadExtra();
     onChanged();

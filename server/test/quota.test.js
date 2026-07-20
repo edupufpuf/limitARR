@@ -17,6 +17,8 @@ import {
   setRequestHold,
   clearRequestHold,
   addManualCharge,
+  resetQuota,
+  undoQuotaAction,
 } from '../src/quota.js';
 import { setRawSetting } from '../src/settings.js';
 import { db } from '../src/db.js';
@@ -357,6 +359,76 @@ test('dismissPendingItem: no toca a otros usuarios ni otras bibliotecas', () => 
   assert.equal(dismissed, 1);
   assert.equal(pendingCount.get(13, 2).n, 1);
   assert.equal(pendingCount.get(14, 1).n, 1);
+});
+
+// --- Registro + deshacer de "quitar del cupo"/"resetear" (issue de jesusgarrigues, 20 jul 2026) ---
+
+test('dismissPendingItem: loguea una fila "dismissed" con los ids anulados, deshacer los recupera', () => {
+  insertDecision.run(60, 300, 1, 'Matrix', 603);
+  insertDecision.run(61, 300, 1, 'Matrix', 603); // duplicada, misma película
+
+  const dismissed = dismissPendingItem(300, 1, { tmdbId: 603, title: 'Matrix' }, 'ana');
+  assert.equal(dismissed, 2);
+  assert.equal(pendingCount.get(300, 1).n, 0);
+
+  const logRow = db.prepare(
+    "SELECT * FROM decisions_log WHERE user_id = 300 AND decision = 'dismissed'"
+  ).get();
+  assert.equal(logRow.media_title, 'Matrix');
+  assert.equal(logRow.username, 'ana');
+  assert.equal(JSON.parse(logRow.undo_data).voidedIds.length, 2);
+  assert.equal(logRow.undone_at, null);
+
+  const result = undoQuotaAction(logRow.id);
+  assert.deepEqual(result, { userId: 300, libraryId: 1 });
+  assert.equal(pendingCount.get(300, 1).n, 2); // las dos vuelven a contar
+
+  // no se puede deshacer dos veces
+  assert.equal(undoQuotaAction(logRow.id), null);
+});
+
+test('dismissPendingItem: sin coincidencias no loguea nada', () => {
+  const before = db.prepare("SELECT COUNT(*) AS n FROM decisions_log WHERE decision = 'dismissed'").get().n;
+  const dismissed = dismissPendingItem(301, 1, { tmdbId: 999999, title: 'no existe' });
+  assert.equal(dismissed, 0);
+  const after = db.prepare("SELECT COUNT(*) AS n FROM decisions_log WHERE decision = 'dismissed'").get().n;
+  assert.equal(after, before);
+});
+
+test('resetQuota: loguea "reset" con el reset_at anterior (null la primera vez), deshacer lo quita', () => {
+  resetQuota(302, 1, 'ana');
+  const logRow = db.prepare("SELECT * FROM decisions_log WHERE user_id = 302 AND decision = 'reset'").get();
+  assert.equal(JSON.parse(logRow.undo_data).previousResetAt, null);
+  assert.ok(db.prepare('SELECT reset_at FROM quota_resets WHERE user_id = 302 AND library_id = 1').get());
+
+  const result = undoQuotaAction(logRow.id);
+  assert.deepEqual(result, { userId: 302, libraryId: 1 });
+  // era la primera vez (sin reset anterior) → deshacer quita la fila entera
+  assert.equal(db.prepare('SELECT reset_at FROM quota_resets WHERE user_id = 302 AND library_id = 1').get(), undefined);
+});
+
+test('resetQuota: un segundo reset guarda el reset_at anterior, deshacer lo restaura', () => {
+  resetQuota(303, 1);
+  const firstResetAt = db.prepare('SELECT reset_at FROM quota_resets WHERE user_id = 303 AND library_id = 1').get().reset_at;
+
+  resetQuota(303, 1);
+  const secondLog = db.prepare(
+    "SELECT * FROM decisions_log WHERE user_id = 303 AND decision = 'reset' ORDER BY id DESC LIMIT 1"
+  ).get();
+  assert.equal(JSON.parse(secondLog.undo_data).previousResetAt, firstResetAt);
+
+  undoQuotaAction(secondLog.id);
+  assert.equal(
+    db.prepare('SELECT reset_at FROM quota_resets WHERE user_id = 303 AND library_id = 1').get().reset_at,
+    firstResetAt
+  );
+});
+
+test('undoQuotaAction: null si el id no existe o la decisión no es deshacible', () => {
+  assert.equal(undoQuotaAction(999999), null);
+  insertDecision.run(70, 304, 1, 'Matrix', 603); // decision 'approved', no deshacible
+  const approvedRow = db.prepare("SELECT id FROM decisions_log WHERE user_id = 304 AND decision = 'approved'").get();
+  assert.equal(undoQuotaAction(approvedRow.id), null);
 });
 
 // --- Issue #9: temporadas vistas que no salían del cupo ---

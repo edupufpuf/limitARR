@@ -813,7 +813,7 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
                     {charging[key] ? 'cargando…' : 'cargo manual'}
                   </button>
                   <button
-                    onClick={() => onReset(user.userId, lib.libraryId)}
+                    onClick={() => onReset(user.userId, lib.libraryId, user.username)}
                     disabled={resetting[key]}
                     className="text-accent-400 hover:text-accent-300 text-xs disabled:opacity-50"
                   >
@@ -836,7 +836,7 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
                         key={`${item.tmdbId ?? 'x'}-${item.seasonNumber ?? 0}-${i}`}
                         item={item}
                         onDetail={(it) => onDetail(user, lib, it)}
-                        onDismiss={(it) => onDismiss(user.userId, lib.libraryId, it)}
+                        onDismiss={(it) => onDismiss(user.userId, lib.libraryId, it, user.username)}
                       />
                     ))}
                   </div>
@@ -1111,10 +1111,11 @@ export default function Quota() {
     setImporting(false);
   }
 
-  async function reset(userId, libraryId) {
+  async function reset(userId, libraryId, username) {
+    if (!confirm('¿Resetear el cupo? Todo lo pendiente hasta ahora deja de contar (queda en el Registro, se puede deshacer).')) return;
     const key = `${userId}-${libraryId}`;
     setResetting((r) => ({ ...r, [key]: true }));
-    await api.resetQuota(userId, libraryId);
+    await api.resetQuota(userId, libraryId, username);
     load();
     setResetting((r) => ({ ...r, [key]: false }));
   }
@@ -1133,12 +1134,13 @@ export default function Quota() {
     setCharging((c) => ({ ...c, [key]: false }));
   }
 
-  async function dismiss(userId, libraryId, item) {
-    if (!confirm(`¿Quitar "${item.title ?? 'este pendiente'}" del cupo?`)) return false;
+  async function dismiss(userId, libraryId, item, username) {
+    if (!confirm(`¿Quitar "${item.title ?? 'este pendiente'}" del cupo? Queda en el Registro, se puede deshacer.`)) return false;
     await api.dismissPending(userId, libraryId, {
       tmdbId: item.tmdbId,
       seasonNumber: item.seasonNumber ?? null,
       title: item.title,
+      username,
     });
     load();
     return true;
@@ -1270,7 +1272,7 @@ export default function Quota() {
           statsBase={statsBase}
           onClose={() => setDetailTarget(null)}
           onDismiss={async (item) => {
-            const done = await dismiss(detailTarget.user.userId, detailTarget.lib.libraryId, item);
+            const done = await dismiss(detailTarget.user.userId, detailTarget.lib.libraryId, item, detailTarget.user.username);
             if (done) setDetailTarget(null);
           }}
           onDecline={async (item) => {

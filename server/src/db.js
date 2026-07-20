@@ -183,6 +183,16 @@ addColumnIfMissing('ALTER TABLE group_overrides ADD COLUMN expiry_override INTEG
 // libre puesto por el admin al crearlo, para saber luego por qué está ahí.
 addColumnIfMissing('ALTER TABLE decisions_log ADD COLUMN note TEXT');
 
+// Issue de jesusgarrigues (20 jul 2026): quitar del cupo y resetear deben
+// quedar en el Registro y poder deshacerse. Se loguean como filas nuevas
+// ('dismissed'/'reset', ver dismissPendingItem/resetQuota en quota.js) en vez
+// de tocar las filas 'approved' ya existentes — así el registro histórico no
+// se reescribe, solo se añade el evento. undo_data guarda lo necesario para
+// deshacer exactamente (ids de las filas anuladas, o el reset_at anterior);
+// undone_at se rellena al deshacer, para no poder deshacer dos veces.
+addColumnIfMissing('ALTER TABLE decisions_log ADD COLUMN undo_data TEXT');
+addColumnIfMissing('ALTER TABLE decisions_log ADD COLUMN undone_at TEXT');
+
 // v2: cupo mensual — tope de cosas aprobadas en el mes en curso, independiente
 // de si se han visto o no. Desactivado por defecto; se activa por biblioteca
 // desde la pestaña Cupo. monthly_limit_override sigue la misma precedencia que

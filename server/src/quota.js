@@ -80,11 +80,29 @@ const upsertReset = db.prepare(`
   INSERT INTO quota_resets (user_id, library_id, reset_at) VALUES (?, ?, datetime('now'))
   ON CONFLICT (user_id, library_id) DO UPDATE SET reset_at = excluded.reset_at
 `);
+// Restaura un reset_at concreto (deshacer un reset), a diferencia de upsertReset
+// que siempre fija "ahora".
+const restoreResetAt = db.prepare(`
+  INSERT INTO quota_resets (user_id, library_id, reset_at) VALUES (?, ?, ?)
+  ON CONFLICT (user_id, library_id) DO UPDATE SET reset_at = excluded.reset_at
+`);
+const deleteReset = db.prepare('DELETE FROM quota_resets WHERE user_id = ? AND library_id = ?');
 const getUnvoidedApproved = db.prepare(`
   SELECT id, request_id, created_at FROM decisions_log
   WHERE decision = 'approved' AND voided_at IS NULL AND created_at > datetime('now', '-90 days')
 `);
 const markVoided = db.prepare(`UPDATE decisions_log SET voided_at = datetime('now') WHERE id = ?`);
+const clearVoided = db.prepare(`UPDATE decisions_log SET voided_at = NULL WHERE id = ?`);
+// Registro de "quitar del cupo"/"resetear" en decisions_log, para que aparezcan
+// en la pestaña Registro y se puedan deshacer (issue de jesusgarrigues, 20 jul
+// 2026) — fila NUEVA, no se toca la fila 'approved' original (esa solo se
+// vacía/revacía vía voided_at). undo_data guarda lo necesario para deshacer.
+const insertQuotaActionLog = db.prepare(`
+  INSERT INTO decisions_log (request_id, user_id, username, library_id, media_title, decision, undo_data, created_at)
+  VALUES (@requestId, @userId, @username, @libraryId, @mediaTitle, @decision, @undoData, datetime('now'))
+`);
+const getDecisionRow = db.prepare('SELECT * FROM decisions_log WHERE id = ?');
+const markUndone = db.prepare(`UPDATE decisions_log SET undone_at = datetime('now') WHERE id = ?`);
 const getLibraryForRequest = db.prepare(`
   SELECT * FROM libraries WHERE section_type = ? AND kind = ? AND enabled = 1 LIMIT 1
 `);
@@ -481,9 +499,22 @@ export async function getBalance(userId, libraryId) {
 }
 
 // "Resetea" el cupo de un usuario+biblioteca: las aprobaciones anteriores a ahora
-// dejan de contar como pendientes, sin borrar el historial del registro.
-export function resetQuota(userId, libraryId) {
-  upsertReset.run(quotaIdentity(userId).cacheId, libraryId);
+// dejan de contar como pendientes, sin borrar el historial del registro. Queda
+// logueado en decisions_log (decision='reset') con el reset_at anterior (o
+// null si nunca se había reseteado) para poder deshacerlo exactamente.
+export function resetQuota(userId, libraryId, username = null) {
+  const cacheId = quotaIdentity(userId).cacheId;
+  const previousResetAt = getResetAt.get(cacheId, libraryId)?.reset_at ?? null;
+  upsertReset.run(cacheId, libraryId);
+  insertQuotaActionLog.run({
+    requestId: -Date.now(),
+    userId: cacheId,
+    username,
+    libraryId: Number(libraryId),
+    mediaTitle: null,
+    decision: 'reset',
+    undoData: JSON.stringify({ previousResetAt }),
+  });
 }
 
 // rating_key de Plex para enlazar cada pendiente con su página de estadísticas
@@ -574,7 +605,7 @@ export function listStaleOutstandingPairs(staleMinutes = STALE_OUTSTANDING_MINUT
 }
 
 const getPendingApprovedRows = db.prepare(`
-  SELECT id, media_title, tmdb_id, season_number, created_at FROM decisions_log
+  SELECT id, media_title, tmdb_id, season_number, created_at, username FROM decisions_log
   WHERE user_id = ? AND library_id = ? AND decision = 'approved' AND voided_at IS NULL
 `);
 
@@ -714,17 +745,56 @@ export function clearRequestHold(requestId) {
 // Quita a mano UN pendiente del cupo de un usuario (botón ✕ del panel), sin
 // resetear todo: anula (voided_at) sus filas aprobadas, igual que hace la
 // reconciliación automática con las canceladas.
-export function dismissPendingItem(userId, libraryId, { tmdbId, seasonNumber, title }) {
-  let dismissed = 0;
-  for (const memberId of quotaIdentity(userId).memberIds) {
+// Queda logueado en decisions_log (decision='dismissed') con los ids de las
+// filas anuladas, para poder deshacerlo (issue de jesusgarrigues, 20 jul 2026)
+// — al deshacer solo se limpia voided_at, la caducidad de siempre (comprobada
+// en vivo en cada cálculo) ya se encarga de que no reaparezca si mientras tanto
+// caducó por tiempo.
+export function dismissPendingItem(userId, libraryId, { tmdbId, seasonNumber, title }, username = null) {
+  const identity = quotaIdentity(userId);
+  const voidedIds = [];
+  let matchedTitle = title || null;
+  let matchedUsername = username;
+  for (const memberId of identity.memberIds) {
     for (const row of getPendingApprovedRows.all(memberId, libraryId)) {
       if (matchesPendingRow(row, { tmdbId, seasonNumber, title })) {
         markVoided.run(row.id);
-        dismissed += 1;
+        voidedIds.push(row.id);
+        matchedTitle = matchedTitle ?? row.media_title;
+        matchedUsername = matchedUsername ?? row.username;
       }
     }
   }
-  return dismissed;
+  if (voidedIds.length > 0) {
+    insertQuotaActionLog.run({
+      requestId: -Date.now(),
+      userId: identity.cacheId,
+      username: matchedUsername,
+      libraryId: Number(libraryId),
+      mediaTitle: matchedTitle,
+      decision: 'dismissed',
+      undoData: JSON.stringify({ voidedIds }),
+    });
+  }
+  return voidedIds.length;
+}
+
+// Deshace un 'dismissed' o 'reset' del Registro (issue de jesusgarrigues, 20
+// jul 2026): limpia voided_at de las filas afectadas, o restaura el reset_at
+// anterior. No se puede deshacer dos veces (undone_at) ni nada que no sea uno
+// de estos dos tipos.
+export function undoQuotaAction(logId) {
+  const row = getDecisionRow.get(logId);
+  if (!row || row.undone_at || (row.decision !== 'dismissed' && row.decision !== 'reset')) return null;
+  const data = JSON.parse(row.undo_data || '{}');
+  if (row.decision === 'dismissed') {
+    for (const id of data.voidedIds || []) clearVoided.run(id);
+  } else {
+    if (data.previousResetAt) restoreResetAt.run(row.user_id, row.library_id, data.previousResetAt);
+    else deleteReset.run(row.user_id, row.library_id);
+  }
+  markUndone.run(logId);
+  return { userId: row.user_id, libraryId: row.library_id };
 }
 
 // Sin esto, una aprobada que nunca llega a ver la luz (cancelada por el usuario, o

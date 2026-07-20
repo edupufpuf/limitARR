@@ -18,7 +18,7 @@ import {
   getMediaDetails,
 } from '../services/seerr.js';
 import { getSettings, getSettingsForDisplay, updateSettings } from '../settings.js';
-import { resetQuota, importSeerrHistory, refreshQuotaCache, dismissPendingItem, addManualCharge, getPendingItemDetail, quotaIdentity, getBalance, getRequestHold, setRequestHold, clearRequestHold, pruneStaleQuotaCache } from '../quota.js';
+import { resetQuota, importSeerrHistory, refreshQuotaCache, dismissPendingItem, undoQuotaAction, addManualCharge, getPendingItemDetail, quotaIdentity, getBalance, getRequestHold, setRequestHold, clearRequestHold, pruneStaleQuotaCache } from '../quota.js';
 import { matchByEmailOrUsername } from '../userMatch.js';
 import { runPollCycle } from '../scheduler.js';
 import { getVersionInfo } from '../services/version.js';
@@ -923,7 +923,8 @@ router.post('/quota/recalculate', ah(async (req, res) => {
 // cuentan más contra su cupo), y refresca la caché al momento para el panel.
 router.post('/quota/reset/:userId/:libraryId', ah(async (req, res) => {
   const { userId, libraryId } = req.params;
-  resetQuota(userId, libraryId);
+  const username = (req.body?.username || '').trim() || null;
+  resetQuota(userId, libraryId, username);
   const result = await refreshQuotaCache(userId, libraryId);
   res.json({ ok: true, ...result });
 }));
@@ -933,13 +934,23 @@ router.post('/quota/reset/:userId/:libraryId', ah(async (req, res) => {
 // Refresca la caché para que el panel lo refleje al momento.
 router.post('/quota/dismiss/:userId/:libraryId', ah(async (req, res) => {
   const { userId, libraryId } = req.params;
-  const { tmdbId, seasonNumber, title } = req.body || {};
+  const { tmdbId, seasonNumber, title, username } = req.body || {};
   if (tmdbId == null && !title) {
     return res.status(400).json({ error: 'tmdbId_or_title_required' });
   }
-  const dismissed = dismissPendingItem(userId, libraryId, { tmdbId, seasonNumber, title });
+  const dismissed = dismissPendingItem(userId, libraryId, { tmdbId, seasonNumber, title }, username || null);
   const result = await refreshQuotaCache(userId, libraryId);
   res.json({ ok: true, dismissed, ...result });
+}));
+
+// Deshace un "quitar del cupo" o "resetear" desde el Registro (issue de
+// jesusgarrigues, 20 jul 2026). Refresca la caché del usuario+biblioteca
+// afectados para que el panel de Cupo lo refleje al momento.
+router.post('/decisions/:id/undo', ah(async (req, res) => {
+  const result = undoQuotaAction(req.params.id);
+  if (!result) return res.status(404).json({ error: 'not_undoable' });
+  const refreshed = await refreshQuotaCache(result.userId, result.libraryId);
+  res.json({ ok: true, ...refreshed });
 }));
 
 // Buscador para el cargo manual: algo que YA está en Plex (vía Tautulli, tu
@@ -1254,8 +1265,8 @@ router.get('/decisions', (req, res) => {
   }
   const salvadosWhereSql = salvadosWhere.length ? `WHERE ${salvadosWhere.join(' AND ')}` : '';
 
-  const decisionsSelect = `SELECT id, created_at, username, media_title, poster_url, balance_before, limit_applied, decision, note FROM decisions_log ${decisionsWhereSql}`;
-  const salvadosSelect = `SELECT id, saved_at AS created_at, telegram_name AS username, title AS media_title, poster_url, NULL AS balance_before, NULL AS limit_applied, 'salvado' AS decision, NULL AS note FROM salvados ${salvadosWhereSql}`;
+  const decisionsSelect = `SELECT id, created_at, username, media_title, poster_url, balance_before, limit_applied, decision, note, undone_at FROM decisions_log ${decisionsWhereSql}`;
+  const salvadosSelect = `SELECT id, saved_at AS created_at, telegram_name AS username, title AS media_title, poster_url, NULL AS balance_before, NULL AS limit_applied, 'salvado' AS decision, NULL AS note, NULL AS undone_at FROM salvados ${salvadosWhereSql}`;
 
   let unionSql;
   let unionParams;

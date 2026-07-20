@@ -70,7 +70,8 @@ export const api = {
 
   quota: () => request('/quota'),
   recalculateQuota: () => request('/quota/recalculate', { method: 'POST' }),
-  resetQuota: (userId, libraryId) => request(`/quota/reset/${userId}/${libraryId}`, { method: 'POST' }),
+  resetQuota: (userId, libraryId, username) =>
+    request(`/quota/reset/${userId}/${libraryId}`, { method: 'POST', body: JSON.stringify({ username }) }),
   dismissPending: (userId, libraryId, body) =>
     request(`/quota/dismiss/${userId}/${libraryId}`, { method: 'POST', body: JSON.stringify(body) }),
   manualCharge: (userId, libraryId, title, username, note, posterUrl) =>
@@ -89,6 +90,7 @@ export const api = {
   holdRequest: (id, days) => request(`/requests/${id}/hold`, { method: 'POST', body: JSON.stringify({ days }) }),
   clearRequestHold: (id) => request(`/requests/${id}/hold`, { method: 'DELETE' }),
   decisions: (params = {}) => request(`/decisions?${new URLSearchParams(params)}`),
+  undoDecision: (id) => request(`/decisions/${id}/undo`, { method: 'POST' }),
   stats: () => request('/stats'),
 
   settings: () => request('/settings'),

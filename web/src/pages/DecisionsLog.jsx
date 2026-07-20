@@ -15,6 +15,8 @@ const decisionBadge = {
   no_library_config: 'bg-bg-700/60 text-gray-400 ring-bg-600',
   unmatched_user: 'bg-bg-700/60 text-gray-400 ring-bg-600',
   salvado: 'bg-sky-400/10 text-sky-400 ring-sky-400/25',
+  dismissed: 'bg-orange-400/10 text-orange-400 ring-orange-400/25',
+  reset: 'bg-orange-400/10 text-orange-400 ring-orange-400/25',
 };
 
 const decisionLabel = {
@@ -28,7 +30,13 @@ const decisionLabel = {
   no_library_config: 'sin biblioteca configurada',
   unmatched_user: 'usuario no encontrado en Tautulli',
   salvado: '💾 salvada',
+  dismissed: '✕ quitada del cupo',
+  reset: '↺ cupo reseteado',
 };
+
+// Solo estas dos se pueden deshacer (undo_data en el servidor); el resto son
+// decisiones normales del flujo de aprobación, no acciones manuales del admin.
+const UNDOABLE = new Set(['dismissed', 'reset']);
 
 // created_at viene de SQLite en UTC ('YYYY-MM-DD HH:MM:SS'); se enseña en local.
 function formatDate(createdAt) {
@@ -48,6 +56,18 @@ export default function DecisionsLog() {
   const [decision, setDecision] = useState('');
   const [q, setQ] = useState('');
   const [loadingMore, setLoadingMore] = useState(false);
+  const [undoing, setUndoing] = useState({});
+
+  async function undo(row) {
+    if (!confirm(row.decision === 'reset' ? '¿Deshacer este reseteo del cupo?' : `¿Deshacer? "${row.media_title ?? 'esto'}" vuelve a contar para el cupo.`)) return;
+    setUndoing((u) => ({ ...u, [row.id]: true }));
+    try {
+      await api.undoDecision(row.id);
+      setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, undone_at: new Date().toISOString() } : r)));
+    } finally {
+      setUndoing((u) => ({ ...u, [row.id]: false }));
+    }
+  }
 
   function buildParams(offset) {
     const params = { limit: PAGE_SIZE, offset };
@@ -115,6 +135,7 @@ export default function DecisionsLog() {
               <th className="th">Saldo antes</th>
               <th className="th">Límite</th>
               <th className="th">Decisión</th>
+              <th className="th"></th>
             </tr>
           </thead>
           <tbody>
@@ -143,11 +164,27 @@ export default function DecisionsLog() {
                     {decisionLabel[r.decision] ?? r.decision}
                   </span>
                 </td>
+                <td className="py-2 pr-4 whitespace-nowrap">
+                  {UNDOABLE.has(r.decision) && (
+                    r.undone_at ? (
+                      <span className="text-xs text-gray-600">deshecho</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => undo(r)}
+                        disabled={undoing[r.id]}
+                        className="text-xs text-accent-400 hover:text-accent-300 disabled:opacity-50"
+                      >
+                        {undoing[r.id] ? 'deshaciendo…' : 'deshacer'}
+                      </button>
+                    )
+                  )}
+                </td>
               </tr>
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={6} className="py-6 text-center text-gray-500">
+                <td colSpan={7} className="py-6 text-center text-gray-500">
                   {decision || q ? 'Nada coincide con los filtros.' : 'Sin decisiones registradas todavía.'}
                 </td>
               </tr>
