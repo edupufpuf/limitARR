@@ -181,7 +181,7 @@ function PendingPoster({ item, onDetail, onDismiss }) {
       )}
       {item.unavailable && (
         <div className="absolute top-1 left-1 right-1 flex flex-col items-start gap-0.5 pointer-events-none">
-          <span className="min-w-0 max-w-full truncate rounded bg-amber-500/20 ring-1 ring-inset ring-amber-500/40 px-1 py-0.5 text-[7px] leading-none font-semibold uppercase tracking-wide text-amber-300">
+          <span className="min-w-0 max-w-full truncate rounded bg-indigo-500/20 ring-1 ring-inset ring-indigo-500/40 px-1 py-0.5 text-[7px] leading-none font-semibold uppercase tracking-wide text-indigo-300">
             no cuenta
           </span>
           <span className={`min-w-0 max-w-full truncate rounded px-1 py-0.5 text-[7px] leading-none font-semibold uppercase tracking-wide ${downloadStatusColor(item)} ${downloadStatusBg(item)}`}>
