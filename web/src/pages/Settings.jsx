@@ -22,6 +22,8 @@ export default function Settings() {
     tautulli_public_url: '',
     plex_url: '',
     plex_token: '',
+    radarr_url: '',
+    radarr_api_key: '',
   });
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -42,9 +44,11 @@ export default function Settings() {
         form.tautulli_url !== (settings.tautulli_url ?? '') ||
         form.tautulli_public_url !== (settings.tautulli_public_url ?? '') ||
         form.plex_url !== (settings.plex_url ?? '') ||
+        form.radarr_url !== (settings.radarr_url ?? '') ||
         form.seerr_api_key !== '' ||
         form.tautulli_api_key !== '' ||
-        form.plex_token !== '')
+        form.plex_token !== '' ||
+        form.radarr_api_key !== '')
   );
   useDirty('settings-connections', formDirty);
 
@@ -61,6 +65,7 @@ export default function Settings() {
         tautulli_url: s.tautulli_url ?? '',
         tautulli_public_url: s.tautulli_public_url ?? '',
         plex_url: s.plex_url ?? '',
+        radarr_url: s.radarr_url ?? '',
       }));
     });
     api.webhookInfo().then((r) => setWebhookUrl(r.url));
@@ -72,7 +77,7 @@ export default function Settings() {
     e.preventDefault();
     setSaving(true);
     await api.updateSettings(form);
-    setForm((f) => ({ ...f, seerr_api_key: '', tautulli_api_key: '', plex_token: '' }));
+    setForm((f) => ({ ...f, seerr_api_key: '', tautulli_api_key: '', plex_token: '', radarr_api_key: '' }));
     load();
     setSaving(false);
   }
@@ -216,6 +221,31 @@ export default function Settings() {
           />
         </fieldset>
 
+        <fieldset>
+          <legend className="text-sm font-semibold text-accent-400 mb-2">Radarr <span className="text-gray-600 font-normal">(opcional)</span></legend>
+          <p className="text-xs text-gray-500 mb-2">
+            Solo para la etiqueta de estado de pendientes: sin nada descargándose, muestra
+            lo que dice Radarr (En cines, Anunciada...) en vez de un "pendiente" genérico.
+          </p>
+          <label className="label">URL</label>
+          <input
+            value={form.radarr_url}
+            onChange={(e) => setForm({ ...form, radarr_url: e.target.value })}
+            placeholder="http://radarr:7878"
+            className="input mb-3"
+          />
+          <label className="label">
+            API key {settings.radarr_api_key_set && <span className="text-gray-600">(guardada: {settings.radarr_api_key_masked})</span>}
+          </label>
+          <input
+            type="password"
+            value={form.radarr_api_key}
+            onChange={(e) => setForm({ ...form, radarr_api_key: e.target.value })}
+            placeholder={settings.radarr_api_key_set ? '•••• dejar en blanco para no cambiar' : ''}
+            className="input"
+          />
+        </fieldset>
+
         <div className="flex flex-wrap items-center gap-3 pt-2">
           <button
             type="submit"
@@ -239,6 +269,7 @@ export default function Settings() {
             <div>Tautulli <StatusDot result={testResult.tautulli} /></div>
             <div>Seerr <StatusDot result={testResult.seerr} /></div>
             <div>Plex <StatusDot result={testResult.plex} /></div>
+            {testResult.radarr && <div>Radarr <StatusDot result={testResult.radarr} /></div>}
           </div>
         )}
       </form>

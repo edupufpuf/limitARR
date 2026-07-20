@@ -23,6 +23,7 @@ import { matchByEmailOrUsername } from '../userMatch.js';
 import { runPollCycle } from '../scheduler.js';
 import { getVersionInfo } from '../services/version.js';
 import { createPlexPin, claimPlexPin, getPlexAccount, testPlexServer } from '../services/plex.js';
+import { testRadarrServer } from '../services/radarr.js';
 import {
   getBotTokenForDisplay,
   setBotToken,
@@ -334,8 +335,8 @@ router.get('/settings', (req, res) => {
 });
 
 router.put('/settings', (req, res) => {
-  const { seerr_url, seerr_api_key, seerr_public_url, tautulli_url, tautulli_api_key, tautulli_public_url, plex_url, plex_token } = req.body || {};
-  updateSettings({ seerr_url, seerr_api_key, seerr_public_url, tautulli_url, tautulli_api_key, tautulli_public_url, plex_url, plex_token });
+  const { seerr_url, seerr_api_key, seerr_public_url, tautulli_url, tautulli_api_key, tautulli_public_url, plex_url, plex_token, radarr_url, radarr_api_key } = req.body || {};
+  updateSettings({ seerr_url, seerr_api_key, seerr_public_url, tautulli_url, tautulli_api_key, tautulli_public_url, plex_url, plex_token, radarr_url, radarr_api_key });
   res.json(getSettingsForDisplay());
 });
 
@@ -359,6 +360,17 @@ router.post('/settings/test', async (req, res) => {
     result.seerr = { ok: true };
   } catch (err) {
     result.seerr = { ok: false, error: err.message };
+  }
+  // Opcional: solo se comprueba si hay algo configurado, para no mostrar un
+  // "no configurado" en rojo a quien no usa esta función (radarrLabel en
+  // las etiquetas de descarga, ver services/radarr.js).
+  if (getSettings().radarr_url) {
+    try {
+      await testRadarrServer();
+      result.radarr = { ok: true };
+    } catch (err) {
+      result.radarr = { ok: false, error: err.message };
+    }
   }
   res.json(result);
 });

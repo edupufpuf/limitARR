@@ -1,4 +1,5 @@
 import { getSettings } from '../settings.js';
+import { getRadarrStatus } from './radarr.js';
 
 async function call(path, options = {}) {
   const { seerr_url: baseUrl, seerr_api_key: apiKey } = getSettings();
@@ -251,16 +252,25 @@ async function movieAvailability(tmdbId, is4k) {
     // status 2/3 de Seerr (que solo dice "solicitada"/"monitorizada").
     const downloadList = is4k ? data.mediaInfo?.downloadStatus4k : data.mediaInfo?.downloadStatus;
     const queueStatus = Array.isArray(downloadList) && downloadList.length > 0 ? downloadList[0].status ?? null : null;
+    // Sin nada en cola, Radarr igualmente sabe por qué (en cines pero sin
+    // estreno digital, anunciada...) — eso es lo que hay que pintar, no un
+    // "pendiente de descarga" genérico nuestro. Opcional (radarr_url/api_key):
+    // sin configurar, getRadarrStatus no hace nada y esto queda null.
+    let radarrLabel = null;
+    if (unavailable && !queueStatus) {
+      const radarrId = is4k ? data.mediaInfo?.externalServiceId4k : data.mediaInfo?.externalServiceId;
+      radarrLabel = await getRadarrStatus(radarrId);
+    }
     // Issue #14: cuándo llegó a Plex (mediaAddedAt de Seerr), para mostrarla en
     // el detalle y contar la caducidad desde ahí en vez de desde la aprobación.
     // Seerr no tiene un mediaAddedAt4k separado, así que se usa el mismo campo
     // para ambas calidades — es la mejor aproximación disponible por API.
     const since = unavailable ? NaN : Date.parse(data.mediaInfo?.mediaAddedAt ?? '');
-    const entry = { unavailable, status, queueStatus, availableSince: Number.isFinite(since) ? since : null, at: Date.now() };
+    const entry = { unavailable, status, queueStatus, radarrLabel, availableSince: Number.isFinite(since) ? since : null, at: Date.now() };
     availabilityCache.set(cacheKey, entry);
     return entry;
   } catch {
-    return { unavailable: false, status: null, queueStatus: null, availableSince: null };
+    return { unavailable: false, status: null, queueStatus: null, radarrLabel: null, availableSince: null };
   }
 }
 
@@ -269,8 +279,8 @@ async function movieAvailability(tmdbId, is4k) {
 export async function getMovieAvailability(tmdbIds, is4k = false) {
   const out = new Map();
   for (const tmdbId of new Set(tmdbIds.filter((id) => id != null))) {
-    const { unavailable, status, queueStatus, availableSince } = await movieAvailability(tmdbId, is4k);
-    out.set(tmdbId, { unavailable, status, queueStatus, availableSince });
+    const { unavailable, status, queueStatus, radarrLabel, availableSince } = await movieAvailability(tmdbId, is4k);
+    out.set(tmdbId, { unavailable, status, queueStatus, radarrLabel, availableSince });
   }
   return out;
 }

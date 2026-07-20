@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { getMovieAvailability, getShowDetails } from '../src/services/seerr.js';
-import { updateSettings } from '../src/settings.js';
+import { updateSettings, setRawSetting } from '../src/settings.js';
 
 updateSettings({ seerr_url: 'http://seerr.test', seerr_api_key: 'k' });
 
@@ -62,6 +62,57 @@ test('getMovieAvailability: status 3 sin downloadStatus no trae queueStatus', as
 
     const active = await getMovieAvailability([701], false);
     assert.equal(active.get(701).queueStatus, 'downloading');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+// Bug real (caso Toy Story 5): sin nada en cola, se caía a un "pendiente de
+// descarga" genérico aunque Radarr sepa perfectamente por qué (en cines pero
+// sin estreno digital todavía) — ahora, si Radarr está configurado, se usa su
+// propio status tal cual. Verificado contra Radarr real de producción antes de
+// implementar (curl a /api/v3/movie/31: status "inCinemas", hasFile false).
+test('getMovieAvailability: con Radarr configurado, usa su status cuando no hay cola', async () => {
+  updateSettings({ radarr_url: 'http://radarr.test', radarr_api_key: 'k' });
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url === 'http://seerr.test/api/v1/movie/800') {
+      return new Response(JSON.stringify({
+        mediaInfo: { status: 3, downloadStatus: [], externalServiceId: 42 },
+      }), { status: 200 });
+    }
+    if (url === 'http://radarr.test/api/v3/movie/42') {
+      return new Response(JSON.stringify({ status: 'inCinemas', hasFile: false }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const availability = await getMovieAvailability([800], false);
+    assert.equal(availability.get(800).radarrLabel, 'En cines');
+  } finally {
+    global.fetch = originalFetch;
+    setRawSetting('radarr_url', '');
+    setRawSetting('radarr_api_key', '');
+  }
+});
+
+test('getMovieAvailability: sin Radarr configurado, radarrLabel queda null (no rompe nada)', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url === 'http://seerr.test/api/v1/movie/801') {
+      return new Response(JSON.stringify({
+        mediaInfo: { status: 3, downloadStatus: [], externalServiceId: 43 },
+      }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`); // si llamara a Radarr, fallaría aquí
+  };
+
+  try {
+    const availability = await getMovieAvailability([801], false);
+    assert.equal(availability.get(801).radarrLabel, null);
   } finally {
     global.fetch = originalFetch;
   }
