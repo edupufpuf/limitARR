@@ -387,6 +387,19 @@ test('dismissPendingItem: loguea una fila "dismissed" con los ids anulados, desh
   assert.equal(undoQuotaAction(logRow.id), null);
 });
 
+// Bug real: la fila 'dismissed' del registro salía sin carátula porque
+// insertQuotaActionLog no copiaba poster_url de la fila anulada.
+test('dismissPendingItem: la fila "dismissed" del registro copia el poster_url del pendiente', () => {
+  db.prepare(`
+    INSERT INTO decisions_log (request_id, user_id, library_id, media_title, tmdb_id, poster_url, decision)
+    VALUES (62, 305, 1, 'Matrix', 603, 'https://img/matrix.jpg', 'approved')
+  `).run();
+
+  dismissPendingItem(305, 1, { tmdbId: 603, title: 'Matrix' });
+  const logRow = db.prepare("SELECT poster_url FROM decisions_log WHERE user_id = 305 AND decision = 'dismissed'").get();
+  assert.equal(logRow.poster_url, 'https://img/matrix.jpg');
+});
+
 test('dismissPendingItem: sin coincidencias no loguea nada', () => {
   const before = db.prepare("SELECT COUNT(*) AS n FROM decisions_log WHERE decision = 'dismissed'").get().n;
   const dismissed = dismissPendingItem(301, 1, { tmdbId: 999999, title: 'no existe' });

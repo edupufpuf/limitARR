@@ -98,8 +98,8 @@ const clearVoided = db.prepare(`UPDATE decisions_log SET voided_at = NULL WHERE 
 // 2026) — fila NUEVA, no se toca la fila 'approved' original (esa solo se
 // vacía/revacía vía voided_at). undo_data guarda lo necesario para deshacer.
 const insertQuotaActionLog = db.prepare(`
-  INSERT INTO decisions_log (request_id, user_id, username, library_id, media_title, decision, undo_data, created_at)
-  VALUES (@requestId, @userId, @username, @libraryId, @mediaTitle, @decision, @undoData, datetime('now'))
+  INSERT INTO decisions_log (request_id, user_id, username, library_id, media_title, poster_url, decision, undo_data, created_at)
+  VALUES (@requestId, @userId, @username, @libraryId, @mediaTitle, @posterUrl, @decision, @undoData, datetime('now'))
 `);
 const getDecisionRow = db.prepare('SELECT * FROM decisions_log WHERE id = ?');
 const markUndone = db.prepare(`UPDATE decisions_log SET undone_at = datetime('now') WHERE id = ?`);
@@ -512,6 +512,7 @@ export function resetQuota(userId, libraryId, username = null) {
     username,
     libraryId: Number(libraryId),
     mediaTitle: null,
+    posterUrl: null,
     decision: 'reset',
     undoData: JSON.stringify({ previousResetAt }),
   });
@@ -605,7 +606,7 @@ export function listStaleOutstandingPairs(staleMinutes = STALE_OUTSTANDING_MINUT
 }
 
 const getPendingApprovedRows = db.prepare(`
-  SELECT id, media_title, tmdb_id, season_number, created_at, username FROM decisions_log
+  SELECT id, media_title, tmdb_id, season_number, created_at, username, poster_url FROM decisions_log
   WHERE user_id = ? AND library_id = ? AND decision = 'approved' AND voided_at IS NULL
 `);
 
@@ -755,6 +756,7 @@ export function dismissPendingItem(userId, libraryId, { tmdbId, seasonNumber, ti
   const voidedIds = [];
   let matchedTitle = title || null;
   let matchedUsername = username;
+  let matchedPosterUrl = null;
   for (const memberId of identity.memberIds) {
     for (const row of getPendingApprovedRows.all(memberId, libraryId)) {
       if (matchesPendingRow(row, { tmdbId, seasonNumber, title })) {
@@ -762,6 +764,7 @@ export function dismissPendingItem(userId, libraryId, { tmdbId, seasonNumber, ti
         voidedIds.push(row.id);
         matchedTitle = matchedTitle ?? row.media_title;
         matchedUsername = matchedUsername ?? row.username;
+        matchedPosterUrl = matchedPosterUrl ?? row.poster_url;
       }
     }
   }
@@ -772,6 +775,7 @@ export function dismissPendingItem(userId, libraryId, { tmdbId, seasonNumber, ti
       username: matchedUsername,
       libraryId: Number(libraryId),
       mediaTitle: matchedTitle,
+      posterUrl: matchedPosterUrl,
       decision: 'dismissed',
       undoData: JSON.stringify({ voidedIds }),
     });
