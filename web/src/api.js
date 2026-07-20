@@ -75,7 +75,7 @@ export const api = {
     request(`/quota/dismiss/${userId}/${libraryId}`, { method: 'POST', body: JSON.stringify(body) }),
   manualCharge: (userId, libraryId, title, username, note, posterUrl) =>
     request(`/quota/manual-charge/${userId}/${libraryId}`, { method: 'POST', body: JSON.stringify({ title, username, note, posterUrl }) }),
-  plexSearch: (q) => request(`/media/plex-search?q=${encodeURIComponent(q)}`),
+  plexSearch: (q, mediaType) => request(`/media/plex-search?q=${encodeURIComponent(q)}&mediaType=${mediaType || 'movie'}`),
   pendingDetail: (userId, libraryId, params) => {
     const query = new URLSearchParams(
       Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))

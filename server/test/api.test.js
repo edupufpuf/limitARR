@@ -591,8 +591,50 @@ test('GET /media/plex-search: busca en Tautulli y resuelve el poster por tmdbId 
 
   try {
     const res = await agent.get('/api/media/plex-search?q=interestelar').expect(200);
-    assert.deepEqual(res.body.movies, [
+    assert.deepEqual(res.body.results, [
       { title: 'Interestelar', posterUrl: 'https://image.tmdb.org/t/p/w185/interestelar.jpg' },
+    ]);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
+  }
+});
+
+test('GET /media/plex-search?mediaType=tv: temporadas sueltas con título "Serie - Temporada N"', async () => {
+  const upsertSetting = db.prepare(`
+    INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+  `);
+  upsertSetting.run('tautulli_url', 'http://tautulli.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
+  upsertSetting.run('seerr_url', 'http://seerr.test');
+  upsertSetting.run('seerr_api_key', 'test-key');
+
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes('cmd=search')) {
+      return new Response(JSON.stringify({
+        response: {
+          result: 'success',
+          data: {
+            results_list: {
+              season: [{ rating_key: '777', title: 'Temporada 1', parent_title: 'La nena', media_index: '1', guids: ['tmdb://281041'] }],
+            },
+          },
+        },
+      }), { status: 200 });
+    }
+    if (url === 'http://seerr.test/api/v1/tv/281041') {
+      return new Response(JSON.stringify({ name: 'La nena', seasons: [], posterPath: '/lanena.jpg' }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const res = await agent.get('/api/media/plex-search?q=nena&mediaType=tv').expect(200);
+    assert.deepEqual(res.body.results, [
+      { title: 'La nena - Temporada 1', posterUrl: 'https://image.tmdb.org/t/p/w185/lanena.jpg' },
     ]);
   } finally {
     global.fetch = originalFetch;

@@ -792,8 +792,8 @@ async function buildQuotaByUser() {
   const [tautulliUsers, seerrUsers] = await Promise.all([getUsers(), getSeerrUsers()]);
   const tautulliUserMap = new Map(tautulliUsers.map((u) => [u.id, u]));
 
-  const libraries = db.prepare('SELECT id, name FROM libraries WHERE enabled = 1').all();
-  const libraryMap = new Map(libraries.map((l) => [l.id, l.name]));
+  const libraries = db.prepare('SELECT id, name, section_type FROM libraries WHERE enabled = 1').all();
+  const libraryMap = new Map(libraries.map((l) => [l.id, l]));
   const recentRows = db.prepare(`
     SELECT user_id,
            SUM(CASE WHEN decision = 'approved' THEN 1 ELSE 0 END) AS approved7d,
@@ -865,7 +865,8 @@ async function buildQuotaByUser() {
     } catch { /* caché de una versión anterior sin pending_items válido */ }
     byUser.get(row.user_id).libraries.push({
       libraryId: row.library_id,
-      libraryName: libraryMap.get(row.library_id) ?? `#${row.library_id}`,
+      libraryName: libraryMap.get(row.library_id)?.name ?? `#${row.library_id}`,
+      sectionType: libraryMap.get(row.library_id)?.section_type ?? 'movie',
       balance: row.balance,
       limitApplied: row.limit_applied,
       outstanding: row.outstanding,
@@ -932,17 +933,34 @@ router.post('/quota/dismiss/:userId/:libraryId', ah(async (req, res) => {
   res.json({ ok: true, dismissed, ...result });
 }));
 
-// Buscador para el cargo manual: películas que YA están en Plex (vía Tautulli,
-// tu propia biblioteca) sin pasar por el título a mano — así el título coincide
+// Buscador para el cargo manual: algo que YA está en Plex (vía Tautulli, tu
+// propia biblioteca) sin pasar por el título a mano — así el título coincide
 // con el de Tautulli al carácter y el visionado se resuelve solo (issue del
 // cargo manual de texto libre: si no coincide letra a letra con Tautulli, nunca
 // se detecta como vista). El poster se resuelve aparte por tmdbId (guid de Plex
 // "tmdb://<id>") consultando solo el catálogo de TMDB vía Seerr — no dice nada
 // sobre si se pidió o no en Seerr, así que no hay riesgo de marcarla como no
 // disponible por esto.
+// mediaType=tv devuelve TEMPORADAS sueltas (no la serie entera) con el mismo
+// título "Serie - Temporada N" que usa el resto de la app (ver formatSeasonTitle
+// en scheduler.js/quota.js) — el cupo de series se lleva por temporada.
 router.get('/media/plex-search', ah(async (req, res) => {
   const q = (req.query.q || '').trim();
-  if (!q) return res.json({ movies: [] });
+  if (!q) return res.json({ results: [] });
+
+  if (req.query.mediaType === 'tv') {
+    const { seasons } = await searchMedia(q);
+    const results = await Promise.all(
+      seasons.slice(0, 8).map(async (s) => {
+        const tmdbGuid = s.guids.find((g) => g.startsWith('tmdb://'));
+        const tmdbId = tmdbGuid ? Number(tmdbGuid.slice('tmdb://'.length)) : null;
+        const { posterUrl } = tmdbId != null ? await getMediaDetails('tv', tmdbId, s.seasonNumber) : { posterUrl: null };
+        return { title: `${s.parentTitle} - Temporada ${s.seasonNumber}`, posterUrl };
+      })
+    );
+    return res.json({ results });
+  }
+
   const { movies } = await searchMedia(q);
   const results = await Promise.all(
     movies.slice(0, 8).map(async (m) => {
@@ -952,7 +970,7 @@ router.get('/media/plex-search', ah(async (req, res) => {
       return { title: m.title, posterUrl };
     })
   );
-  res.json({ movies: results });
+  res.json({ results });
 }));
 
 // Cargo manual: algo consumido fuera de Seerr (bajado/visto a mano) que aun

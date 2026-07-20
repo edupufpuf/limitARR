@@ -805,7 +805,7 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
                     {' '}/ {lib.limitApplied}
                   </span>
                   <button
-                    onClick={() => onManualCharge(user.userId, lib.libraryId, user.username)}
+                    onClick={() => onManualCharge(user.userId, lib.libraryId, user.username, lib.sectionType)}
                     disabled={charging[key]}
                     title="Restar un hueco de cupo a mano (contenido bajado/visto fuera de Seerr)"
                     className="text-gray-400 hover:text-gray-200 text-xs disabled:opacity-50"
@@ -856,12 +856,15 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
   );
 }
 
-// Cargo manual con buscador contra Plex (vía Tautulli): para películas que ya
-// están en la biblioteca pero nunca se pidieron en Seerr. Elegir el resultado
-// real evita el problema del título a mano (si no coincide letra a letra con
-// Tautulli, el visionado nunca se detecta solo, ver addManualCharge). Se deja
-// también un campo de título libre por si la película buscada no aparece.
-function ManualChargeModal({ username, onClose, onSubmit }) {
+// Cargo manual con buscador contra Plex (vía Tautulli): para algo que ya está
+// en la biblioteca pero nunca se pidió en Seerr. Elegir el resultado real evita
+// el problema del título a mano (si no coincide letra a letra con Tautulli, el
+// visionado nunca se detecta solo, ver addManualCharge). Se deja también un
+// campo de título libre por si lo buscado no aparece. Para bibliotecas de
+// series (sectionType 'show') se buscan y listan TEMPORADAS sueltas, no la
+// serie entera — el cupo de series se lleva por temporada.
+function ManualChargeModal({ username, sectionType, onClose, onSubmit }) {
+  const isTv = sectionType === 'show';
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -876,8 +879,8 @@ function ManualChargeModal({ username, onClose, onSubmit }) {
     setSearching(true);
     setSelected(null);
     try {
-      const { movies } = await api.plexSearch(query.trim());
-      setResults(movies);
+      const { results } = await api.plexSearch(query.trim(), isTv ? 'tv' : 'movie');
+      setResults(results);
     } finally {
       setSearching(false);
       setSearched(true);
@@ -902,14 +905,14 @@ function ManualChargeModal({ username, onClose, onSubmit }) {
       >
         <h3 className="font-bold text-lg mb-1">Cargo manual — {username}</h3>
         <p className="text-xs text-gray-400 mb-3">
-          Para algo bajado/visto fuera de Seerr, incluidas películas ya disponibles en Plex que nunca se pidieron ahí.
+          Para algo bajado/visto fuera de Seerr, incluidas {isTv ? 'temporadas' : 'películas'} ya disponibles en Plex que nunca se pidieron ahí.
         </p>
 
         <div className="flex gap-2">
           <input
             autoFocus
             className="input flex-1"
-            placeholder="Buscar en tu Plex…"
+            placeholder={isTv ? 'Buscar serie en tu Plex…' : 'Buscar película en tu Plex…'}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && search()}
@@ -947,7 +950,7 @@ function ManualChargeModal({ username, onClose, onSubmit }) {
           </label>
           <input
             className="input w-full"
-            placeholder="Título exacto de lo que se bajó/vio"
+            placeholder={isTv ? 'Ej: La nena - Temporada 1' : 'Título exacto de lo que se bajó/vio'}
             value={manualTitle}
             onChange={(e) => { setManualTitle(e.target.value); setSelected(null); }}
           />
@@ -1116,8 +1119,8 @@ export default function Quota() {
     setResetting((r) => ({ ...r, [key]: false }));
   }
 
-  function manualCharge(userId, libraryId, username) {
-    setChargeModal({ userId, libraryId, username });
+  function manualCharge(userId, libraryId, username, sectionType) {
+    setChargeModal({ userId, libraryId, username, sectionType });
   }
 
   async function submitManualCharge(title, note, posterUrl) {
@@ -1302,6 +1305,7 @@ export default function Quota() {
       {chargeModal && (
         <ManualChargeModal
           username={chargeModal.username}
+          sectionType={chargeModal.sectionType}
           onClose={() => setChargeModal(null)}
           onSubmit={submitManualCharge}
         />
