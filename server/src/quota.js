@@ -89,9 +89,15 @@ const restoreResetAt = db.prepare(`
   ON CONFLICT (user_id, library_id) DO UPDATE SET reset_at = excluded.reset_at
 `);
 const deleteReset = db.prepare('DELETE FROM quota_resets WHERE user_id = ? AND library_id = ?');
+// request_id > 0: solo solicitudes reales de Seerr. Los cargos manuales
+// (addManualCharge) usan un request_id sintético negativo (-Date.now()) que
+// nunca existe en Seerr — comprobarlo contra la API devuelve 404 ("gone") y
+// los anulaba a los pocos segundos de crearlos (caso Rocío/Euphoria, 21 jul
+// 2026: 3 intentos, los 3 anulados en <1 min por el scheduler).
 const getUnvoidedApproved = db.prepare(`
   SELECT id, request_id, created_at FROM decisions_log
   WHERE decision = 'approved' AND voided_at IS NULL AND created_at > datetime('now', '-90 days')
+    AND request_id > 0
 `);
 const markVoided = db.prepare(`UPDATE decisions_log SET voided_at = datetime('now') WHERE id = ?`);
 const clearVoided = db.prepare(`UPDATE decisions_log SET voided_at = NULL WHERE id = ?`);
