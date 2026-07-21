@@ -341,6 +341,46 @@ export function seasonWatchState(index, episodes, { showTitle, showRatingKey, se
   };
 }
 
+// Mismas tres llaves que buildWatchedEpisodeIndex, pero guardando la fecha más
+// reciente en vez de solo si se vio — para el backfill del Registro (reconstruir
+// cuándo se vio algo aprobado antes de que existiera el log de 'watched').
+function buildWatchedEpisodeDateIndex(watchedEpisodes) {
+  const byRatingKey = new Map();
+  const byShowKey = new Map();
+  const byTitle = new Map();
+  for (const h of watchedEpisodes) {
+    if (h.percent < WATCHED_THRESHOLD || h.date == null) continue;
+    if (h.ratingKey) byRatingKey.set(h.ratingKey, Math.max(byRatingKey.get(h.ratingKey) ?? 0, h.date));
+    if (Number.isFinite(h.seasonNumber) && Number.isFinite(h.episodeNumber)) {
+      if (h.showRatingKey) {
+        const k = `${h.showRatingKey}:${h.seasonNumber}:${h.episodeNumber}`;
+        byShowKey.set(k, Math.max(byShowKey.get(k) ?? 0, h.date));
+      }
+      if (h.showTitle) {
+        const k = `${normalize(h.showTitle)}:${h.seasonNumber}:${h.episodeNumber}`;
+        byTitle.set(k, Math.max(byTitle.get(k) ?? 0, h.date));
+      }
+    }
+  }
+  return { byRatingKey, byShowKey, byTitle };
+}
+
+// Fecha en la que una temporada quedó vista: la más tardía entre sus episodios
+// que hicieron match (mismo criterio de 3 llaves que seasonWatchState), es
+// decir cuándo se completó el umbral. null si no hay fecha para ninguno.
+function seasonCompletionDate(dateIndex, episodes, { showTitle, showRatingKey, seasonNumber }) {
+  const normalizedTitle = showTitle ? normalize(showTitle) : null;
+  let latest = null;
+  for (const episode of episodes) {
+    const date =
+      dateIndex.byRatingKey.get(episode.ratingKey) ??
+      (showRatingKey != null ? dateIndex.byShowKey.get(`${showRatingKey}:${seasonNumber}:${episode.episodeNumber}`) : null) ??
+      (normalizedTitle != null ? dateIndex.byTitle.get(`${normalizedTitle}:${seasonNumber}:${episode.episodeNumber}`) : null);
+    if (date != null) latest = latest == null ? date : Math.max(latest, date);
+  }
+  return latest;
+}
+
 async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatchedPercent = DEFAULT_SEASON_WATCHED_PERCENT, expiryDays = null) {
   await hydrateMissingPosters(approvedRows);
   const watchedIndex = buildWatchedEpisodeIndex(watchedEpisodes);
@@ -1130,6 +1170,131 @@ export async function importSeerrHistory() {
     }
   }
   return imported;
+}
+
+const getUnresolvedApproved = db.prepare(`
+  SELECT id, request_id, user_id, username, library_id, media_title, media_type, tmdb_id, season_number, poster_url
+  FROM decisions_log
+  WHERE decision = 'approved' AND voided_at IS NULL AND user_id IS NOT NULL AND library_id IS NOT NULL
+`);
+// Si ya hay un 'watched'/'expired' para esa unidad (evento real del scheduler
+// desde el 21 jul 2026, o de una pasada anterior de este mismo backfill), no
+// se vuelve a loguear — idempotente igual que requestUnitAlreadyLogged.
+const hasWatchedOrExpired = db.prepare(`
+  SELECT 1 FROM decisions_log
+  WHERE request_id = ? AND media_type = ? AND COALESCE(season_number, -1) = COALESCE(?, -1)
+    AND decision IN ('watched', 'expired')
+  LIMIT 1
+`);
+const insertBackfilledWatched = db.prepare(`
+  INSERT INTO decisions_log
+    (request_id, user_id, username, library_id, media_title, media_type, tmdb_id, season_number, poster_url, decision, created_at)
+  VALUES
+    (@requestId, @userId, @username, @libraryId, @mediaTitle, @mediaType, @tmdbId, @seasonNumber, @posterUrl, 'watched', @createdAt)
+`);
+
+// Reconstruye en el Registro, con la fecha real de Tautulli, lo que ya se vio
+// ANTES de que el scheduler empezara a loguear 'watched'/'expired' (21 jul
+// 2026, adc28de) — y también lo que importSeerrHistory trae de aprobaciones
+// viejas de Seerr que ya estaban vistas antes de instalar limitARR. Pedido
+// expreso de Edu: solo 'watched', no 'expired' (eso no se puede saber a
+// ciencia cierta a toro pasado, así que no se inventa). Idempotente: se puede
+// re-ejecutar sin duplicar.
+export async function backfillWatchedHistory() {
+  const groups = new Map();
+  for (const row of getUnresolvedApproved.all()) {
+    if (hasWatchedOrExpired.get(row.request_id, row.media_type, row.season_number ?? null)) continue;
+    const key = `${row.user_id}:${row.library_id}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+
+  let backfilled = 0;
+  const showDetailsCache = new Map();
+  const seasonEpisodesCache = new Map();
+
+  for (const [key, groupRows] of groups) {
+    const [userId, libraryId] = key.split(':').map(Number);
+
+    const movieRows = groupRows.filter((r) => r.media_type !== 'tv');
+    if (movieRows.length > 0) {
+      const history = await getUserMovieHistory(userId, libraryId, 2000);
+      // Primer visionado que cruzó el umbral, no el último (varias
+      // reproducciones sueltas no cambian cuándo "se vio" de verdad).
+      const firstWatchedByTitle = new Map();
+      for (const h of history) {
+        if (h.percent < WATCHED_THRESHOLD || h.date == null) continue;
+        const titleKey = normalize(h.title);
+        const prev = firstWatchedByTitle.get(titleKey);
+        if (prev == null || h.date < prev) firstWatchedByTitle.set(titleKey, h.date);
+      }
+      for (const row of movieRows) {
+        const date = firstWatchedByTitle.get(normalize(row.media_title));
+        if (date == null) continue;
+        insertBackfilledWatched.run({
+          requestId: row.request_id,
+          userId: row.user_id,
+          username: row.username,
+          libraryId: row.library_id,
+          mediaTitle: row.media_title,
+          mediaType: row.media_type,
+          tmdbId: row.tmdb_id,
+          seasonNumber: row.season_number,
+          posterUrl: row.poster_url,
+          createdAt: toSqliteDateTime(new Date(date).toISOString()),
+        });
+        backfilled += 1;
+      }
+    }
+
+    const tvRows = groupRows.filter((r) => r.media_type === 'tv' && r.tmdb_id && r.season_number);
+    if (tvRows.length > 0) {
+      const history = await getUserEpisodeHistory(userId, libraryId, 5000);
+      const watchedIndex = buildWatchedEpisodeIndex(history);
+      const dateIndex = buildWatchedEpisodeDateIndex(history);
+      const seasonWatchedPercent = getSeasonWatchedPercent();
+
+      for (const row of tvRows) {
+        const detailsCacheKey = `${row.tmdb_id}:${row.season_number}`;
+        if (!showDetailsCache.has(detailsCacheKey)) {
+          showDetailsCache.set(detailsCacheKey, await getMediaDetails('tv', row.tmdb_id, row.season_number));
+        }
+        const showRatingKey = showDetailsCache.get(detailsCacheKey)?.showRatingKey;
+        const episodesCacheKey = `${showRatingKey || 'missing'}:${row.season_number}`;
+        if (!seasonEpisodesCache.has(episodesCacheKey)) {
+          seasonEpisodesCache.set(episodesCacheKey, await getSeasonEpisodes(showRatingKey, row.season_number));
+        }
+        const episodes = seasonEpisodesCache.get(episodesCacheKey);
+        if (episodes.length === 0) continue;
+
+        const seasonCtx = {
+          showTitle: row.media_title.replace(/ - Temporada \d+$/, ''),
+          showRatingKey,
+          seasonNumber: row.season_number,
+        };
+        const state = seasonWatchState(watchedIndex, episodes, seasonCtx, seasonWatchedPercent);
+        if (!state.complete) continue;
+        const date = seasonCompletionDate(dateIndex, episodes, seasonCtx);
+        if (date == null) continue;
+
+        insertBackfilledWatched.run({
+          requestId: row.request_id,
+          userId: row.user_id,
+          username: row.username,
+          libraryId: row.library_id,
+          mediaTitle: row.media_title,
+          mediaType: row.media_type,
+          tmdbId: row.tmdb_id,
+          seasonNumber: row.season_number,
+          posterUrl: row.poster_url,
+          createdAt: toSqliteDateTime(new Date(date).toISOString()),
+        });
+        backfilled += 1;
+      }
+    }
+  }
+
+  return backfilled;
 }
 
 function formatMediaTitle(mediaType, title, seasonNumber = null) {

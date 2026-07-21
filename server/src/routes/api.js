@@ -19,7 +19,7 @@ import {
 } from '../services/seerr.js';
 import { getSettings, getSettingsForDisplay, updateSettings } from '../settings.js';
 import {
-  resetQuota, importSeerrHistory, refreshQuotaCache, dismissPendingItem, undoQuotaAction, addManualCharge,
+  resetQuota, importSeerrHistory, backfillWatchedHistory, refreshQuotaCache, dismissPendingItem, undoQuotaAction, addManualCharge,
   getPendingItemDetail, quotaIdentity, getBalance, getRequestHold, setRequestHold, clearRequestHold,
   pruneStaleQuotaCache, setOverride, deleteOverride, setGroupOverride, deleteGroupOverride, setRoleOverride,
   deleteRoleOverride,
@@ -880,6 +880,15 @@ router.get('/quota', ah(async (req, res) => {
 router.post('/quota/import-seerr-history', ah(async (req, res) => {
   const imported = await importSeerrHistory();
   res.json({ ok: true, imported });
+}));
+
+// Reconstruye en el Registro lo que ya se vio antes de que el scheduler
+// empezara a loguear 'watched'/'expired' (21 jul 2026) — con la fecha real de
+// Tautulli, no "ahora". Idempotente, pensado para lanzarse tras importar el
+// historial de Seerr (así hay filas 'approved' viejas contra las que buscar).
+router.post('/quota/backfill-watched-history', ah(async (req, res) => {
+  const backfilled = await backfillWatchedHistory();
+  res.json({ ok: true, backfilled });
 }));
 
 // Force-compute quota for every user x enabled library, so the panel shows

@@ -1105,9 +1105,13 @@ export default function Quota() {
     setImporting(true);
     setImportResult(null);
     const { imported } = await api.importSeerrHistory();
+    // Con las aprobaciones viejas de Seerr ya en el Registro, reconstruye
+    // además qué se vio antes de que el scheduler lo logueara solo (21 jul
+    // 2026) — misma fecha real de Tautulli, no "ahora".
+    const { backfilled } = await api.backfillWatchedHistory();
     await api.recalculateQuota();
     load();
-    setImportResult(`${imported} solicitud(es) importada(s)`);
+    setImportResult(`${imported} solicitud(es) importada(s), ${backfilled} vista(s) reconstruida(s)`);
     setImporting(false);
   }
 

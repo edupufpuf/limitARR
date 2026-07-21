@@ -80,7 +80,11 @@ export async function getUserMovieHistory(userId, sectionId, limit = 200) {
     if (!Number.isFinite(percent)) {
       percent = Number(row.watched_status) * 100;
     }
-    return { title: row.full_title || row.title, percent: Math.max(0, Math.min(100, percent)) };
+    return {
+      title: row.full_title || row.title,
+      percent: Math.max(0, Math.min(100, percent)),
+      date: Number(row.date) ? Number(row.date) * 1000 : null,
+    };
   });
 }
 
@@ -108,6 +112,7 @@ export async function getUserEpisodeHistory(userId, sectionId, limit = 1000) {
       seasonRatingKey: row.parent_rating_key ? String(row.parent_rating_key) : null,
       showRatingKey: row.grandparent_rating_key ? String(row.grandparent_rating_key) : null,
       percent: Math.max(0, Math.min(100, percent)),
+      date: Number(row.date) ? Number(row.date) * 1000 : null,
     };
   });
 }

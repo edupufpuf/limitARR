@@ -84,6 +84,7 @@ export const api = {
     return request(`/quota/pending-detail/${userId}/${libraryId}?${query}`);
   },
   importSeerrHistory: () => request('/quota/import-seerr-history', { method: 'POST' }),
+  backfillWatchedHistory: () => request('/quota/backfill-watched-history', { method: 'POST' }),
   pendingApprovals: () => request('/requests/pending-approval'),
   approveRequest: (id) => request(`/requests/${id}/approve`, { method: 'POST' }),
   declineRequest: (id) => request(`/requests/${id}/decline`, { method: 'POST' }),
