@@ -21,6 +21,8 @@ const decisionBadge = {
   override_changed: 'bg-violet-400/10 text-violet-400 ring-violet-400/25',
   group_override_changed: 'bg-violet-400/10 text-violet-400 ring-violet-400/25',
   role_override_changed: 'bg-violet-400/10 text-violet-400 ring-violet-400/25',
+  watched: 'bg-green-400/10 text-green-400 ring-green-400/25',
+  expired: 'bg-bg-700/60 text-gray-400 ring-bg-600',
 };
 
 const decisionLabel = {
@@ -40,6 +42,8 @@ const decisionLabel = {
   override_changed: 'override cambiado',
   group_override_changed: 'override de grupo cambiado',
   role_override_changed: 'override de rol cambiado',
+  watched: '👁️ visto (cupo liberado)',
+  expired: '⌛ caducado (cupo liberado)',
 };
 
 // created_at viene de SQLite en UTC ('YYYY-MM-DD HH:MM:SS'); se enseña en local.

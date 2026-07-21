@@ -28,6 +28,14 @@ const getLastDecision = db.prepare(`
 const getLibraryName = db.prepare('SELECT name FROM libraries WHERE id = ?');
 const getChatId = db.prepare('SELECT chat_id FROM telegram_links WHERE user_id = ?');
 const getCacheRow = db.prepare('SELECT outstanding, pending_items FROM quota_cache WHERE user_id = ? AND library_id = ?');
+// Para etiquetar en el Registro quién liberó cupo: los pending_items de la
+// caché no llevan username, así que se toma el último conocido para ese
+// usuario+biblioteca (viene de sus propias filas 'approved').
+const getLastUsernameForUser = db.prepare(`
+  SELECT username FROM decisions_log
+  WHERE user_id = ? AND library_id = ? AND username IS NOT NULL
+  ORDER BY id DESC LIMIT 1
+`);
 
 // Avoids re-logging (and re-notifying) the same still-pending request every poll
 // cycle when nothing about its situation has changed since the last time.
@@ -173,10 +181,34 @@ function pendingItemKey(item) {
   return `t:${normalize(item.title)}`;
 }
 
+// Registra en decisions_log un pendiente que ha salido de la lista (visto, o
+// caducado) al comparar la caché de antes con la de después. Independiente
+// del aviso de Telegram: queda en el Registro se avise o no.
+function logFreedItem(userId, libraryId, item, decision, limitApplied) {
+  const username = getLastUsernameForUser.get(userId, libraryId)?.username ?? null;
+  insertLog.run({
+    requestId: item.requestId ?? -Date.now(),
+    userId,
+    username,
+    libraryId,
+    mediaTitle: item.title ?? null,
+    mediaType: item.mediaType ?? 'movie',
+    tmdbId: item.tmdbId ?? null,
+    seasonNumber: item.seasonNumber ?? null,
+    posterUrl: item.posterUrl ?? null,
+    balanceBefore: null,
+    limitApplied: limitApplied ?? null,
+    decision,
+  });
+}
+
 // Aviso de cupo liberado: al refrescar los pares con pendientes (issue #5) se
 // compara la caché de antes con la de después — lo que desaparece de la lista
-// con el contador bajando es cupo liberado (visto, o cancelado en Seerr).
-// Los avisos van tras el refresco para no retrasar la caché si Telegram cojea.
+// con el contador bajando es cupo liberado (visto, o caducado por fecha). Cada
+// ítem liberado queda logueado en el Registro ('watched' o 'expired' según si
+// ya había pasado su expiresAt), y además se avisa por Telegram si está
+// activado. Los avisos van tras el refresco para no retrasar la caché si
+// Telegram cojea.
 async function refreshStaleAndNotify() {
   const pairs = listStaleOutstandingPairs();
 
@@ -184,18 +216,26 @@ async function refreshStaleAndNotify() {
     const before = getCacheRow.get(user_id, library_id);
     const result = await refreshQuotaCache(user_id, library_id);
 
-    const target = getNotifyTarget();
-    if (!target.notifyFreed || !before || result.outstanding >= before.outstanding) continue;
+    if (!before || result.outstanding >= before.outstanding) continue;
 
     let oldItems = [];
     try {
       oldItems = JSON.parse(before.pending_items || '[]');
     } catch { /* caché de una versión anterior */ }
     const newKeys = new Set(result.pendingItems.map(pendingItemKey));
-    const freedTitles = oldItems
-      .filter((item) => !newKeys.has(pendingItemKey(item)))
-      .map((item) => item.title)
-      .filter(Boolean);
+    const freedItems = oldItems.filter((item) => !newKeys.has(pendingItemKey(item)));
+    if (freedItems.length === 0) continue;
+
+    const nowMs = Date.now();
+    for (const item of freedItems) {
+      const decision = item.expiresAt != null && item.expiresAt <= nowMs ? 'expired' : 'watched';
+      logFreedItem(user_id, library_id, item, decision, result.limit);
+    }
+
+    const target = getNotifyTarget();
+    if (!target.notifyFreed) continue;
+
+    const freedTitles = freedItems.map((item) => item.title).filter(Boolean);
     if (freedTitles.length === 0) continue;
 
     // Aviso personal, solo DM al usuario — nunca al grupo. Un grupo agregado
