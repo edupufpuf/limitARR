@@ -177,7 +177,7 @@ router.get('/me/quota', ah(async (req, res) => {
     buildPendingApprovalItems(),
   ]);
   const card = quotaCards.find((item) => item.userId === cacheId)
-    ?? { userId: cacheId, username: req.session.user.username, libraries: [] };
+    ?? { userId: cacheId, username: req.session.user.username, monthlyTotal: getMonthlyTotalQuota(cacheId), libraries: [] };
   const ownPending = pendingApprovals.filter((item) => item.userId === Number(req.session.user.id));
   const byLibrary = new Map();
   for (const item of ownPending) {
