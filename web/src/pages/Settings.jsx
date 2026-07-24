@@ -39,6 +39,17 @@ export default function Settings() {
   const [configuringWebhook, setConfiguringWebhook] = useState(false);
   const [webhookMessage, setWebhookMessage] = useState(null);
 
+  const [monthlyTotal, setMonthlyTotal] = useState(null);
+  const [monthlyTotalForm, setMonthlyTotalForm] = useState({ enabled: false, limit: '' });
+  const [monthlyTotalSaving, setMonthlyTotalSaving] = useState(false);
+
+  const monthlyTotalDirty = Boolean(
+    monthlyTotal &&
+      (monthlyTotalForm.enabled !== monthlyTotal.enabled ||
+        String(monthlyTotalForm.limit) !== String(monthlyTotal.limit))
+  );
+  useDirty('settings-monthly-total', monthlyTotalDirty);
+
   const formDirty = Boolean(
     settings &&
       (form.seerr_url !== (settings.seerr_url ?? '') ||
@@ -74,6 +85,10 @@ export default function Settings() {
       }));
     });
     api.webhookInfo().then((r) => setWebhookUrl(r.url));
+    api.monthlyTotalQuotaSettings().then((s) => {
+      setMonthlyTotal(s);
+      setMonthlyTotalForm({ enabled: s.enabled, limit: String(s.limit) });
+    });
   }
 
   useEffect(load, []);
@@ -116,6 +131,22 @@ export default function Settings() {
       setPwMessage({ ok: false, text: 'Contraseña actual incorrecta' });
     } finally {
       setPwSaving(false);
+    }
+  }
+
+  async function saveMonthlyTotal(e) {
+    e.preventDefault();
+    setMonthlyTotalSaving(true);
+    try {
+      const limitNum = Number(monthlyTotalForm.limit);
+      const s = await api.updateMonthlyTotalQuotaSettings({
+        enabled: monthlyTotalForm.enabled,
+        limit: Number.isInteger(limitNum) && limitNum >= 0 ? limitNum : undefined,
+      });
+      setMonthlyTotal(s);
+      setMonthlyTotalForm({ enabled: s.enabled, limit: String(s.limit) });
+    } finally {
+      setMonthlyTotalSaving(false);
     }
   }
 
@@ -327,6 +358,38 @@ export default function Settings() {
           )}
         </div>
       </div>
+
+      <h3 className="text-sm font-semibold text-accent-400 mt-8 mb-2">Cupo mensual total</h3>
+      <form onSubmit={saveMonthlyTotal} className="card p-5 space-y-3">
+        <p className="text-xs text-gray-500">
+          Tope global de solicitudes aprobadas al mes, sumando TODAS las bibliotecas
+          combinadas (independiente del cupo mensual que ya se puede activar por
+          biblioteca en la pestaña Cupo). Se puede sobreescribir por usuario, grupo
+          o rol en su ficha.
+        </p>
+        <label className="flex items-start gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={monthlyTotalForm.enabled}
+            onChange={(e) => setMonthlyTotalForm({ ...monthlyTotalForm, enabled: e.target.checked })}
+            className="mt-0.5 accent-accent-500"
+          />
+          <span className="text-sm">Activar cupo mensual total</span>
+        </label>
+        <div>
+          <label className="label">Límite mensual (todas las bibliotecas)</label>
+          <input
+            type="number"
+            min={0}
+            value={monthlyTotalForm.limit}
+            onChange={(e) => setMonthlyTotalForm({ ...monthlyTotalForm, limit: e.target.value })}
+            className="input w-32"
+          />
+        </div>
+        <button type="submit" disabled={monthlyTotalSaving} className="btn btn-primary">
+          {monthlyTotalSaving ? 'Guardando…' : 'Guardar'}
+        </button>
+      </form>
 
       <h3 className="text-sm font-semibold text-accent-400 mt-8 mb-2">Copia de seguridad</h3>
       <div className="card p-5">

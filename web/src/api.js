@@ -99,6 +99,23 @@ export const api = {
   settings: () => request('/settings'),
   updateSettings: (body) => request('/settings', { method: 'PUT', body: JSON.stringify(body) }),
   testSettings: () => request('/settings/test', { method: 'POST' }),
+
+  monthlyTotalQuotaSettings: () => request('/monthly-total-quota/settings'),
+  updateMonthlyTotalQuotaSettings: (body) =>
+    request('/monthly-total-quota/settings', { method: 'PUT', body: JSON.stringify(body) }),
+  monthlyTotalQuotaOverrides: () => request('/monthly-total-quota/overrides'),
+  setMonthlyTotalUserOverride: (userId, limitOverride, username) =>
+    request(`/monthly-total-quota/overrides/user/${userId}`, { method: 'PUT', body: JSON.stringify({ limitOverride, username }) }),
+  deleteMonthlyTotalUserOverride: (userId, username) =>
+    request(`/monthly-total-quota/overrides/user/${userId}`, { method: 'DELETE', body: JSON.stringify({ username }) }),
+  setMonthlyTotalGroupOverride: (groupId, limitOverride, groupName) =>
+    request(`/monthly-total-quota/overrides/group/${groupId}`, { method: 'PUT', body: JSON.stringify({ limitOverride, groupName }) }),
+  deleteMonthlyTotalGroupOverride: (groupId, groupName) =>
+    request(`/monthly-total-quota/overrides/group/${groupId}`, { method: 'DELETE', body: JSON.stringify({ groupName }) }),
+  setMonthlyTotalRoleOverride: (roleId, limitOverride, roleName) =>
+    request(`/monthly-total-quota/overrides/role/${roleId}`, { method: 'PUT', body: JSON.stringify({ limitOverride, roleName }) }),
+  deleteMonthlyTotalRoleOverride: (roleId, roleName) =>
+    request(`/monthly-total-quota/overrides/role/${roleId}`, { method: 'DELETE', body: JSON.stringify({ roleName }) }),
   webhookInfo: () => request('/webhook/info'),
   configureWebhook: () => request('/webhook/configure', { method: 'POST' }),
 

@@ -1,6 +1,6 @@
 import { db } from './db.js';
 import { config } from './config.js';
-import { getRawSetting } from './settings.js';
+import { getRawSetting, setRawSetting } from './settings.js';
 import {
   getItemWatchHistory,
   getSeasonEpisodes,
@@ -129,6 +129,69 @@ const setUndoData = db.prepare(`UPDATE decisions_log SET undo_data = ? WHERE id 
 const getLibraryForRequest = db.prepare(`
   SELECT * FROM libraries WHERE section_type = ? AND kind = ? AND enabled = 1 LIMIT 1
 `);
+// v3: cupo mensual TOTAL — igual que el mensual por biblioteca, pero sin
+// filtrar por library_id: cuenta TODAS las aprobaciones del mes, en
+// cualquier biblioteca. El límite por defecto vive en settings (Ajustes),
+// no en libraries.
+const DEFAULT_MONTHLY_TOTAL_LIMIT = 20;
+const getMonthlyApprovedCountTotal = db.prepare(`
+  SELECT COUNT(*) AS n FROM decisions_log
+  WHERE user_id = ? AND decision = 'approved' AND voided_at IS NULL
+    AND created_at >= datetime('now', 'start of month')
+`);
+const getMonthlyTotalOverrideRaw = db.prepare('SELECT * FROM monthly_total_overrides WHERE user_id = ?');
+const getGroupMonthlyTotalOverrideForUser = db.prepare(`
+  SELECT gmto.limit_override FROM group_members gm
+  JOIN group_monthly_total_overrides gmto ON gmto.group_id = gm.group_id
+  WHERE gm.user_id = ?
+`);
+const getGroupMonthlyTotalOverrideRaw = db.prepare('SELECT * FROM group_monthly_total_overrides WHERE group_id = ?');
+const getRoleMonthlyTotalOverrideForUser = db.prepare(`
+  SELECT rmto.limit_override FROM user_roles ur
+  JOIN role_monthly_total_overrides rmto ON rmto.role_id = ur.role_id
+  WHERE ur.user_id = ?
+`);
+const getRoleMonthlyTotalOverrideRaw = db.prepare('SELECT * FROM role_monthly_total_overrides WHERE role_id = ?');
+
+export function getMonthlyTotalSettings() {
+  const enabled = getRawSetting('monthly_total_quota_enabled') === '1';
+  const rawLimit = Number(getRawSetting('monthly_total_limit'));
+  const limit = Number.isInteger(rawLimit) && rawLimit >= 0 ? rawLimit : DEFAULT_MONTHLY_TOTAL_LIMIT;
+  return { enabled, limit };
+}
+
+export function setMonthlyTotalSettings({ enabled, limit }) {
+  if (enabled !== undefined) setRawSetting('monthly_total_quota_enabled', enabled ? '1' : '0');
+  if (limit !== undefined && limit !== null && limit !== '') {
+    const n = Number(limit);
+    if (Number.isInteger(n) && n >= 0) setRawSetting('monthly_total_limit', String(n));
+  }
+}
+
+// Mismo cálculo que getBalance().monthly, pero global: suma lo aprobado en
+// TODAS las bibliotecas (no una sola) contra el límite de Ajustes, con la
+// misma precedencia de overrides (individual > grupo > rol > global). Un
+// grupo agregado no tiene rol propio, igual que en getBalance.
+export function getMonthlyTotalQuota(userId) {
+  const { enabled, limit: globalLimit } = getMonthlyTotalSettings();
+  const identity = quotaIdentity(userId);
+  let limit;
+  if (identity.aggregated) {
+    const groupOverride = getGroupMonthlyTotalOverrideRaw.get(identity.groupId);
+    limit = resolveLimit([groupOverride?.limit_override ?? null], globalLimit);
+  } else {
+    const override = getMonthlyTotalOverrideRaw.get(identity.cacheId);
+    const groupOverride = getGroupMonthlyTotalOverrideForUser.get(identity.cacheId);
+    const roleOverride = getRoleMonthlyTotalOverrideForUser.get(identity.cacheId);
+    limit = resolveLimit(
+      [override?.limit_override ?? null, groupOverride?.limit_override ?? null, roleOverride?.limit_override ?? null],
+      globalLimit
+    );
+  }
+  const used = identity.memberIds.reduce((sum, memberId) => sum + getMonthlyApprovedCountTotal.get(memberId).n, 0);
+  return { enabled, limit, used, remaining: Math.max(0, limit - used) };
+}
+
 // v2: cupo mensual — cuenta lo aprobado (y no anulado) en el mes en curso,
 // para TODOS los miembros de la identidad de cupo (igual que el saldo). Un
 // cargo manual también es una fila 'approved' en esta tabla, así que cuenta
@@ -724,6 +787,121 @@ export function deleteRoleOverride(roleId, libraryId, roleName = null) {
   });
 }
 
+// --- Overrides del cupo mensual TOTAL (v3): mismo patrón que arriba, pero sin
+// libraryId — un único override por usuario/grupo/rol.
+function restoreMonthlyTotalOverride(userId, previous) {
+  if (!previous) {
+    db.prepare('DELETE FROM monthly_total_overrides WHERE user_id = ?').run(userId);
+    return;
+  }
+  db.prepare(`
+    INSERT INTO monthly_total_overrides (user_id, limit_override, updated_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT (user_id) DO UPDATE SET limit_override = excluded.limit_override, updated_at = excluded.updated_at
+  `).run(userId, previous.limit_override);
+}
+
+function restoreGroupMonthlyTotalOverride(groupId, previous) {
+  if (!previous) {
+    db.prepare('DELETE FROM group_monthly_total_overrides WHERE group_id = ?').run(groupId);
+    return;
+  }
+  db.prepare(`
+    INSERT INTO group_monthly_total_overrides (group_id, limit_override, updated_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT (group_id) DO UPDATE SET limit_override = excluded.limit_override, updated_at = excluded.updated_at
+  `).run(groupId, previous.limit_override);
+}
+
+function restoreRoleMonthlyTotalOverride(roleId, previous) {
+  if (!previous) {
+    db.prepare('DELETE FROM role_monthly_total_overrides WHERE role_id = ?').run(roleId);
+    return;
+  }
+  db.prepare(`
+    INSERT INTO role_monthly_total_overrides (role_id, limit_override, updated_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT (role_id) DO UPDATE SET limit_override = excluded.limit_override, updated_at = excluded.updated_at
+  `).run(roleId, previous.limit_override);
+}
+
+export function setMonthlyTotalOverride(userId, limitOverride, actorUsername = null) {
+  const previous = getMonthlyTotalOverrideRaw.get(userId) ?? null;
+  db.prepare(`
+    INSERT INTO monthly_total_overrides (user_id, limit_override, updated_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT (user_id) DO UPDATE SET limit_override = excluded.limit_override, updated_at = excluded.updated_at
+  `).run(userId, limitOverride);
+  logAdminChange({
+    decision: 'monthly_total_override_changed',
+    userId: Number(userId),
+    username: actorUsername,
+    undoData: { userId: Number(userId), previous },
+  });
+}
+
+export function deleteMonthlyTotalOverride(userId, actorUsername = null) {
+  const previous = getMonthlyTotalOverrideRaw.get(userId) ?? null;
+  db.prepare('DELETE FROM monthly_total_overrides WHERE user_id = ?').run(userId);
+  if (!previous) return;
+  logAdminChange({
+    decision: 'monthly_total_override_changed',
+    userId: Number(userId),
+    username: actorUsername,
+    undoData: { userId: Number(userId), previous },
+  });
+}
+
+export function setGroupMonthlyTotalOverride(groupId, limitOverride, groupName = null) {
+  const previous = getGroupMonthlyTotalOverrideRaw.get(groupId) ?? null;
+  db.prepare(`
+    INSERT INTO group_monthly_total_overrides (group_id, limit_override, updated_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT (group_id) DO UPDATE SET limit_override = excluded.limit_override, updated_at = excluded.updated_at
+  `).run(groupId, limitOverride);
+  logAdminChange({
+    decision: 'group_monthly_total_override_changed',
+    username: groupName,
+    undoData: { groupId: Number(groupId), previous },
+  });
+}
+
+export function deleteGroupMonthlyTotalOverride(groupId, groupName = null) {
+  const previous = getGroupMonthlyTotalOverrideRaw.get(groupId) ?? null;
+  db.prepare('DELETE FROM group_monthly_total_overrides WHERE group_id = ?').run(groupId);
+  if (!previous) return;
+  logAdminChange({
+    decision: 'group_monthly_total_override_changed',
+    username: groupName,
+    undoData: { groupId: Number(groupId), previous },
+  });
+}
+
+export function setRoleMonthlyTotalOverride(roleId, limitOverride, roleName = null) {
+  const previous = getRoleMonthlyTotalOverrideRaw.get(roleId) ?? null;
+  db.prepare(`
+    INSERT INTO role_monthly_total_overrides (role_id, limit_override, updated_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT (role_id) DO UPDATE SET limit_override = excluded.limit_override, updated_at = excluded.updated_at
+  `).run(roleId, limitOverride);
+  logAdminChange({
+    decision: 'role_monthly_total_override_changed',
+    username: roleName,
+    undoData: { roleId: Number(roleId), previous },
+  });
+}
+
+export function deleteRoleMonthlyTotalOverride(roleId, roleName = null) {
+  const previous = getRoleMonthlyTotalOverrideRaw.get(roleId) ?? null;
+  db.prepare('DELETE FROM role_monthly_total_overrides WHERE role_id = ?').run(roleId);
+  if (!previous) return;
+  logAdminChange({
+    decision: 'role_monthly_total_override_changed',
+    username: roleName,
+    undoData: { roleId: Number(roleId), previous },
+  });
+}
+
 // rating_key de Plex para enlazar cada pendiente con su página de estadísticas
 // en Tautulli. Se matchea primero por TMDB id (los guids de Plex incluyen
 // "tmdb://<id>", independiente del idioma) y si no por título normalizado.
@@ -1084,6 +1262,18 @@ export async function undoQuotaAction(logId) {
     case 'role_override_changed':
       restoreRoleOverride(data.roleId, data.libraryId, data.previous);
       result = { kind: 'role', roleId: data.roleId, libraryId: data.libraryId };
+      break;
+    case 'monthly_total_override_changed':
+      restoreMonthlyTotalOverride(data.userId, data.previous);
+      result = { kind: 'user', userId: data.userId, libraryId: null };
+      break;
+    case 'group_monthly_total_override_changed':
+      restoreGroupMonthlyTotalOverride(data.groupId, data.previous);
+      result = { kind: 'group', groupId: data.groupId, libraryId: null };
+      break;
+    case 'role_monthly_total_override_changed':
+      restoreRoleMonthlyTotalOverride(data.roleId, data.previous);
+      result = { kind: 'role', roleId: data.roleId, libraryId: null };
       break;
     default:
       return null;
