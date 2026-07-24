@@ -9,7 +9,7 @@ import Settings from './Settings.jsx';
 import Notifications from './Notifications.jsx';
 import WhatsNewModal from '../components/WhatsNewModal.jsx';
 import { Wordmark } from '../components/Brand.jsx';
-import { IconGauge, IconSave, IconFilm, IconUsers, IconClock, IconBell, IconGear, IconLogout } from '../icons.jsx';
+import { IconGauge, IconSave, IconFilm, IconUsers, IconClock, IconBell, IconGear, IconLogout, IconMenu, IconXCircle } from '../icons.jsx';
 import { DirtyGuardProvider, useAnyDirty } from '../DirtyGuard.jsx';
 
 const UNSAVED_WARNING = 'Hay cambios sin guardar en esta pestaña. ¿Salir igualmente?';
@@ -35,6 +35,7 @@ export default function Dashboard({ onLoggedOut }) {
 function DashboardInner({ onLoggedOut }) {
   const [tab, setTab] = useState('quota');
   const [version, setVersion] = useState(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const { Component, label } = TABS[tab];
   const anyDirty = useAnyDirty();
 
@@ -45,6 +46,7 @@ function DashboardInner({ onLoggedOut }) {
   function goTab(key) {
     if (key !== tab && anyDirty() && !window.confirm(UNSAVED_WARNING)) return;
     setTab(key);
+    setMenuOpen(false);
   }
 
   async function logout() {
@@ -55,10 +57,25 @@ function DashboardInner({ onLoggedOut }) {
 
   return (
     <div className="min-h-screen flex flex-col sm:flex-row bg-bg-950 text-gray-100">
-      {/* Sidebar — solo desktop */}
-      <nav className="hidden sm:flex w-[300px] h-screen sticky top-0 overflow-y-auto bg-gradient-to-b from-bg-900 via-bg-900 to-bg-950 border-r border-bg-700/55 px-7 py-8 flex-col flex-shrink-0 shadow-[18px_0_48px_-32px_rgba(0,0,0,.85)]">
-        <div className="mb-16">
+      {/* Overlay — solo móvil, cierra el menú al tocar fuera */}
+      {menuOpen && (
+        <div
+          onClick={() => setMenuOpen(false)}
+          className="sm:hidden fixed inset-0 bg-black/60 z-20 backdrop-blur-sm"
+        />
+      )}
+
+      {/* Sidebar — fija en desktop, cajón deslizante escondido en móvil */}
+      <nav
+        className={`fixed sm:sticky inset-y-0 left-0 sm:top-0 z-30 sm:z-auto w-[280px] sm:w-[300px] h-screen overflow-y-auto bg-gradient-to-b from-bg-900 via-bg-900 to-bg-950 border-r border-bg-700/55 px-7 py-8 flex flex-col flex-shrink-0 shadow-[18px_0_48px_-32px_rgba(0,0,0,.85)] transition-transform duration-300 sm:transition-none ${
+          menuOpen ? 'translate-x-0' : '-translate-x-full sm:translate-x-0'
+        }`}
+      >
+        <div className="mb-16 flex items-center justify-between">
           <Wordmark className="text-[42px]" />
+          <button onClick={() => setMenuOpen(false)} className="sm:hidden text-gray-400 p-1 -mr-1">
+            <IconXCircle className="w-7 h-7" />
+          </button>
         </div>
         <div className="space-y-4">
           {Object.entries(TABS).map(([key, { label, Icon }]) => (
@@ -117,34 +134,18 @@ function DashboardInner({ onLoggedOut }) {
 
       {/* Top bar — solo móvil */}
       <header className="sm:hidden flex items-center justify-between px-4 h-16 bg-bg-900/95 border-b border-bg-700/60 flex-shrink-0 sticky top-0 z-10 backdrop-blur">
-        <div className="flex items-center gap-2">
-          <Wordmark className="text-2xl" />
-        </div>
+        <button onClick={() => setMenuOpen(true)} className="text-gray-300 p-1 -ml-1">
+          <IconMenu className="w-6 h-6" />
+        </button>
         <span className="text-sm text-gray-400">{label}</span>
         <button onClick={logout} className="text-gray-400 p-1 -mr-1">
           <IconLogout className="w-5 h-5" />
         </button>
       </header>
 
-      <main className="flex-1 p-4 sm:p-8 lg:p-10 pb-20 sm:pb-8 overflow-x-hidden">
+      <main className="flex-1 p-4 sm:p-8 lg:p-10 pb-8 overflow-x-hidden">
         <Component />
       </main>
-
-      {/* Barra de pestañas — solo móvil */}
-      <nav className="sm:hidden fixed bottom-0 left-0 right-0 bg-bg-900/95 border-t border-bg-700/60 flex z-10 backdrop-blur">
-        {Object.entries(TABS).map(([key, { label, Icon }]) => (
-          <button
-            key={key}
-            onClick={() => goTab(key)}
-            className={`flex-1 flex flex-col items-center gap-0.5 py-2 text-[10px] transition-colors ${
-              tab === key ? 'text-accent-300' : 'text-gray-500'
-            }`}
-          >
-            <Icon className="w-5 h-5" />
-            {label}
-          </button>
-        ))}
-      </nav>
 
       <WhatsNewModal />
     </div>
