@@ -34,6 +34,37 @@ function OverrideField({ label, className, ...inputProps }) {
   );
 }
 
+// v3: control único (no por biblioteca) para el override del cupo mensual
+// TOTAL — mismo patrón visual que OverrideField, pero con su propio guardar/
+// quitar porque no vive en la grid por biblioteca de límite/caducidad/mensual.
+function MonthlyTotalOverrideControl({ value, onSave, onDelete }) {
+  const [input, setInput] = useState(value ?? '');
+  useEffect(() => setInput(value ?? ''), [value]);
+  const dirty = String(input) !== String(value ?? '');
+  return (
+    <div className="flex items-end gap-2 text-sm">
+      <OverrideField
+        label="Cupo mensual total"
+        type="number"
+        min={0}
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        title="Todas las bibliotecas combinadas (0 = bloquear el mes; vacío = herencia/global)"
+      />
+      {dirty && input !== '' && (
+        <button onClick={() => onSave(Number(input))} className="btn btn-primary py-1 px-2.5 text-xs mb-0.5">
+          Guardar
+        </button>
+      )}
+      {dirty && input === '' && value !== '' && value != null && (
+        <button onClick={onDelete} className="text-accent-400 text-xs mb-1.5">
+          quitar
+        </button>
+      )}
+    </div>
+  );
+}
+
 function GroupCard({ group, users, libraries, onChanged }) {
   // Límite, caducidad y cupo mensual por biblioteca como texto del input: '' = sin override.
   const [limits, setLimits] = useState({});
@@ -212,6 +243,21 @@ function GroupCard({ group, users, libraries, onChanged }) {
           );
         })}
       </div>
+
+      <div className="mt-4 pt-3 border-t border-bg-700/50">
+        <div className="label mb-1.5">Cupo mensual total (vacío = el global de Ajustes)</div>
+        <MonthlyTotalOverrideControl
+          value={group.monthlyTotalOverride?.limit_override ?? ''}
+          onSave={async (n) => {
+            await api.setMonthlyTotalGroupOverride(group.id, n, group.name);
+            onChanged();
+          }}
+          onDelete={async () => {
+            await api.deleteMonthlyTotalGroupOverride(group.id, group.name);
+            onChanged();
+          }}
+        />
+      </div>
     </div>
   );
 }
@@ -361,6 +407,21 @@ function RoleCard({ role, users, libraries, onChanged }) {
           );
         })}
       </div>
+
+      <div className="mt-4 pt-3 border-t border-bg-700/50">
+        <div className="label mb-1.5">Cupo mensual total (vacío = el global de Ajustes)</div>
+        <MonthlyTotalOverrideControl
+          value={role.monthlyTotalOverride?.limit_override ?? ''}
+          onSave={async (n) => {
+            await api.setMonthlyTotalRoleOverride(role.id, n, role.name);
+            onChanged();
+          }}
+          onDelete={async () => {
+            await api.deleteMonthlyTotalRoleOverride(role.id, role.name);
+            onChanged();
+          }}
+        />
+      </div>
     </div>
   );
 }
@@ -380,7 +441,7 @@ const FICHA_TABS = [
 // tenga salvado del borrado (Maintainerr). Grupo/rol/overrides se editan
 // aquí mismo; cupo/pendientes/salvadas son de la misma fuente que la pestaña
 // Cupo (esta ficha NO la sustituye, solo la enseña centrada en un usuario).
-function UserFichaModal({ user, group, role, allGroups, allRoles, overrides, libraries, onChanged, onClose }) {
+function UserFichaModal({ user, group, role, allGroups, allRoles, overrides, monthlyTotalOverride, libraries, onChanged, onClose }) {
   const [tab, setTab] = useState('general');
   const [quotaAll, setQuotaAll] = useState([]);
   const [pendingAll, setPendingAll] = useState([]);
@@ -634,6 +695,11 @@ function UserFichaModal({ user, group, role, allGroups, allRoles, overrides, lib
                 cualquier miembro cuenta aquí.
               </p>
             )}
+            {quotaEntry?.monthlyTotal?.enabled && (
+              <div className="text-xs text-gray-400">
+                📅 Cupo mensual total (todas las bibliotecas): {quotaEntry.monthlyTotal.used}/{quotaEntry.monthlyTotal.limit}
+              </div>
+            )}
             {quotaEntry?.libraries.map((lib) => {
               const pct = lib.limitApplied > 0 ? Math.round((lib.balance / lib.limitApplied) * 100) : 0;
               const busy = cupoBusy[lib.libraryId];
@@ -739,6 +805,19 @@ function UserFichaModal({ user, group, role, allGroups, allRoles, overrides, lib
             <p className="text-xs text-gray-500 mb-3">
               Overrides propios de este usuario (vacío = herencia normal: grupo &gt; rol &gt; biblioteca).
             </p>
+            <div className="mb-4 pb-3 border-b border-bg-700/50">
+              <MonthlyTotalOverrideControl
+                value={monthlyTotalOverride?.limit_override ?? ''}
+                onSave={async (n) => {
+                  await api.setMonthlyTotalUserOverride(user.id, n, user.username);
+                  onChanged();
+                }}
+                onDelete={async () => {
+                  await api.deleteMonthlyTotalUserOverride(user.id, user.username);
+                  onChanged();
+                }}
+              />
+            </div>
             <div className="flex flex-col gap-2">
               {libraries.map((l) => {
                 const saved = overrides.find((o) => o.library_id === l.id);
@@ -889,6 +968,7 @@ const SUBTABS = [
 export default function Users() {
   const [subtab, setSubtab] = useState('usuarios');
   const [overrides, setOverrides] = useState([]);
+  const [monthlyTotalUserOverrides, setMonthlyTotalUserOverrides] = useState([]);
   const [groups, setGroups] = useState([]);
   const [newGroupName, setNewGroupName] = useState('');
   const [roles, setRoles] = useState([]);
@@ -905,6 +985,7 @@ export default function Users() {
 
   function load() {
     api.overrides().then(setOverrides);
+    api.monthlyTotalQuotaOverrides().then((r) => setMonthlyTotalUserOverrides(r.users ?? []));
     api.groups().then(setGroups);
     api.roles().then(setRoles);
     // Foto de Seerr, cupo y pendientes de un vistazo en la tabla de usuarios.
@@ -1100,6 +1181,7 @@ export default function Users() {
           allGroups={groups}
           allRoles={roles}
           overrides={overrides.filter((o) => o.user_id === selectedUser.id)}
+          monthlyTotalOverride={monthlyTotalUserOverrides.find((o) => o.user_id === selectedUser.id) ?? null}
           libraries={libraries}
           onChanged={load}
           onClose={() => setSelectedUser(null)}

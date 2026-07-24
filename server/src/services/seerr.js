@@ -70,9 +70,13 @@ async function listHistoricalRequestsByMediaType(mediaType, seerrUserId) {
       const isTv = r.type === 'tv' || r.media?.mediaType === 'tv';
       const isMovie = r.type === 'movie' || r.media?.mediaType === 'movie';
       if ((mediaType === 'tv' && !isTv) || (mediaType === 'movie' && !isMovie)) continue;
-      // For history imports, count requests that are already approved or available.
-      // Seerr does not return status=5 available items with filter=approved.
-      if (!new Set([2, 3, 4, 5]).has(Number(r.status))) continue;
+      // For history imports, count requests that are already approved (request.status)
+      // or whose media is already available/partially available (media.status),
+      // but never requests that were declined (request.status === 3).
+      const isApprovedRequest = Number(r.status) === 2;
+      const mediaStatus = Number(r.media?.status ?? 0);
+      const isAvailableMedia = mediaStatus === 4 || mediaStatus === 5;
+      if (!isApprovedRequest && !isAvailableMedia) continue;
       results.push(mapRequest(r));
     }
     skip += 100;

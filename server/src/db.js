@@ -239,6 +239,31 @@ db.exec(`
     hold_until TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- v3: cupo mensual TOTAL — a diferencia del mensual por biblioteca (arriba),
+  -- este suma TODAS las bibliotecas combinadas contra un único tope. Se activa
+  -- y edita en Ajustes (settings: monthly_total_quota_enabled/monthly_total_limit,
+  -- ver settings.js); estas tablas solo guardan los overrides, con la misma
+  -- precedencia que el resto (individual > grupo > rol > global). Sin
+  -- library_id: un único cupo por usuario/grupo/rol, no uno por biblioteca.
+  -- 0 = bloquear el mes entero.
+  CREATE TABLE IF NOT EXISTS monthly_total_overrides (
+    user_id INTEGER PRIMARY KEY,
+    limit_override INTEGER NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS group_monthly_total_overrides (
+    group_id INTEGER PRIMARY KEY,
+    limit_override INTEGER NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS role_monthly_total_overrides (
+    role_id INTEGER PRIMARY KEY,
+    limit_override INTEGER NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
 
 // Roles por defecto pedidos por Edu: se siembran una sola vez si la tabla está

@@ -5,7 +5,7 @@ import { config } from './config.js';
 import { getRawSetting, setRawSetting } from './settings.js';
 import { listPendingRequests, approveRequest, declineRequest, getMediaDetails } from './services/seerr.js';
 import { getUsers } from './services/tautulli.js';
-import { getBalance, reconcileVoidedRequests, refreshQuotaCache, listStaleOutstandingPairs, normalize, getRequestHold, clearRequestHold, pruneStaleQuotaCache } from './quota.js';
+import { getBalance, getMonthlyTotalQuota, reconcileVoidedRequests, refreshQuotaCache, listStaleOutstandingPairs, normalize, getRequestHold, clearRequestHold, pruneStaleQuotaCache } from './quota.js';
 import { sendMessage, getNotifyTarget, pendingButton, renderNoQuotaMessage } from './services/telegram.js';
 import { matchByEmailOrUsername } from './userMatch.js';
 
@@ -83,6 +83,25 @@ async function notifyNoMonthlyQuota(base, monthly) {
   const text =
     `🚫 Cupo mensual agotado: ${base.mediaTitle ?? 'tu solicitud'} (${libraryName}).\n` +
     `${base.username}: ya llevas ${monthly.used}/${monthly.limit} este mes.`;
+  try {
+    await sendMessage(chatId, text);
+  } catch (err) {
+    console.error('[scheduler] telegram notify failed:', err.message);
+  }
+}
+
+// v3: cupo mensual TOTAL agotado — igual que notifyNoMonthlyQuota pero deja
+// claro que el tope es el global (todas las bibliotecas combinadas), no el de
+// esta biblioteca en concreto.
+async function notifyNoMonthlyTotalQuota(base, monthlyTotal) {
+  const target = getNotifyTarget();
+  if (!target.notifyNoQuota) return;
+
+  const chatId = getChatId.get(base.userId)?.chat_id;
+  if (!chatId) return;
+  const text =
+    `🚫 Cupo mensual total agotado: ${base.mediaTitle ?? 'tu solicitud'}.\n` +
+    `${base.username}: ya llevas ${monthlyTotal.used}/${monthlyTotal.limit} este mes (todas las bibliotecas).`;
   try {
     await sendMessage(chatId, text);
   } catch (err) {
@@ -421,7 +440,19 @@ export async function runPollCycle() {
     // v2: cupo mensual — tope aparte del saldo de pendientes por ver; agotado
     // bloquea igual aunque el usuario tenga saldo libre.
     const monthlyOk = !monthly.enabled || monthly.remaining >= requiredUnits;
-    const decision = balance >= requiredUnits && monthlyOk ? 'approved' : monthlyOk ? 'no_quota' : 'no_monthly_quota';
+    // v3: cupo mensual TOTAL — igual que el anterior, pero sumando todas las
+    // bibliotecas; se comprueba aparte porque puede estar activado aunque esta
+    // biblioteca en concreto no tenga cupo mensual propio.
+    const monthlyTotal = getMonthlyTotalQuota(tautulliUser.id);
+    const monthlyTotalOk = !monthlyTotal.enabled || monthlyTotal.remaining >= requiredUnits;
+    const decision =
+      balance >= requiredUnits && monthlyOk && monthlyTotalOk
+        ? 'approved'
+        : !monthlyTotalOk
+          ? 'no_monthly_total_quota'
+          : monthlyOk
+            ? 'no_quota'
+            : 'no_monthly_quota';
 
     if (decision === 'approved') {
       await approveRequest(request.id);
@@ -447,6 +478,7 @@ export async function runPollCycle() {
     }
     if (decision === 'no_quota' && isNew) await notifyNoQuota(base);
     if (decision === 'no_monthly_quota' && isNew) await notifyNoMonthlyQuota(base, monthly);
+    if (decision === 'no_monthly_total_quota' && isNew) await notifyNoMonthlyTotalQuota(base, monthlyTotal);
     if (decision === 'approved' && isNew) {
       await notifyApproved(base, Math.max(0, balance - requiredUnits));
     }

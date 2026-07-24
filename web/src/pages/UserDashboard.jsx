@@ -198,6 +198,38 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
         </div>
         {quota && quota.libraries?.length === 0 && <div className="card p-6 text-gray-400">Todavía no hay cupo calculado para tu cuenta.</div>}
 
+        {quota?.monthlyTotal?.enabled && (
+          <section className="card p-5 mt-8">
+            <h2 className="font-extrabold text-xl mb-1">📅 Cupo mensual total</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Límite de cuántas puedes pedir al mes en total, sumando todas las bibliotecas
+              (HD, 4K, series...) combinadas.
+            </p>
+            {(() => {
+              const mt = quota.monthlyTotal;
+              const pct = mt.limit > 0 ? Math.max(0, Math.min(100, (mt.used / mt.limit) * 100)) : 0;
+              const maxed = mt.used >= mt.limit;
+              return (
+                <div className="rounded-xl bg-bg-950/60 p-4 max-w-sm">
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="font-semibold">Todas las bibliotecas</span>
+                    <div className={`text-2xl font-black tabular-nums ${maxed ? 'text-accent-400' : 'text-white'}`}>
+                      {mt.used}<span className="text-sm text-gray-500 font-bold">/{mt.limit}</span>
+                    </div>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-bg-800 mt-3 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${maxed ? 'bg-accent-500' : 'bg-sky-400'}`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  {maxed && <p className="text-xs text-accent-400 mt-2">Cupo del mes agotado</p>}
+                </div>
+              );
+            })()}
+          </section>
+        )}
+
         {quota?.libraries?.some((l) => l.monthly?.enabled) && (
           <section className="card p-5 mt-8">
             <h2 className="font-extrabold text-xl mb-1">📅 Cupo mensual</h2>

@@ -22,7 +22,9 @@ import {
   resetQuota, importSeerrHistory, backfillWatchedHistory, refreshQuotaCache, dismissPendingItem, undoQuotaAction, addManualCharge,
   getPendingItemDetail, quotaIdentity, getBalance, getRequestHold, setRequestHold, clearRequestHold,
   pruneStaleQuotaCache, setOverride, deleteOverride, setGroupOverride, deleteGroupOverride, setRoleOverride,
-  deleteRoleOverride,
+  deleteRoleOverride, getMonthlyTotalSettings, setMonthlyTotalSettings, getMonthlyTotalQuota,
+  setMonthlyTotalOverride, deleteMonthlyTotalOverride, setGroupMonthlyTotalOverride, deleteGroupMonthlyTotalOverride,
+  setRoleMonthlyTotalOverride, deleteRoleMonthlyTotalOverride,
 } from '../quota.js';
 import { matchByEmailOrUsername } from '../userMatch.js';
 import { runPollCycle } from '../scheduler.js';
@@ -389,6 +391,65 @@ router.post('/settings/test', async (req, res) => {
   res.json(result);
 });
 
+// --- v3: Cupo mensual total (global, todas las bibliotecas combinadas) ---
+
+router.get('/monthly-total-quota/settings', (req, res) => {
+  res.json(getMonthlyTotalSettings());
+});
+
+router.put('/monthly-total-quota/settings', (req, res) => {
+  const { enabled, limit } = req.body || {};
+  setMonthlyTotalSettings({ enabled, limit });
+  res.json(getMonthlyTotalSettings());
+});
+
+router.get('/monthly-total-quota/overrides', (req, res) => {
+  res.json({
+    users: db.prepare('SELECT * FROM monthly_total_overrides').all(),
+    groups: db.prepare('SELECT * FROM group_monthly_total_overrides').all(),
+    roles: db.prepare('SELECT * FROM role_monthly_total_overrides').all(),
+  });
+});
+
+router.put('/monthly-total-quota/overrides/user/:userId', (req, res) => {
+  const { userId } = req.params;
+  const { limitOverride, username } = req.body || {};
+  if (limitOverride === undefined) return res.status(400).json({ error: 'limitOverride_required' });
+  setMonthlyTotalOverride(userId, limitOverride, username || null);
+  res.json({ ok: true });
+});
+
+router.delete('/monthly-total-quota/overrides/user/:userId', (req, res) => {
+  deleteMonthlyTotalOverride(req.params.userId, (req.body?.username || '').trim() || null);
+  res.json({ ok: true });
+});
+
+router.put('/monthly-total-quota/overrides/group/:groupId', (req, res) => {
+  const { groupId } = req.params;
+  const { limitOverride, groupName } = req.body || {};
+  if (limitOverride === undefined) return res.status(400).json({ error: 'limitOverride_required' });
+  setGroupMonthlyTotalOverride(groupId, limitOverride, groupName || null);
+  res.json({ ok: true });
+});
+
+router.delete('/monthly-total-quota/overrides/group/:groupId', (req, res) => {
+  deleteGroupMonthlyTotalOverride(req.params.groupId, (req.body?.groupName || '').trim() || null);
+  res.json({ ok: true });
+});
+
+router.put('/monthly-total-quota/overrides/role/:roleId', (req, res) => {
+  const { roleId } = req.params;
+  const { limitOverride, roleName } = req.body || {};
+  if (limitOverride === undefined) return res.status(400).json({ error: 'limitOverride_required' });
+  setRoleMonthlyTotalOverride(roleId, limitOverride, roleName || null);
+  res.json({ ok: true });
+});
+
+router.delete('/monthly-total-quota/overrides/role/:roleId', (req, res) => {
+  deleteRoleMonthlyTotalOverride(req.params.roleId, (req.body?.roleName || '').trim() || null);
+  res.json({ ok: true });
+});
+
 // URL que hay que dar de alta en Seerr (Settings > Notifications > Webhook) para
 // que avise a limitARR al instante. Asume que el contenedor se llama "limitarr"
 // en la misma red docker que seerr — si no, hay que pegarla a mano con el
@@ -562,11 +623,13 @@ router.get('/groups', (req, res) => {
   const groups = db.prepare('SELECT * FROM groups ORDER BY name').all();
   const members = db.prepare('SELECT * FROM group_members').all();
   const overrides = db.prepare('SELECT * FROM group_overrides').all();
+  const monthlyTotalOverrides = db.prepare('SELECT * FROM group_monthly_total_overrides').all();
   res.json(
     groups.map((g) => ({
       ...g,
       members: members.filter((m) => m.group_id === g.id).map((m) => m.user_id),
       overrides: overrides.filter((o) => o.group_id === g.id),
+      monthlyTotalOverride: monthlyTotalOverrides.find((o) => o.group_id === g.id) ?? null,
     }))
   );
 });
@@ -692,11 +755,13 @@ router.get('/roles', (req, res) => {
   const roles = db.prepare('SELECT * FROM roles ORDER BY name').all();
   const members = db.prepare('SELECT * FROM user_roles').all();
   const overrides = db.prepare('SELECT * FROM role_overrides').all();
+  const monthlyTotalOverrides = db.prepare('SELECT * FROM role_monthly_total_overrides').all();
   res.json(
     roles.map((r) => ({
       ...r,
       members: members.filter((m) => m.role_id === r.id).map((m) => m.user_id),
       overrides: overrides.filter((o) => o.role_id === r.id),
+      monthlyTotalOverride: monthlyTotalOverrides.find((o) => o.role_id === r.id) ?? null,
     }))
   );
 });
@@ -833,6 +898,7 @@ async function buildQuotaByUser() {
           approved7d: memberIds.reduce((sum, uid) => sum + (recentMap.get(uid)?.approved7d ?? 0), 0),
           blocked7d: memberIds.reduce((sum, uid) => sum + (recentMap.get(uid)?.blocked7d ?? 0), 0),
           requestedTotal: memberIds.reduce((sum, uid) => sum + (requestedMap.get(uid) ?? 0), 0),
+          monthlyTotal: getMonthlyTotalQuota(row.user_id),
           libraries: [],
         });
       } else {
@@ -844,6 +910,7 @@ async function buildQuotaByUser() {
           approved7d: recentMap.get(row.user_id)?.approved7d ?? 0,
           blocked7d: recentMap.get(row.user_id)?.blocked7d ?? 0,
           requestedTotal: requestedMap.get(row.user_id) ?? 0,
+          monthlyTotal: getMonthlyTotalQuota(row.user_id),
           libraries: [],
         });
       }
@@ -938,6 +1005,12 @@ router.post('/quota/dismiss/:userId/:libraryId', ah(async (req, res) => {
 router.post('/decisions/:id/undo', ah(async (req, res) => {
   const result = await undoQuotaAction(req.params.id);
   if (!result) return res.status(404).json({ error: 'not_undoable' });
+  // libraryId null = override del cupo mensual TOTAL (v3): no vive en
+  // quota_cache (se calcula en vivo), así que no hay nada que refrescar aquí.
+  if (result.libraryId == null) {
+    res.json({ ok: true });
+    return;
+  }
   // Los de grupo/rol no tienen un único usuario que refrescar — se recalcula
   // el cupo de todos los miembros afectados (igual que al editar el override).
   if (result.kind === 'group') {
