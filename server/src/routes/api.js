@@ -23,6 +23,7 @@ import {
   getPendingItemDetail, quotaIdentity, getBalance, getRequestHold, setRequestHold, clearRequestHold,
   pruneStaleQuotaCache, setOverride, deleteOverride, setGroupOverride, deleteGroupOverride, setRoleOverride,
   deleteRoleOverride, getMonthlyTotalSettings, setMonthlyTotalSettings, getMonthlyTotalQuota,
+  getMonthlyQuotaMode, setMonthlyQuotaMode,
   setMonthlyTotalOverride, deleteMonthlyTotalOverride, setGroupMonthlyTotalOverride, deleteGroupMonthlyTotalOverride,
   setRoleMonthlyTotalOverride, deleteRoleMonthlyTotalOverride,
 } from '../quota.js';
@@ -394,13 +395,14 @@ router.post('/settings/test', async (req, res) => {
 // --- v3: Cupo mensual total (global, todas las bibliotecas combinadas) ---
 
 router.get('/monthly-total-quota/settings', (req, res) => {
-  res.json(getMonthlyTotalSettings());
+  res.json({ mode: getMonthlyQuotaMode(), ...getMonthlyTotalSettings() });
 });
 
 router.put('/monthly-total-quota/settings', (req, res) => {
-  const { enabled, limit } = req.body || {};
-  setMonthlyTotalSettings({ enabled, limit });
-  res.json(getMonthlyTotalSettings());
+  const { mode, limit } = req.body || {};
+  if (mode !== undefined) setMonthlyQuotaMode(mode);
+  setMonthlyTotalSettings({ limit });
+  res.json({ mode: getMonthlyQuotaMode(), ...getMonthlyTotalSettings() });
 });
 
 router.get('/monthly-total-quota/overrides', (req, res) => {

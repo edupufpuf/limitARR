@@ -153,15 +153,26 @@ const getRoleMonthlyTotalOverrideForUser = db.prepare(`
 `);
 const getRoleMonthlyTotalOverrideRaw = db.prepare('SELECT * FROM role_monthly_total_overrides WHERE role_id = ?');
 
+// El cupo mensual es o por biblioteca (v2) o total (v3), nunca los dos a la
+// vez — Edu lo pidió tras tener ambos activables por separado y confundirse
+// sobre cuál mandaba. El modo vive en un único setting; 'per_library' es el
+// valor por defecto porque es el que ya estaba en uso en producción.
+export function getMonthlyQuotaMode() {
+  return getRawSetting('monthly_quota_mode') === 'total' ? 'total' : 'per_library';
+}
+
+export function setMonthlyQuotaMode(mode) {
+  if (mode === 'total' || mode === 'per_library') setRawSetting('monthly_quota_mode', mode);
+}
+
 export function getMonthlyTotalSettings() {
-  const enabled = getRawSetting('monthly_total_quota_enabled') === '1';
+  const enabled = getMonthlyQuotaMode() === 'total';
   const rawLimit = Number(getRawSetting('monthly_total_limit'));
   const limit = Number.isInteger(rawLimit) && rawLimit >= 0 ? rawLimit : DEFAULT_MONTHLY_TOTAL_LIMIT;
   return { enabled, limit };
 }
 
-export function setMonthlyTotalSettings({ enabled, limit }) {
-  if (enabled !== undefined) setRawSetting('monthly_total_quota_enabled', enabled ? '1' : '0');
+export function setMonthlyTotalSettings({ limit }) {
   if (limit !== undefined && limit !== null && limit !== '') {
     const n = Number(limit);
     if (Number.isInteger(n) && n >= 0) setRawSetting('monthly_total_limit', String(n));
@@ -583,7 +594,7 @@ export async function getBalance(userId, libraryId) {
     0
   );
   const monthly = {
-    enabled: Boolean(library.monthly_quota_enabled),
+    enabled: getMonthlyQuotaMode() === 'per_library' && Boolean(library.monthly_quota_enabled),
     limit: monthlyLimit,
     used: monthlyUsed,
     remaining: Math.max(0, monthlyLimit - monthlyUsed),

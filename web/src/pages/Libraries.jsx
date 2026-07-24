@@ -9,12 +9,14 @@ function GlobalSettings() {
   const [percent, setPercent] = useState('');
   const [savedPercent, setSavedPercent] = useState('');
   const [saving, setSaving] = useState(false);
+  const [monthlyQuotaMode, setMonthlyQuotaMode] = useState('per_library');
 
   function load() {
     api.settings().then((s) => {
       setPercent(s.tv_season_watched_percent ?? '');
       setSavedPercent(s.tv_season_watched_percent ?? '');
     });
+    api.monthlyTotalQuotaSettings().then((s) => setMonthlyQuotaMode(s.mode));
   }
 
   useEffect(load, []);
@@ -30,6 +32,12 @@ function GlobalSettings() {
   return (
     <div className="card p-4 mb-6">
       <h3 className="text-sm font-semibold text-accent-400 mb-3">Ajustes</h3>
+      {monthlyQuotaMode === 'total' && (
+        <p className="text-xs text-accent-400 mb-3">
+          Cupo mensual total activo en Ajustes → Cupo mensual: los límites de "Cupo mensual"
+          de cada biblioteca de abajo no se aplican mientras tanto.
+        </p>
+      )}
       <form onSubmit={save} className="flex flex-wrap items-end gap-3">
         <div>
           <label className="text-xs text-gray-400 mr-2 block mb-1">

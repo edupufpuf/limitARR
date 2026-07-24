@@ -40,12 +40,12 @@ export default function Settings() {
   const [webhookMessage, setWebhookMessage] = useState(null);
 
   const [monthlyTotal, setMonthlyTotal] = useState(null);
-  const [monthlyTotalForm, setMonthlyTotalForm] = useState({ enabled: false, limit: '' });
+  const [monthlyTotalForm, setMonthlyTotalForm] = useState({ mode: 'per_library', limit: '' });
   const [monthlyTotalSaving, setMonthlyTotalSaving] = useState(false);
 
   const monthlyTotalDirty = Boolean(
     monthlyTotal &&
-      (monthlyTotalForm.enabled !== monthlyTotal.enabled ||
+      (monthlyTotalForm.mode !== monthlyTotal.mode ||
         String(monthlyTotalForm.limit) !== String(monthlyTotal.limit))
   );
   useDirty('settings-monthly-total', monthlyTotalDirty);
@@ -87,7 +87,7 @@ export default function Settings() {
     api.webhookInfo().then((r) => setWebhookUrl(r.url));
     api.monthlyTotalQuotaSettings().then((s) => {
       setMonthlyTotal(s);
-      setMonthlyTotalForm({ enabled: s.enabled, limit: String(s.limit) });
+      setMonthlyTotalForm({ mode: s.mode, limit: String(s.limit) });
     });
   }
 
@@ -140,11 +140,11 @@ export default function Settings() {
     try {
       const limitNum = Number(monthlyTotalForm.limit);
       const s = await api.updateMonthlyTotalQuotaSettings({
-        enabled: monthlyTotalForm.enabled,
+        mode: monthlyTotalForm.mode,
         limit: Number.isInteger(limitNum) && limitNum >= 0 ? limitNum : undefined,
       });
       setMonthlyTotal(s);
-      setMonthlyTotalForm({ enabled: s.enabled, limit: String(s.limit) });
+      setMonthlyTotalForm({ mode: s.mode, limit: String(s.limit) });
     } finally {
       setMonthlyTotalSaving(false);
     }
@@ -359,33 +359,47 @@ export default function Settings() {
         </div>
       </div>
 
-      <h3 className="text-sm font-semibold text-accent-400 mt-8 mb-2">Cupo mensual total</h3>
+      <h3 className="text-sm font-semibold text-accent-400 mt-8 mb-2">Cupo mensual</h3>
       <form onSubmit={saveMonthlyTotal} className="card p-5 space-y-3">
         <p className="text-xs text-gray-500">
-          Tope global de solicitudes aprobadas al mes, sumando TODAS las bibliotecas
-          combinadas (independiente del cupo mensual que ya se puede activar por
-          biblioteca en la pestaña Cupo). Se puede sobreescribir por usuario, grupo
-          o rol en su ficha.
+          Elige un único modo: o cupo mensual por biblioteca (los límites de la pestaña
+          Bibliotecas) o un tope total sumando todas las bibliotecas combinadas. Nunca los
+          dos a la vez. El total se puede sobreescribir por usuario, grupo o rol en su ficha.
         </p>
-        <label className="flex items-start gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={monthlyTotalForm.enabled}
-            onChange={(e) => setMonthlyTotalForm({ ...monthlyTotalForm, enabled: e.target.checked })}
-            className="mt-0.5 accent-accent-500"
-          />
-          <span className="text-sm">Activar cupo mensual total</span>
-        </label>
-        <div>
-          <label className="label">Límite mensual (todas las bibliotecas)</label>
-          <input
-            type="number"
-            min={0}
-            value={monthlyTotalForm.limit}
-            onChange={(e) => setMonthlyTotalForm({ ...monthlyTotalForm, limit: e.target.value })}
-            className="input w-32"
-          />
+        <div className="space-y-2">
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="monthly-quota-mode"
+              checked={monthlyTotalForm.mode === 'per_library'}
+              onChange={() => setMonthlyTotalForm({ ...monthlyTotalForm, mode: 'per_library' })}
+              className="mt-0.5 accent-accent-500"
+            />
+            <span className="text-sm">Por biblioteca (límites configurados en Bibliotecas)</span>
+          </label>
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="monthly-quota-mode"
+              checked={monthlyTotalForm.mode === 'total'}
+              onChange={() => setMonthlyTotalForm({ ...monthlyTotalForm, mode: 'total' })}
+              className="mt-0.5 accent-accent-500"
+            />
+            <span className="text-sm">Total (todas las bibliotecas combinadas)</span>
+          </label>
         </div>
+        {monthlyTotalForm.mode === 'total' && (
+          <div>
+            <label className="label">Límite mensual (todas las bibliotecas)</label>
+            <input
+              type="number"
+              min={0}
+              value={monthlyTotalForm.limit}
+              onChange={(e) => setMonthlyTotalForm({ ...monthlyTotalForm, limit: e.target.value })}
+              className="input w-32"
+            />
+          </div>
+        )}
         <button type="submit" disabled={monthlyTotalSaving} className="btn btn-primary">
           {monthlyTotalSaving ? 'Guardando…' : 'Guardar'}
         </button>
