@@ -104,7 +104,13 @@ saldo = límite − (películas aprobadas para ese usuario en esa biblioteca que
   vistas las pendientes actuales sin esperar a que el usuario las vea de
   verdad (sin borrar el historial del registro).
 - Para quitar UNA sola película del cupo (sin resetear el resto), ✕ al
-  pasar el ratón sobre su carátula en la tarjeta desplegada.
+  pasar el ratón sobre su carátula en la tarjeta desplegada. Tras quitarla
+  se puede **penalizar** al usuario por no haberla visto: resta N huecos
+  del límite de esa biblioteca durante M meses (a elegir), por encima del
+  límite normal. La penalización activa se ve en la propia tarjeta del
+  usuario ("🚫 -N hasta DD/MM") con botón ✕ para cancelarla antes de
+  tiempo; también se puede deshacer desde el Registro como cualquier otro
+  cambio admin.
 - Una película aprobada que **aún no está disponible en Plex** (según
   Seerr: faltante, sin estrenar o no encontrada) no resta cupo hasta que
   se descarga de verdad. En el panel se enseña igualmente su carátula,

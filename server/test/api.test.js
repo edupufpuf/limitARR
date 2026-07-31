@@ -726,3 +726,63 @@ test('POST /quota/manual-charge: acepta posterUrl y no lo pisa a null', async ()
   db.prepare('DELETE FROM quota_cache WHERE user_id = 9001').run();
   db.prepare('DELETE FROM libraries WHERE id = 1888').run();
 });
+
+test('POST /quota/penalize: resta huecos del límite, sale en GET /quota, y se cancela con undo', async () => {
+  const upsertSetting = db.prepare(`
+    INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+  `);
+  upsertSetting.run('tautulli_url', 'http://tautulli.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
+  upsertSetting.run('seerr_url', 'http://seerr.test');
+  upsertSetting.run('seerr_api_key', 'test-key');
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (1900, 'Películas', 'movie', 'standard', 1, 4)
+  `).run();
+
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith('http://tautulli.test')) {
+      const cmd = new URL(url).searchParams.get('cmd');
+      const data = cmd === 'get_users' ? [{ user_id: 9002, username: 'sevej' }] : { data: [] };
+      return new Response(JSON.stringify({ response: { result: 'success', data } }), { status: 200 });
+    }
+    if (url.startsWith('http://seerr.test')) {
+      return new Response(JSON.stringify({ results: [] }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const penalize = await agent
+      .post('/api/quota/penalize/9002/1900')
+      .send({ amount: 2, months: 1, title: 'Peli no vista', username: 'sevej' })
+      .expect(200);
+    assert.equal(penalize.body.limit, 2); // 4 - 2
+    assert.ok(penalize.body.logId);
+
+    const listed = await agent.get('/api/quota').expect(200);
+    const user = listed.body.find((u) => u.userId === 9002);
+    const lib = user.libraries.find((l) => l.libraryId === 1900);
+    assert.equal(lib.penalties.length, 1);
+    assert.equal(lib.penalties[0].amount, 2);
+    assert.equal(lib.penalties[0].logId, penalize.body.logId);
+
+    await agent.post(`/api/decisions/${penalize.body.logId}/undo`).expect(200);
+
+    const after = await agent.get('/api/quota').expect(200);
+    const userAfter = after.body.find((u) => u.userId === 9002);
+    const libAfter = userAfter.libraries.find((l) => l.libraryId === 1900);
+    assert.equal(libAfter.limitApplied, 4); // penalización cancelada
+    assert.equal(libAfter.penalties.length, 0);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM decisions_log WHERE library_id = 1900').run();
+    db.prepare('DELETE FROM quota_penalties WHERE library_id = 1900').run();
+    db.prepare('DELETE FROM quota_cache WHERE library_id = 1900').run();
+    db.prepare('DELETE FROM libraries WHERE id = 1900').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
+  }
+});

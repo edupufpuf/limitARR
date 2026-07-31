@@ -26,6 +26,7 @@ import {
   getMonthlyQuotaMode, setMonthlyQuotaMode,
   setMonthlyTotalOverride, deleteMonthlyTotalOverride, setGroupMonthlyTotalOverride, deleteGroupMonthlyTotalOverride,
   setRoleMonthlyTotalOverride, deleteRoleMonthlyTotalOverride,
+  addPenalty, getActivePenalties,
 } from '../quota.js';
 import { matchByEmailOrUsername } from '../userMatch.js';
 import { runPollCycle } from '../scheduler.js';
@@ -936,6 +937,7 @@ async function buildQuotaByUser() {
         limit: row.monthly_limit,
         used: row.monthly_used,
       },
+      penalties: getActivePenalties(row.user_id, row.library_id),
     });
   }
   return [...byUser.values()];
@@ -1000,6 +1002,23 @@ router.post('/quota/dismiss/:userId/:libraryId', ah(async (req, res) => {
   const dismissed = dismissPendingItem(userId, libraryId, { tmdbId, seasonNumber, title }, username || null);
   const result = await refreshQuotaCache(userId, libraryId);
   res.json({ ok: true, dismissed, ...result });
+}));
+
+// Penaliza a un usuario tras quitar algo del cupo sin que lo haya visto: resta
+// `amount` huecos del límite de esa biblioteca durante `months` meses. Se
+// deshace igual que cualquier otro cambio admin, vía /decisions/:id/undo con
+// el logId devuelto (el botón "Cancelar" de la pestaña Cupo llama a eso).
+router.post('/quota/penalize/:userId/:libraryId', ah(async (req, res) => {
+  const { userId, libraryId } = req.params;
+  const { amount, months, title, posterUrl, username } = req.body || {};
+  const amountNum = Number(amount);
+  const monthsNum = Number(months);
+  if (!Number.isInteger(amountNum) || amountNum < 1 || !Number.isInteger(monthsNum) || monthsNum < 1) {
+    return res.status(400).json({ error: 'amount_and_months_required' });
+  }
+  const { logId } = addPenalty(userId, libraryId, { amount: amountNum, months: monthsNum, title, posterUrl }, username || null);
+  const result = await refreshQuotaCache(userId, libraryId);
+  res.json({ ok: true, logId, ...result });
 }));
 
 // Deshace un "quitar del cupo" o "resetear" desde el Registro (issue de

@@ -264,6 +264,21 @@ db.exec(`
     limit_override INTEGER NOT NULL,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- Penalización manual: al quitar algo del cupo sin que se haya visto, el
+  -- admin puede restar N huecos del límite durante M meses. "Activa" no es un
+  -- flag propio: se deriva de si decisions_log.undone_at (de la fila log_id,
+  -- decision='penalized') sigue a NULL y de si ends_at ya pasó — deshacerla
+  -- desde el Registro (o el botón de Cupo, que llama al mismo undo) basta.
+  CREATE TABLE IF NOT EXISTS quota_penalties (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    library_id INTEGER NOT NULL,
+    amount INTEGER NOT NULL,
+    ends_at TEXT NOT NULL,
+    log_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
 
 // Roles por defecto pedidos por Edu: se siembran una sola vez si la tabla está
@@ -284,4 +299,5 @@ db.exec(`
     WHERE decision = 'approved' AND voided_at IS NULL;
   CREATE INDEX IF NOT EXISTS idx_decisions_created ON decisions_log (created_at);
   CREATE INDEX IF NOT EXISTS idx_decisions_request ON decisions_log (request_id);
+  CREATE INDEX IF NOT EXISTS idx_quota_penalties_lookup ON quota_penalties (user_id, library_id, ends_at);
 `);

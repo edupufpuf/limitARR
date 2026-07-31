@@ -74,6 +74,8 @@ export const api = {
     request(`/quota/reset/${userId}/${libraryId}`, { method: 'POST', body: JSON.stringify({ username }) }),
   dismissPending: (userId, libraryId, body) =>
     request(`/quota/dismiss/${userId}/${libraryId}`, { method: 'POST', body: JSON.stringify(body) }),
+  penalize: (userId, libraryId, body) =>
+    request(`/quota/penalize/${userId}/${libraryId}`, { method: 'POST', body: JSON.stringify(body) }),
   manualCharge: (userId, libraryId, title, username, note, posterUrl) =>
     request(`/quota/manual-charge/${userId}/${libraryId}`, { method: 'POST', body: JSON.stringify({ title, username, note, posterUrl }) }),
   plexSearch: (q, mediaType) => request(`/media/plex-search?q=${encodeURIComponent(q)}&mediaType=${mediaType || 'movie'}`),

@@ -744,7 +744,13 @@ function DebtorBubbles({ debtors, onDetail }) {
   );
 }
 
-function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss, onManualCharge, onDetail, resetting, charging }) {
+// endsAt viene de SQLite en UTC ('YYYY-MM-DD HH:MM:SS'); se enseña en local, sin hora.
+function formatShortDate(endsAt) {
+  const date = new Date(endsAt.replace(' ', 'T') + 'Z');
+  return date.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit', year: '2-digit' });
+}
+
+function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss, onManualCharge, onDetail, onCancelPenalty, resetting, charging }) {
   const worst = worstLib(user.libraries);
   const pending = totalOutstanding(user.libraries);
   return (
@@ -821,6 +827,27 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
                   </button>
                 </div>
                 <QuotaBar balance={lib.balance} limit={lib.limitApplied} />
+                {lib.penalties?.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {lib.penalties.map((p) => (
+                      <span
+                        key={p.id}
+                        title={p.title ? `Penalización por "${p.title}"` : 'Penalización'}
+                        className="inline-flex items-center gap-1.5 text-[11px] rounded-full bg-red-400/10 text-red-400 ring-1 ring-red-400/25 pl-2 pr-1 py-0.5"
+                      >
+                        🚫 -{p.amount} hasta {formatShortDate(p.endsAt)}
+                        <button
+                          type="button"
+                          onClick={() => onCancelPenalty(p.logId)}
+                          title="Cancelar penalización"
+                          className="hover:text-red-200 px-0.5"
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
                 {lib.monthly?.enabled && (
                   <div
                     className={`text-[11px] mt-1 tabular-nums ${lib.monthly.used >= lib.monthly.limit ? 'text-accent-400' : 'text-gray-500'}`}
@@ -972,6 +999,61 @@ function ManualChargeModal({ username, sectionType, onClose, onSubmit }) {
   );
 }
 
+// Tras quitar algo del cupo sin verlo, opción de penalizar: restar N huecos
+// del límite de esa biblioteca durante M meses. Un solo paso (no dos diálogos
+// encadenados) para no interrumpir el flujo si el admin decide no penalizar.
+function PenalizeModal({ username, title, onClose, onSubmit }) {
+  const [amount, setAmount] = useState(1);
+  const [months, setMonths] = useState(1);
+  const [saving, setSaving] = useState(false);
+
+  async function confirmSubmit() {
+    setSaving(true);
+    await onSubmit(amount, months);
+    setSaving(false);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
+      <div className="card w-full max-w-sm p-4 sm:p-5" onClick={(e) => e.stopPropagation()}>
+        <h3 className="font-bold text-lg mb-1">Penalizar a {username}</h3>
+        <p className="text-xs text-gray-400 mb-4">
+          Por no haber visto {title ? <>"{title}"</> : 'lo que se acaba de quitar del cupo'}. Resta huecos del
+          límite de esta biblioteca durante un tiempo, además de lo ya quitado.
+        </p>
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <label className="block text-xs text-gray-400 mb-1">Huecos a restar</label>
+            <input
+              type="number"
+              min={1}
+              value={amount}
+              onChange={(e) => setAmount(Math.max(1, Number(e.target.value) || 1))}
+              className="input w-full"
+            />
+          </div>
+          <div className="flex-1">
+            <label className="block text-xs text-gray-400 mb-1">Meses</label>
+            <input
+              type="number"
+              min={1}
+              value={months}
+              onChange={(e) => setMonths(Math.max(1, Number(e.target.value) || 1))}
+              className="input w-full"
+            />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 mt-4">
+          <button type="button" className="btn btn-ghost" onClick={onClose}>No penalizar</button>
+          <button type="button" className="btn btn-primary" onClick={confirmSubmit} disabled={saving}>
+            {saving ? 'Aplicando…' : 'Penalizar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Quota() {
   const [users, setUsers] = useState([]);
   const [stats, setStats] = useState(null);
@@ -989,6 +1071,8 @@ export default function Quota() {
   const [detailTarget, setDetailTarget] = useState(null);
   // Cargo manual abierto: { userId, libraryId, username } o null.
   const [chargeModal, setChargeModal] = useState(null);
+  // Modal de penalización abierta tras un dismiss: { userId, libraryId, username, title, posterUrl } o null.
+  const [penalizeModal, setPenalizeModal] = useState(null);
   // Base para enlazar pósters con Tautulli: la URL pública si está configurada
   // (la interna suele ser un hostname docker que el navegador no resuelve).
   const [statsBase, setStatsBase] = useState('');
@@ -1147,7 +1231,23 @@ export default function Quota() {
       username,
     });
     load();
+    if (confirm(`¿Penalizar a ${username} por no haber visto "${item.title ?? 'esto'}"?`)) {
+      setPenalizeModal({ userId, libraryId, username, title: item.title, posterUrl: item.posterUrl ?? null });
+    }
     return true;
+  }
+
+  async function submitPenalize(amount, months) {
+    const { userId, libraryId, username, title, posterUrl } = penalizeModal;
+    await api.penalize(userId, libraryId, { amount, months, title, posterUrl, username });
+    setPenalizeModal(null);
+    load();
+  }
+
+  async function cancelPenalty(logId) {
+    if (!confirm('¿Cancelar esta penalización? El límite vuelve a ser el de siempre.')) return;
+    await api.undoDecision(logId);
+    load();
   }
 
   function toggle(userId) {
@@ -1264,11 +1364,21 @@ export default function Quota() {
             onDismiss={dismiss}
             onManualCharge={manualCharge}
             onDetail={(user, lib, item) => setDetailTarget({ user, lib, item })}
+            onCancelPenalty={cancelPenalty}
             resetting={resetting}
             charging={charging}
           />
         ))}
       </div>
+
+      {penalizeModal && (
+        <PenalizeModal
+          username={penalizeModal.username}
+          title={penalizeModal.title}
+          onClose={() => setPenalizeModal(null)}
+          onSubmit={submitPenalize}
+        />
+      )}
 
       {detailTarget && (
         <PendingDetailModal

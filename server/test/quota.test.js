@@ -26,6 +26,8 @@ import {
   setRoleOverride,
   deleteRoleOverride,
   getBalance,
+  addPenalty,
+  getActivePenalties,
 } from '../src/quota.js';
 import { setRawSetting, updateSettings } from '../src/settings.js';
 import { db } from '../src/db.js';
@@ -870,6 +872,114 @@ test('getBalance (TV): serie vista hace tiempo cuenta aunque el historial genera
     db.prepare('DELETE FROM libraries WHERE id = 9101').run();
     setRawSetting('seerr_url', '');
     setRawSetting('seerr_api_key', '');
+    setRawSetting('tautulli_url', '');
+    setRawSetting('tautulli_api_key', '');
+  }
+});
+
+// --- Penalización manual (al quitar del cupo algo que no se ha visto) ---
+
+test('addPenalty: resta huecos del límite mientras está activa, y se deshace con undoQuotaAction', async () => {
+  updateSettings({ tautulli_url: 'http://tautulli.test', tautulli_api_key: 'k' });
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (9301, 'Películas', 'movie', 'standard', 1, 4)
+  `).run();
+  db.prepare(`
+    INSERT INTO decisions_log (request_id, user_id, library_id, media_title, media_type, decision)
+    VALUES (93001, 9300, 9301, 'Peli sin ver', 'movie', 'approved')
+  `).run();
+
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith('http://tautulli.test')) {
+      return new Response(JSON.stringify({ response: { result: 'success', data: { data: [] } } }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const before = await getBalance(9300, 9301);
+    assert.equal(before.limit, 4);
+    assert.equal(before.balance, 3); // 4 - 1 pendiente
+
+    const { logId } = addPenalty(9300, 9301, { amount: 2, months: 1, title: 'Peli sin ver' }, 'admin');
+    assert.ok(logId);
+
+    const penalized = await getBalance(9300, 9301);
+    assert.equal(penalized.limit, 2); // 4 - 2 de penalización
+    assert.equal(penalized.balance, 1); // 2 - 1 pendiente
+
+    const active = getActivePenalties(9300, 9301);
+    assert.equal(active.length, 1);
+    assert.equal(active[0].amount, 2);
+    assert.equal(active[0].logId, logId);
+
+    await undoQuotaAction(logId);
+
+    const after = await getBalance(9300, 9301);
+    assert.equal(after.limit, 4); // penalización deshecha, límite vuelve al de siempre
+    assert.equal(getActivePenalties(9300, 9301).length, 0);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM decisions_log WHERE library_id = 9301').run();
+    db.prepare('DELETE FROM quota_penalties WHERE library_id = 9301').run();
+    db.prepare('DELETE FROM quota_cache WHERE library_id = 9301').run();
+    db.prepare('DELETE FROM libraries WHERE id = 9301').run();
+    setRawSetting('tautulli_url', '');
+    setRawSetting('tautulli_api_key', '');
+  }
+});
+
+test('addPenalty: el límite nunca baja de 0 aunque la penalización sea mayor', async () => {
+  updateSettings({ tautulli_url: 'http://tautulli.test', tautulli_api_key: 'k' });
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (9302, 'Películas', 'movie', 'standard', 1, 3)
+  `).run();
+
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response(JSON.stringify({ response: { result: 'success', data: { data: [] } } }), { status: 200 });
+
+  try {
+    addPenalty(9310, 9302, { amount: 10, months: 1, title: 'Motivo' }, 'admin');
+    const result = await getBalance(9310, 9302);
+    assert.equal(result.limit, 0);
+    assert.equal(result.balance, 0);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM quota_penalties WHERE library_id = 9302').run();
+    db.prepare('DELETE FROM quota_cache WHERE library_id = 9302').run();
+    db.prepare('DELETE FROM libraries WHERE id = 9302').run();
+    setRawSetting('tautulli_url', '');
+    setRawSetting('tautulli_api_key', '');
+  }
+});
+
+test('addPenalty: al pasar los meses deja de aplicar sola, sin deshacerla a mano', async () => {
+  updateSettings({ tautulli_url: 'http://tautulli.test', tautulli_api_key: 'k' });
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (9303, 'Películas', 'movie', 'standard', 1, 4)
+  `).run();
+
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response(JSON.stringify({ response: { result: 'success', data: { data: [] } } }), { status: 200 });
+
+  try {
+    addPenalty(9320, 9303, { amount: 1, months: 1, title: 'Motivo' }, 'admin');
+    // Simula que ya pasó el mes.
+    db.prepare("UPDATE quota_penalties SET ends_at = datetime('now', '-1 minutes') WHERE library_id = 9303").run();
+
+    const result = await getBalance(9320, 9303);
+    assert.equal(result.limit, 4);
+    assert.equal(getActivePenalties(9320, 9303).length, 0);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM quota_penalties WHERE library_id = 9303').run();
+    db.prepare('DELETE FROM quota_cache WHERE library_id = 9303').run();
+    db.prepare('DELETE FROM libraries WHERE id = 9303').run();
     setRawSetting('tautulli_url', '');
     setRawSetting('tautulli_api_key', '');
   }

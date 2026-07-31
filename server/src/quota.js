@@ -626,6 +626,10 @@ export async function getBalance(userId, libraryId) {
     expiryDays = resolveExpiryDays(chain('expiry_override'), library.expiry_days);
     monthlyLimit = resolveLimit(chain('monthly_limit_override'), library.monthly_limit);
   }
+  // Penalización manual (admin, al quitar algo del cupo sin verlo): resta N
+  // huecos SOBRE el límite ya resuelto (override/rol/biblioteca), mientras
+  // esté activa (ver getActivePenaltyTotal). Nunca por debajo de 0.
+  limit = Math.max(0, limit - getActivePenaltyTotal(identity.cacheId, libraryId));
   const resetAt = getResetAt.get(identity.cacheId, libraryId)?.reset_at ?? '0000-01-01';
   // v2: cupo mensual — independiente de si se ha visto o no. Solo se aplica si
   // la biblioteca lo tiene activado; el resto del cálculo de saldo no cambia.
@@ -1253,6 +1257,72 @@ export function dismissPendingItem(userId, libraryId, { tmdbId, seasonNumber, ti
   return voidedIds.length;
 }
 
+// --- Penalización manual (al quitar del cupo algo que no se ha visto) ---
+// Resta N huecos del límite de esa biblioteca durante M meses, POR ENCIMA del
+// límite ya resuelto (override/rol/biblioteca) — no lo sustituye. "Activa" no
+// es un flag propio: depende de que la fila del Registro (decision='penalized')
+// asociada siga sin deshacer y de que ends_at no haya pasado, así que
+// deshacerla desde el Registro (o desde el botón de Cupo, que llama al mismo
+// undo) es toda la gestión que hace falta.
+const insertPenaltyLog = db.prepare(`
+  INSERT INTO decisions_log
+    (request_id, user_id, username, library_id, media_title, poster_url, note, decision, undo_data, created_at)
+  VALUES
+    (@requestId, @userId, @username, @libraryId, @mediaTitle, @posterUrl, @note, 'penalized', @undoData, datetime('now'))
+`);
+const insertPenaltyRow = db.prepare(`
+  INSERT INTO quota_penalties (user_id, library_id, amount, ends_at, log_id)
+  VALUES (?, ?, ?, datetime('now', ?), ?)
+`);
+const getActivePenaltiesStmt = db.prepare(`
+  SELECT qp.id, qp.amount, qp.ends_at AS endsAt, qp.log_id AS logId, dl.media_title AS title
+  FROM quota_penalties qp
+  JOIN decisions_log dl ON dl.id = qp.log_id
+  WHERE qp.user_id = ? AND qp.library_id = ? AND qp.ends_at > datetime('now') AND dl.undone_at IS NULL
+  ORDER BY qp.ends_at ASC
+`);
+const getActivePenaltyTotalStmt = db.prepare(`
+  SELECT COALESCE(SUM(qp.amount), 0) AS total
+  FROM quota_penalties qp
+  JOIN decisions_log dl ON dl.id = qp.log_id
+  WHERE qp.user_id = ? AND qp.library_id = ? AND qp.ends_at > datetime('now') AND dl.undone_at IS NULL
+`);
+
+function getActivePenaltyTotal(cacheId, libraryId) {
+  return getActivePenaltyTotalStmt.get(cacheId, libraryId)?.total ?? 0;
+}
+
+// Penalizaciones activas de un usuario+biblioteca, para enseñarlas en la
+// pestaña Cupo (con botón de cancelar, que reusa el undo del Registro).
+export function getActivePenalties(userId, libraryId) {
+  const identity = quotaIdentity(userId);
+  return getActivePenaltiesStmt.all(identity.cacheId, Number(libraryId)).map((r) => ({
+    id: r.id,
+    logId: r.logId,
+    amount: r.amount,
+    endsAt: r.endsAt,
+    title: r.title,
+  }));
+}
+
+// amount/months ya validados (enteros >= 1) por la ruta antes de llamar.
+export function addPenalty(userId, libraryId, { amount, months, title, posterUrl }, username = null) {
+  const identity = quotaIdentity(userId);
+  const note = `Penalización: -${amount} hueco${amount === 1 ? '' : 's'} durante ${months} mes${months === 1 ? '' : 'es'}.`;
+  const info = insertPenaltyLog.run({
+    requestId: -Date.now(),
+    userId: identity.cacheId,
+    username,
+    libraryId: Number(libraryId),
+    mediaTitle: title ?? null,
+    posterUrl: posterUrl ?? null,
+    note,
+    undoData: JSON.stringify({}),
+  });
+  insertPenaltyRow.run(identity.cacheId, Number(libraryId), amount, `+${months} months`, info.lastInsertRowid);
+  return { logId: info.lastInsertRowid };
+}
+
 // Deshace un 'dismissed' o 'reset' del Registro (issue de jesusgarrigues, 20
 // jul 2026): limpia voided_at de las filas afectadas, o restaura el reset_at
 // anterior. No se puede deshacer dos veces (undone_at) ni nada que no sea uno
@@ -1323,6 +1393,12 @@ export async function undoQuotaAction(logId) {
     case 'role_monthly_total_override_changed':
       restoreRoleMonthlyTotalOverride(data.roleId, data.previous);
       result = { kind: 'role', roleId: data.roleId, libraryId: null };
+      break;
+    case 'penalized':
+      // Nada que restaurar aparte: markUndone (abajo) pone undone_at, y
+      // getActivePenaltyTotal ya excluye cualquier penalización cuyo log esté
+      // deshecho — con eso deja de contar sola.
+      result = { kind: 'user', userId: row.user_id, libraryId: row.library_id };
       break;
     default:
       return null;
