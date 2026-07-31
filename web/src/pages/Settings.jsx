@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useDirty } from '../DirtyGuard.jsx';
 
+const DEFAULT_STREAM_LIMIT_MESSAGE_PLACEHOLDER = 'Ya tienes otro dispositivo reproduciendo. Solo se permite uno a la vez.';
+
 function StatusDot({ result }) {
   if (!result) return null;
   return (
@@ -42,6 +44,18 @@ export default function Settings() {
   const [monthlyTotal, setMonthlyTotal] = useState(null);
   const [monthlyTotalForm, setMonthlyTotalForm] = useState({ mode: 'per_library', limit: '' });
   const [monthlyTotalSaving, setMonthlyTotalSaving] = useState(false);
+
+  const [streamLimit, setStreamLimit] = useState(null);
+  const [streamLimitForm, setStreamLimitForm] = useState({ enabled: false, max: 1, message: '' });
+  const [streamLimitSaving, setStreamLimitSaving] = useState(false);
+
+  const streamLimitDirty = Boolean(
+    streamLimit &&
+      (streamLimitForm.enabled !== streamLimit.enabled ||
+        String(streamLimitForm.max) !== String(streamLimit.max) ||
+        streamLimitForm.message !== (streamLimit.message ?? ''))
+  );
+  useDirty('settings-stream-limit', streamLimitDirty);
 
   const monthlyTotalDirty = Boolean(
     monthlyTotal &&
@@ -88,6 +102,10 @@ export default function Settings() {
     api.monthlyTotalQuotaSettings().then((s) => {
       setMonthlyTotal(s);
       setMonthlyTotalForm({ mode: s.mode, limit: String(s.limit) });
+    });
+    api.streamLimitSettings().then((s) => {
+      setStreamLimit(s);
+      setStreamLimitForm({ enabled: s.enabled, max: s.max, message: s.message ?? '' });
     });
   }
 
@@ -147,6 +165,23 @@ export default function Settings() {
       setMonthlyTotalForm({ mode: s.mode, limit: String(s.limit) });
     } finally {
       setMonthlyTotalSaving(false);
+    }
+  }
+
+  async function saveStreamLimit(e) {
+    e.preventDefault();
+    setStreamLimitSaving(true);
+    try {
+      const maxNum = Number(streamLimitForm.max);
+      const s = await api.updateStreamLimitSettings({
+        enabled: streamLimitForm.enabled,
+        max: Number.isInteger(maxNum) && maxNum > 0 ? maxNum : undefined,
+        message: streamLimitForm.message,
+      });
+      setStreamLimit(s);
+      setStreamLimitForm({ enabled: s.enabled, max: s.max, message: s.message ?? '' });
+    } finally {
+      setStreamLimitSaving(false);
     }
   }
 
@@ -402,6 +437,49 @@ export default function Settings() {
         )}
         <button type="submit" disabled={monthlyTotalSaving} className="btn btn-primary">
           {monthlyTotalSaving ? 'Guardando…' : 'Guardar'}
+        </button>
+      </form>
+
+      <h3 className="text-sm font-semibold text-accent-400 mt-8 mb-2">Un dispositivo por usuario</h3>
+      <form onSubmit={saveStreamLimit} className="card p-5 space-y-3">
+        <p className="text-xs text-gray-500">
+          Detecta con Tautulli cuando un mismo usuario reproduce en varios dispositivos
+          a la vez y corta el/los más recientes directamente en Plex. Los administradores
+          de Plex quedan exentos. Requiere URL y token de Plex configurados arriba.
+        </p>
+        <label className="flex items-center justify-between gap-4 rounded-xl border border-bg-600 bg-bg-950/30 p-4 cursor-pointer">
+          <span>
+            <span className="block font-bold">Activar límite</span>
+            <span className="block text-xs text-gray-500 mt-1">Comprueba las sesiones activas cada pocos segundos.</span>
+          </span>
+          <input
+            type="checkbox"
+            checked={streamLimitForm.enabled}
+            onChange={(e) => setStreamLimitForm({ ...streamLimitForm, enabled: e.target.checked })}
+            className="w-5 h-5 accent-red-500"
+          />
+        </label>
+        <div>
+          <label className="label">Dispositivos simultáneos permitidos</label>
+          <input
+            type="number"
+            min={1}
+            value={streamLimitForm.max}
+            onChange={(e) => setStreamLimitForm({ ...streamLimitForm, max: e.target.value })}
+            className="input w-32"
+          />
+        </div>
+        <div>
+          <label className="label">Motivo mostrado al cortar la sesión</label>
+          <input
+            value={streamLimitForm.message}
+            onChange={(e) => setStreamLimitForm({ ...streamLimitForm, message: e.target.value })}
+            placeholder={DEFAULT_STREAM_LIMIT_MESSAGE_PLACEHOLDER}
+            className="input"
+          />
+        </div>
+        <button type="submit" disabled={streamLimitSaving} className="btn btn-primary">
+          {streamLimitSaving ? 'Guardando…' : 'Guardar'}
         </button>
       </form>
 

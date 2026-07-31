@@ -53,3 +53,18 @@ export async function testPlexServer(baseUrl, token) {
   if (!res.ok) throw new Error(`Plex HTTP ${res.status}`);
   return res.json();
 }
+
+// Corta un stream en curso directamente en Plex (no vía Tautulli: así no
+// depende de tener activado "Allow Session Termination" en Tautulli). El
+// reason viaja al cliente como el motivo del corte.
+export async function terminateSession(baseUrl, token, sessionId, reason) {
+  if (!baseUrl || !token) throw new Error('Plex no configurado');
+  if (!sessionId) throw new Error('sessionId requerido');
+  const url = new URL(`${baseUrl.replace(/\/$/, '')}/status/sessions/terminate`);
+  url.searchParams.set('sessionId', sessionId);
+  url.searchParams.set('reason', reason || 'Sesión cerrada');
+  const res = await fetch(url, {
+    headers: { Accept: 'application/json', 'X-Plex-Token': token },
+  });
+  if (!res.ok) throw new Error(`Plex terminate HTTP ${res.status}`);
+}

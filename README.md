@@ -110,6 +110,18 @@ saldo = límite − (películas aprobadas para ese usuario en esa biblioteca que
   se descarga de verdad. En el panel se enseña igualmente su carátula,
   apagada y con la etiqueta "no cuenta". No requiere configuración.
 
+## Un dispositivo por usuario
+
+Pestaña **Configuración** → "Un dispositivo por usuario" (desactivado por
+defecto): cada pocos segundos revisa con Tautulli (`get_activity`) las
+sesiones en curso y, si un mismo usuario tiene más streams simultáneos de
+los permitidos (1 por defecto, configurable), corta el/los más recientes
+directamente contra Plex (`PUT /status/sessions/terminate`) — el más
+antiguo sigue viendo sin interrupción. Los administradores de Plex quedan
+exentos. Requiere URL y token de Plex configurados. El aviso opcional por
+Telegram ("Dispositivo cortado", pestaña Notificaciones) le dice al usuario
+en qué dispositivo se le cortó.
+
 ## Panel
 
 - **Cupo**: tarjetas por usuario ordenadas por peor saldo, con buscador,

@@ -119,6 +119,10 @@ export const api = {
   webhookInfo: () => request('/webhook/info'),
   configureWebhook: () => request('/webhook/configure', { method: 'POST' }),
 
+  streamLimitSettings: () => request('/stream-limit/settings'),
+  updateStreamLimitSettings: (body) =>
+    request('/stream-limit/settings', { method: 'PUT', body: JSON.stringify(body) }),
+
   notificationSettings: () => request('/notifications/settings'),
   updateNotificationSettings: (body) =>
     request('/notifications/settings', { method: 'PUT', body: JSON.stringify(body) }),

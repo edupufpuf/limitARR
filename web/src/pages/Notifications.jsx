@@ -72,6 +72,7 @@ export default function Notifications() {
   const [notifyNoQuota, setNotifyNoQuota] = useState(true);
   const [notifyApproved, setNotifyApproved] = useState(true);
   const [notifyFreed, setNotifyFreed] = useState(true);
+  const [notifyStreamLimit, setNotifyStreamLimit] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
   const [groupTestResult, setGroupTestResult] = useState(null);
   const [pendingSummaryResult, setPendingSummaryResult] = useState(null);
@@ -109,7 +110,8 @@ export default function Notifications() {
         noQuotaMessage !== (botSettings.noQuotaMessage ?? '') ||
         notifyNoQuota !== (botSettings.notifyNoQuota ?? true) ||
         notifyApproved !== (botSettings.notifyApproved ?? true) ||
-        notifyFreed !== (botSettings.notifyFreed ?? true))
+        notifyFreed !== (botSettings.notifyFreed ?? true) ||
+        notifyStreamLimit !== (botSettings.notifyStreamLimit ?? true))
   );
   useDirty('notifications-agent', agentDirty);
 
@@ -142,6 +144,7 @@ export default function Notifications() {
       setNotifyNoQuota(s.notifyNoQuota ?? true);
       setNotifyApproved(s.notifyApproved ?? true);
       setNotifyFreed(s.notifyFreed ?? true);
+      setNotifyStreamLimit(s.notifyStreamLimit ?? true);
     });
     api.users().then(setUsers);
     loadLinks();
@@ -213,7 +216,7 @@ export default function Notifications() {
   async function saveSettings(e) {
     e.preventDefault();
     setSavingSettings(true);
-    const s = await api.updateNotificationSettings({ botToken: tokenInput, mode, groupChatId, groupTopicId, noQuotaMessage, notifyNoQuota, notifyApproved, notifyFreed });
+    const s = await api.updateNotificationSettings({ botToken: tokenInput, mode, groupChatId, groupTopicId, noQuotaMessage, notifyNoQuota, notifyApproved, notifyFreed, notifyStreamLimit });
     setBotSettings(s);
     setNoQuotaMessage(s.noQuotaMessage ?? '');
     setTokenInput('');
@@ -415,6 +418,24 @@ export default function Notifications() {
               <span className="block text-xs text-gray-500 mt-1">Indica qué elemento liberó el hueco y el nuevo saldo.</span>
             </span>
             <input type="checkbox" checked={notifyFreed} onChange={(e) => setNotifyFreed(e.target.checked)} className="w-5 h-5 accent-red-500" />
+          </label>
+        </AccordionSection>
+
+        <AccordionSection
+          id="device-limit"
+          title="Dispositivo cortado"
+          description="Avisa al usuario cuando se le corta una sesión por exceder el límite de dispositivos (pestaña Configuración)."
+          status={notifyStreamLimit ? 'Activo' : 'Desactivado'}
+          tone={notifyStreamLimit ? 'active' : 'neutral'}
+          open={openSection === 'device-limit'}
+          onToggle={toggleSection}
+        >
+          <label className="flex items-center justify-between gap-4 rounded-xl border border-bg-600 bg-bg-950/30 p-4 cursor-pointer">
+            <span>
+              <span className="block font-bold">Enviar esta notificación</span>
+              <span className="block text-xs text-gray-500 mt-1">Indica en qué dispositivo se cortó y cuál sigue activo.</span>
+            </span>
+            <input type="checkbox" checked={notifyStreamLimit} onChange={(e) => setNotifyStreamLimit(e.target.checked)} className="w-5 h-5 accent-red-500" />
           </label>
         </AccordionSection>
 

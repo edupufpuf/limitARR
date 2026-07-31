@@ -52,6 +52,7 @@ import {
   getSalvadosByUser,
   getAllSalvados,
 } from '../services/maintainerr.js';
+import { getStreamLimitSettingsForDisplay, updateStreamLimitSettings } from '../services/streamGuard.js';
 
 export const router = Router();
 
@@ -1439,15 +1440,27 @@ router.get('/notifications/settings', (req, res) => {
 });
 
 router.put('/notifications/settings', (req, res) => {
-  const { botToken, mode, groupChatId, groupTopicId, noQuotaMessage, notifyNoQuota, notifyApproved, notifyFreed } = req.body || {};
+  const { botToken, mode, groupChatId, groupTopicId, noQuotaMessage, notifyNoQuota, notifyApproved, notifyFreed, notifyStreamLimit } = req.body || {};
   if (typeof botToken === 'string' && botToken.trim() !== '') setBotToken(botToken);
   if (
     mode || groupChatId !== undefined || groupTopicId !== undefined || noQuotaMessage !== undefined ||
-    notifyNoQuota !== undefined || notifyApproved !== undefined || notifyFreed !== undefined
+    notifyNoQuota !== undefined || notifyApproved !== undefined || notifyFreed !== undefined || notifyStreamLimit !== undefined
   ) {
-    setNotifyTarget({ mode, groupChatId, groupTopicId, noQuotaMessage, notifyNoQuota, notifyApproved, notifyFreed });
+    setNotifyTarget({ mode, groupChatId, groupTopicId, noQuotaMessage, notifyNoQuota, notifyApproved, notifyFreed, notifyStreamLimit });
   }
   res.json({ ...getBotTokenForDisplay(), ...getNotifyTarget() });
+});
+
+// --- Límite de dispositivos (un stream por usuario, corte vía Plex) ---
+
+router.get('/stream-limit/settings', (req, res) => {
+  res.json(getStreamLimitSettingsForDisplay());
+});
+
+router.put('/stream-limit/settings', (req, res) => {
+  const { enabled, max, message } = req.body || {};
+  updateStreamLimitSettings({ enabled, max, message });
+  res.json(getStreamLimitSettingsForDisplay());
 });
 
 router.get('/notifications/links', ah(async (req, res) => {

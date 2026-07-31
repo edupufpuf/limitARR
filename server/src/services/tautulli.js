@@ -183,6 +183,27 @@ export async function getMediaTitle(ratingKey) {
   }
 }
 
+// Streams en curso ahora mismo (todas las cuentas), para el límite de "un
+// dispositivo por usuario": session_key es un contador local del servidor
+// Plex que sube con cada stream nuevo, así que sirve para saber qué sesión
+// de un mismo usuario es la más reciente sin tener que llamar a Plex aparte.
+// session_id es el identificador real de Plex, el que hace falta para cortar
+// el stream contra el propio Plex.
+export async function getActivity() {
+  const data = await call('get_activity');
+  const sessions = data?.sessions || [];
+  return sessions.map((s) => ({
+    sessionKey: Number(s.session_key),
+    sessionId: s.session_id,
+    userId: Number(s.user_id),
+    username: s.friendly_name || s.user,
+    title: s.full_title || s.title,
+    player: s.player,
+    product: s.product,
+    ipAddress: s.ip_address,
+  }));
+}
+
 export async function getSeasonEpisodes(showRatingKey, seasonNumber) {
   if (!showRatingKey || !seasonNumber) return [];
   const seasons = await call('get_children_metadata', { rating_key: showRatingKey });
