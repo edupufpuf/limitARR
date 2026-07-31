@@ -5,6 +5,7 @@ import {
   getItemWatchHistory,
   getSeasonEpisodes,
   getUserEpisodeHistory,
+  getUserShowHistory,
   getUserMovieHistory,
   getUsers as getTautulliUsers,
   searchMedia,
@@ -461,13 +462,51 @@ function seasonCompletionDate(dateIndex, episodes, { showTitle, showRatingKey, s
   return latest;
 }
 
-async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatchedPercent = DEFAULT_SEASON_WATCHED_PERCENT, expiryDays = null) {
+async function computeTvBalance(limit, approvedRows, memberIds, libraryId, seasonWatchedPercent = DEFAULT_SEASON_WATCHED_PERCENT, expiryDays = null) {
   await hydrateMissingPosters(approvedRows);
-  const watchedIndex = buildWatchedEpisodeIndex(watchedEpisodes);
 
   const pending = [];
   const showDetailsCache = new Map();
   const seasonEpisodesCache = new Map();
+  // Índice de vistos por serie (rating_key de Plex), no uno global de toda la
+  // biblioteca: get_history acota a un nº de filas (recientes primero), así
+  // que un usuario con mucho visionado podía dejar fuera del recorte series
+  // vistas hace tiempo y el cupo dejaba de reconocerlas como vistas.
+  const watchedIndexCache = new Map();
+  let fallbackIndexPromise = null;
+
+  async function getShowWatchedIndex(showRatingKey) {
+    if (!watchedIndexCache.has(showRatingKey)) {
+      watchedIndexCache.set(
+        showRatingKey,
+        (async () => {
+          const history = [];
+          for (const memberId of memberIds) {
+            history.push(...(await getUserShowHistory(memberId, showRatingKey)));
+          }
+          return buildWatchedEpisodeIndex(history);
+        })()
+      );
+    }
+    return watchedIndexCache.get(showRatingKey);
+  }
+
+  // Sin rating_key de la serie (aún no vinculada en Plex/Seerr) no se puede
+  // pedir su historial en concreto: se recurre al historial completo de la
+  // biblioteca como antes (con el mismo recorte que arregla lo de arriba,
+  // pero es un caso raro: normalmente ya hay rating_key).
+  async function getFallbackIndex() {
+    if (!fallbackIndexPromise) {
+      fallbackIndexPromise = (async () => {
+        const history = [];
+        for (const memberId of memberIds) {
+          history.push(...(await getUserEpisodeHistory(memberId, libraryId)));
+        }
+        return buildWatchedEpisodeIndex(history);
+      })();
+    }
+    return fallbackIndexPromise;
+  }
 
   for (const row of approvedRows) {
     if (!row.tmdb_id || !row.season_number) {
@@ -491,6 +530,7 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatc
       seasonEpisodesCache.set(cacheKey, await getSeasonEpisodes(showRatingKey, row.season_number));
     }
     const episodes = seasonEpisodesCache.get(cacheKey);
+    const watchedIndex = showRatingKey ? await getShowWatchedIndex(showRatingKey) : await getFallbackIndex();
     const state = seasonWatchState(
       watchedIndex,
       episodes,
@@ -603,12 +643,10 @@ export async function getBalance(userId, libraryId) {
   const allApproved = identity.memberIds.flatMap((memberId) => getApprovedTitles.all(memberId, libraryId, resetAt));
   if (library.section_type === 'show') {
     // Issue #10/#14: la caducidad de series se aplica dentro de computeTvBalance,
-    // donde ya se conoce la disponibilidad por temporada.
-    const history = [];
-    for (const memberId of identity.memberIds) {
-      history.push(...(await getUserEpisodeHistory(memberId, libraryId)));
-    }
-    const tvResult = await computeTvBalance(limit, allApproved, history, getSeasonWatchedPercent(), expiryDays);
+    // donde ya se conoce la disponibilidad por temporada. El historial de
+    // visionado se pide por serie (no de golpe para toda la biblioteca) para
+    // no perder series vistas hace tiempo por el recorte de get_history.
+    const tvResult = await computeTvBalance(limit, allApproved, identity.memberIds, libraryId, getSeasonWatchedPercent(), expiryDays);
     return { ...tvResult, monthly };
   }
 

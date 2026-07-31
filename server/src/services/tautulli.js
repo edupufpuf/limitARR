@@ -117,6 +117,42 @@ export async function getUserEpisodeHistory(userId, sectionId, limit = 1000) {
   });
 }
 
+// Historial de episodios de UNA serie concreta para un usuario (filtrado por
+// grandparent_rating_key en vez de traer TODO el historial de la biblioteca).
+// El bug real que arregla esto: get_history acota a `limit` filas (recientes
+// primero); un usuario con mucho visionado en la biblioteca puede tener series
+// vistas hace tiempo empujadas fuera de ese recorte, y entonces el cupo deja
+// de reconocerlas como vistas aunque sí se vieran (caso real: "Silo" T1/T2
+// vistas por CB, seguían contando como pendientes). Al acotar por serie en
+// vez de por biblioteca entera, el recorte deja de importar en la práctica.
+export async function getUserShowHistory(userId, showRatingKey, limit = 500) {
+  if (!showRatingKey) return [];
+  const data = await call('get_history', {
+    user_id: userId,
+    grandparent_rating_key: showRatingKey,
+    length: limit,
+    media_type: 'episode',
+    grouping: 0,
+  });
+  return (data.data || []).map((row) => {
+    let percent = Number(row.percent_complete);
+    if (!Number.isFinite(percent)) {
+      percent = Number(row.watched_status) * 100;
+    }
+    return {
+      title: row.full_title || row.title,
+      showTitle: row.grandparent_title,
+      seasonNumber: Number(row.parent_media_index),
+      episodeNumber: Number(row.media_index),
+      ratingKey: String(row.rating_key),
+      seasonRatingKey: row.parent_rating_key ? String(row.parent_rating_key) : null,
+      showRatingKey: row.grandparent_rating_key ? String(row.grandparent_rating_key) : null,
+      percent: Math.max(0, Math.min(100, percent)),
+      date: Number(row.date) ? Number(row.date) * 1000 : null,
+    };
+  });
+}
+
 // Historial de reproducciones de UN ítem concreto (todas las cuentas), para la
 // ventana de detalle de un pendiente: quién lo ha visto, cuándo y hasta qué %.
 // Para series el ratingKey guardado puede ser el de la temporada o el de la

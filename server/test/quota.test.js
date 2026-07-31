@@ -25,6 +25,7 @@ import {
   deleteGroupOverride,
   setRoleOverride,
   deleteRoleOverride,
+  getBalance,
 } from '../src/quota.js';
 import { setRawSetting, updateSettings } from '../src/settings.js';
 import { db } from '../src/db.js';
@@ -773,4 +774,103 @@ test('computeBalance: una no disponible no lleva fecha de caducidad', () => {
   assert.equal(r.pendingItems[0].mediaStatus, 3);
   assert.equal(r.pendingItems[0].expiresAt, null);
   assert.equal(r.pendingItems[0].availableSince, null);
+});
+
+// --- Bug real: "Silo" T1/T2 vistas por un usuario con mucho historial
+// seguían saliendo como pendientes. get_history acota a un nº de filas
+// (recientes primero); con MUCHO visionado en la biblioteca, las vistas viejas
+// de una serie concreta quedaban fuera del recorte y el cupo no las
+// reconocía como vistas. getBalance debe consultar el historial por SERIE
+// (grandparent_rating_key), no de golpe para toda la biblioteca, así que el
+// tamaño del historial general de la biblioteca no debe importar.
+test('getBalance (TV): serie vista hace tiempo cuenta aunque el historial general de la biblioteca esté "lleno" de otras series', async () => {
+  updateSettings({ seerr_url: 'http://seerr.test', seerr_api_key: 'k', tautulli_url: 'http://tautulli.test', tautulli_api_key: 'k' });
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (9101, 'Series', 'show', 'standard', 1, 4)
+  `).run();
+  db.prepare(`
+    INSERT INTO decisions_log (request_id, user_id, library_id, media_title, media_type, tmdb_id, season_number, decision)
+    VALUES
+      (91001, 9100, 9101, 'Silo - Temporada 1', 'tv', 84958, 1, 'approved'),
+      (91002, 9100, 9101, 'Silo - Temporada 2', 'tv', 84958, 2, 'approved')
+  `).run();
+
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith('http://seerr.test/api/v1/tv/84958')) {
+      return new Response(
+        JSON.stringify({
+          name: 'Silo',
+          posterPath: '/silo.jpg',
+          seasons: [{ seasonNumber: 1, posterPath: '/silo-s1.jpg' }, { seasonNumber: 2, posterPath: '/silo-s2.jpg' }],
+          mediaInfo: {
+            ratingKey: 'silo-show-rk',
+            seasons: [
+              { seasonNumber: 1, status: 5, updatedAt: '2025-01-01T00:00:00.000Z' },
+              { seasonNumber: 2, status: 5, updatedAt: '2025-06-01T00:00:00.000Z' },
+            ],
+          },
+        }),
+        { status: 200 }
+      );
+    }
+    if (url.startsWith('http://tautulli.test')) {
+      const params = new URL(url).searchParams;
+      const cmd = params.get('cmd');
+      if (cmd === 'get_children_metadata') {
+        const ratingKey = params.get('rating_key');
+        if (ratingKey === 'silo-show-rk') {
+          return new Response(
+            JSON.stringify({
+              response: {
+                result: 'success',
+                data: { children_list: [{ rating_key: 's1-rk', media_index: '1' }, { rating_key: 's2-rk', media_index: '2' }] },
+              },
+            }),
+            { status: 200 }
+          );
+        }
+        const episodes = ratingKey === 's1-rk'
+          ? [{ rating_key: 's1e1', media_index: '1', media_type: 'episode' }, { rating_key: 's1e2', media_index: '2', media_type: 'episode' }]
+          : [{ rating_key: 's2e1', media_index: '1', media_type: 'episode' }, { rating_key: 's2e2', media_index: '2', media_type: 'episode' }];
+        return new Response(JSON.stringify({ response: { result: 'success', data: { children_list: episodes } } }), { status: 200 });
+      }
+      if (cmd === 'get_history') {
+        // Sin filtro por serie (grandparent_rating_key): simula el historial
+        // general de la biblioteca ya "lleno" de otras series — Silo ya no
+        // aparece ahí, cayó fuera del recorte de `length`.
+        if (!params.get('grandparent_rating_key')) {
+          return new Response(JSON.stringify({ response: { result: 'success', data: { data: [] } } }), { status: 200 });
+        }
+        // Con filtro por serie sí aparece, viéndose completa hace tiempo.
+        const rows = [
+          { rating_key: 's1e1', grandparent_rating_key: 'silo-show-rk', grandparent_title: 'Silo', parent_media_index: '1', media_index: '1', percent_complete: '100' },
+          { rating_key: 's1e2', grandparent_rating_key: 'silo-show-rk', grandparent_title: 'Silo', parent_media_index: '1', media_index: '2', percent_complete: '100' },
+          { rating_key: 's2e1', grandparent_rating_key: 'silo-show-rk', grandparent_title: 'Silo', parent_media_index: '2', media_index: '1', percent_complete: '100' },
+          { rating_key: 's2e2', grandparent_rating_key: 'silo-show-rk', grandparent_title: 'Silo', parent_media_index: '2', media_index: '2', percent_complete: '100' },
+        ];
+        return new Response(JSON.stringify({ response: { result: 'success', data: { data: rows } } }), { status: 200 });
+      }
+      throw new Error(`unexpected tautulli cmd ${cmd}`);
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const result = await getBalance(9100, 9101);
+    assert.equal(result.outstanding, 0, 'las 2 temporadas de Silo deberían contar como vistas');
+    assert.equal(result.balance, 4);
+    assert.equal(result.pendingItems.length, 0);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM decisions_log WHERE library_id = 9101').run();
+    db.prepare('DELETE FROM quota_cache WHERE library_id = 9101').run();
+    db.prepare('DELETE FROM libraries WHERE id = 9101').run();
+    setRawSetting('seerr_url', '');
+    setRawSetting('seerr_api_key', '');
+    setRawSetting('tautulli_url', '');
+    setRawSetting('tautulli_api_key', '');
+  }
 });
