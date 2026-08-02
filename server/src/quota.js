@@ -34,6 +34,51 @@ export function getSeasonWatchedPercent() {
   return Number.isFinite(value) && value >= 1 && value <= 100 ? value : DEFAULT_SEASON_WATCHED_PERCENT;
 }
 
+// Pedido de Edu (2 ago 2026): al quitar un pendiente del cupo, opción de
+// penalizar restando huecos durante N meses. user_id es el cacheId de
+// quotaIdentity (real o -group_id), igual que los overrides — una
+// penalización se aplica a una identidad concreta, no se reparte por miembro.
+// Varias activas a la vez se SUMAN (pedido explícito, no "manda la última").
+const getActivePenaltyHoles = db.prepare(`
+  SELECT COALESCE(SUM(holes), 0) AS total FROM penalties
+  WHERE user_id = ? AND kind = ? AND library_id = ? AND ends_at > datetime('now')
+`);
+const getActiveTotalPenaltyHoles = db.prepare(`
+  SELECT COALESCE(SUM(holes), 0) AS total FROM penalties
+  WHERE user_id = ? AND kind = 'monthly' AND library_id IS NULL AND ends_at > datetime('now')
+`);
+const insertPenalty = db.prepare(`
+  INSERT INTO penalties (user_id, library_id, kind, holes, note, ends_at)
+  VALUES (@userId, @libraryId, @kind, @holes, @note, datetime('now', '+' || @months || ' months'))
+`);
+// Sin undo_data a propósito (undoable = undo_data IS NOT NULL en /decisions):
+// v1 sin gestión ni deshacer, solo visibilidad en el Registro — caduca sola.
+const insertPenaltyLog = db.prepare(`
+  INSERT INTO decisions_log (request_id, user_id, username, library_id, media_title, decision, note)
+  VALUES (@requestId, @userId, @username, @libraryId, @mediaTitle, 'penalty_applied', @note)
+`);
+
+// kind='normal' resta del límite de pendientes de esa biblioteca. kind='monthly'
+// resta del cupo mensual — de esa biblioteca en modo 'per_library', o del total
+// (library_id NULL) en modo 'total', para que aplique al sistema que de verdad
+// está en uso.
+export function addPenalty(userId, libraryId, kind, holes, months, username = null) {
+  const identity = quotaIdentity(userId);
+  const targetLibraryId = kind === 'monthly' && getMonthlyQuotaMode() === 'total' ? null : Number(libraryId);
+  const holesNum = Math.max(1, Number(holes) || 1);
+  const monthsNum = Math.max(1, Number(months) || 1);
+  const note = `${kind === 'monthly' ? 'Cupo mensual' : 'Límite normal'}: -${holesNum} durante ${monthsNum} mes${monthsNum === 1 ? '' : 'es'}`;
+  insertPenalty.run({ userId: identity.cacheId, libraryId: targetLibraryId, kind, holes: holesNum, note, months: monthsNum });
+  insertPenaltyLog.run({
+    requestId: -Date.now(),
+    userId: identity.cacheId,
+    username,
+    libraryId: Number(libraryId),
+    mediaTitle: null,
+    note,
+  });
+}
+
 // El único enlace entre "aprobada en Seerr" y "vista en Tautulli" es el título en
 // texto, así que hay que ser tolerante con acentos, mayúsculas, puntuación y
 // espacios — sin esto, "Río" vs "Rio" o "Amélie" vs "Amelie" no encontraban match.
@@ -217,6 +262,7 @@ export function getMonthlyTotalQuota(userId) {
       globalLimit
     );
   }
+  limit = Math.max(0, limit - getActiveTotalPenaltyHoles.get(identity.cacheId).total);
   const used = identity.memberIds.reduce((sum, memberId) => sum + getMonthlyApprovedCountTotal.get(memberId).n, 0);
   return { enabled, limit, used, remaining: Math.max(0, limit - used) };
 }
@@ -635,6 +681,10 @@ export async function getBalance(userId, libraryId) {
     expiryDays = resolveExpiryDays(chain('expiry_override'), library.expiry_days);
     monthlyLimit = resolveLimit(chain('monthly_limit_override'), library.monthly_limit);
   }
+  limit = Math.max(0, limit - getActivePenaltyHoles.get(identity.cacheId, 'normal', libraryId).total);
+  // Penalización de cupo mensual guardada en modo 'total' vive con library_id
+  // NULL (ver addPenalty) — aquí no aplica, la resta getMonthlyTotalQuota.
+  monthlyLimit = Math.max(0, monthlyLimit - getActivePenaltyHoles.get(identity.cacheId, 'monthly', libraryId).total);
   const resetAt = getResetAt.get(identity.cacheId, libraryId)?.reset_at ?? '0000-01-01';
   // v2: cupo mensual — independiente de si se ha visto o no. Solo se aplica si
   // la biblioteca lo tiene activado; el resto del cálculo de saldo no cambia.

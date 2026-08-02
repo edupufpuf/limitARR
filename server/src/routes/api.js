@@ -19,7 +19,7 @@ import {
 } from '../services/seerr.js';
 import { getSettings, getSettingsForDisplay, updateSettings } from '../settings.js';
 import {
-  resetQuota, importSeerrHistory, backfillWatchedHistory, refreshQuotaCache, dismissPendingItem, undoQuotaAction, addManualCharge,
+  resetQuota, importSeerrHistory, backfillWatchedHistory, refreshQuotaCache, dismissPendingItem, undoQuotaAction, addManualCharge, addPenalty,
   getPendingItemDetail, quotaIdentity, getBalance, getRequestHold, setRequestHold, clearRequestHold,
   pruneStaleQuotaCache, setOverride, deleteOverride, setGroupOverride, deleteGroupOverride, setRoleOverride,
   deleteRoleOverride, getMonthlyTotalSettings, setMonthlyTotalSettings, getMonthlyTotalQuota,
@@ -1043,6 +1043,20 @@ router.post('/quota/dismiss/:userId/:libraryId', ah(async (req, res) => {
   const dismissed = dismissPendingItem(userId, libraryId, { tmdbId, seasonNumber, title }, username || null);
   const result = await refreshQuotaCache(userId, libraryId);
   res.json({ ok: true, dismissed, ...result });
+}));
+
+// Pedido de Edu (2 ago 2026): penalizar tras quitar un pendiente del cupo (no
+// lo vio) — resta `holes` durante `months` del límite normal o del cupo
+// mensual de esa biblioteca (ver addPenalty). Refresca la caché para que el
+// panel lo refleje al momento.
+router.post('/quota/penalty/:userId/:libraryId', ah(async (req, res) => {
+  const { userId, libraryId } = req.params;
+  const { kind, holes, months, username } = req.body || {};
+  if (kind !== 'normal' && kind !== 'monthly') return res.status(400).json({ error: 'kind_required' });
+  if (!holes || !months) return res.status(400).json({ error: 'holes_and_months_required' });
+  addPenalty(userId, libraryId, kind, holes, months, username || null);
+  const result = await refreshQuotaCache(userId, libraryId);
+  res.json({ ok: true, ...result });
 }));
 
 // Deshace un "quitar del cupo" o "resetear" desde el Registro (issue de

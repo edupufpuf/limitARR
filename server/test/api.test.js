@@ -615,6 +615,182 @@ test('cupo mensual total: el historial trae las filas aprobadas de todas las bib
   }
 });
 
+test('POST /quota/penalty: resta huecos del límite normal y del mensual, y se acumulan', async () => {
+  const upsertSetting = db.prepare(`
+    INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+  `);
+  upsertSetting.run('tautulli_url', 'http://tautulli.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
+  upsertSetting.run('seerr_url', 'http://seerr.test');
+  upsertSetting.run('seerr_api_key', 'test-key');
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit, monthly_quota_enabled, monthly_limit)
+    VALUES (1783, 'Películas', 'movie', 'standard', 1, 4, 1, 3)
+  `).run();
+
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith('http://tautulli.test')) {
+      const cmd = new URL(url).searchParams.get('cmd');
+      const data = cmd === 'get_users' ? [{ user_id: 1893, username: 'jesus' }] : { data: [] };
+      return new Response(JSON.stringify({ response: { result: 'success', data } }), { status: 200 });
+    }
+    if (url.startsWith('http://seerr.test')) {
+      return new Response(JSON.stringify({ results: [] }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    // Sin penalización todavía: límite normal en 4 (el de la biblioteca).
+    const baseline = await agent
+      .post('/api/quota/manual-charge/1893/1783')
+      .send({ title: 'Algo visto fuera de Seerr' })
+      .expect(200);
+    assert.equal(baseline.body.limit, 4);
+
+    // Dos penalizaciones normales activas a la vez se SUMAN (4 - 1 - 2 = 1).
+    let res = await agent
+      .post('/api/quota/penalty/1893/1783')
+      .send({ kind: 'normal', holes: 1, months: 1, username: 'jesus' })
+      .expect(200);
+    assert.equal(res.body.limit, 3);
+    res = await agent
+      .post('/api/quota/penalty/1893/1783')
+      .send({ kind: 'normal', holes: 2, months: 1, username: 'jesus' })
+      .expect(200);
+    assert.equal(res.body.limit, 1);
+
+    // Penalización de cupo mensual (modo per_library, el que tiene esta lib): 3 - 1 = 2.
+    await agent
+      .post('/api/quota/penalty/1893/1783')
+      .send({ kind: 'monthly', holes: 1, months: 1, username: 'jesus' })
+      .expect(200);
+    const quota = (await agent.get('/api/quota').expect(200)).body;
+    const lib = quota.find((u) => u.userId === 1893)?.libraries.find((l) => l.libraryId === 1783);
+    assert.equal(lib.monthly.limit, 2);
+
+    // Queda en el Registro, sin undo_data (v1 sin deshacer/gestión).
+    const logged = db.prepare(
+      "SELECT undo_data FROM decisions_log WHERE library_id = 1783 AND decision = 'penalty_applied'"
+    ).all();
+    assert.equal(logged.length, 3);
+    assert.ok(logged.every((r) => r.undo_data == null));
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM decisions_log WHERE library_id = 1783').run();
+    db.prepare('DELETE FROM quota_cache WHERE library_id = 1783').run();
+    db.prepare('DELETE FROM penalties WHERE library_id = 1783').run();
+    db.prepare('DELETE FROM libraries WHERE id = 1783').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
+  }
+});
+
+test('POST /quota/penalty: en modo cupo mensual total, resta del total en vez del de la biblioteca', async () => {
+  const upsertSetting = db.prepare(`
+    INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+  `);
+  upsertSetting.run('monthly_quota_mode', 'total');
+  upsertSetting.run('monthly_total_limit', '5');
+  upsertSetting.run('tautulli_url', 'http://tautulli.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
+  upsertSetting.run('seerr_url', 'http://seerr.test');
+  upsertSetting.run('seerr_api_key', 'test-key');
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (1784, 'Películas', 'movie', 'standard', 1, 4)
+  `).run();
+
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith('http://tautulli.test')) {
+      const cmd = new URL(url).searchParams.get('cmd');
+      const data = cmd === 'get_users' ? [{ user_id: 1894, username: 'jesus' }] : { data: [] };
+      return new Response(JSON.stringify({ response: { result: 'success', data } }), { status: 200 });
+    }
+    if (url.startsWith('http://seerr.test')) {
+      return new Response(JSON.stringify({ results: [] }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    await agent
+      .post('/api/quota/penalty/1894/1784')
+      .send({ kind: 'monthly', holes: 2, months: 1, username: 'jesus' })
+      .expect(200);
+    const quota = (await agent.get('/api/quota').expect(200)).body;
+    const user = quota.find((u) => u.userId === 1894);
+    assert.equal(user.monthlyTotal.limit, 3); // 5 - 2, no ligado a la biblioteca 1784
+
+    const penalty = db.prepare('SELECT library_id FROM penalties WHERE user_id = 1894').get();
+    assert.equal(penalty.library_id, null);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM decisions_log WHERE user_id = 1894').run();
+    db.prepare('DELETE FROM quota_cache WHERE library_id = 1784').run();
+    db.prepare('DELETE FROM penalties WHERE user_id = 1894').run();
+    db.prepare('DELETE FROM libraries WHERE id = 1784').run();
+    db.prepare(
+      "DELETE FROM settings WHERE key IN ('monthly_quota_mode', 'monthly_total_limit', 'tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')"
+    ).run();
+  }
+});
+
+test('penalties: una penalización caducada (ends_at pasado) deja de aplicar', async () => {
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (1785, 'Películas', 'movie', 'standard', 0, 4)
+  `).run();
+  db.prepare(`
+    INSERT INTO penalties (user_id, library_id, kind, holes, ends_at)
+    VALUES (1895, 1785, 'normal', 2, datetime('now', '-1 day'))
+  `).run();
+
+  const upsertSetting = db.prepare(`
+    INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+  `);
+  upsertSetting.run('tautulli_url', 'http://tautulli.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
+  upsertSetting.run('seerr_url', 'http://seerr.test');
+  upsertSetting.run('seerr_api_key', 'test-key');
+  db.prepare('UPDATE libraries SET enabled = 1 WHERE id = 1785').run();
+
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith('http://tautulli.test')) {
+      const cmd = new URL(url).searchParams.get('cmd');
+      const data = cmd === 'get_users' ? [{ user_id: 1895, username: 'jesus' }] : { data: [] };
+      return new Response(JSON.stringify({ response: { result: 'success', data } }), { status: 200 });
+    }
+    if (url.startsWith('http://seerr.test')) {
+      return new Response(JSON.stringify({ results: [] }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const res = await agent
+      .post('/api/quota/manual-charge/1895/1785')
+      .send({ title: 'Algo' })
+      .expect(200);
+    assert.equal(res.body.limit, 4); // caducada, no resta
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM decisions_log WHERE library_id = 1785').run();
+    db.prepare('DELETE FROM quota_cache WHERE library_id = 1785').run();
+    db.prepare('DELETE FROM penalties WHERE library_id = 1785').run();
+    db.prepare('DELETE FROM libraries WHERE id = 1785').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
+  }
+});
+
 test('cupo: recalcular todos limpia la caché de usuarios que ya no están activos en Tautulli', async () => {
   const upsertSetting = db.prepare(`
     INSERT INTO settings (key, value) VALUES (?, ?)

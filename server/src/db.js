@@ -264,6 +264,25 @@ db.exec(`
     limit_override INTEGER NOT NULL,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- Pedido de Edu (2 ago 2026): al quitar un pendiente del cupo (no lo vio),
+  -- opción de penalizar reduciendo temporalmente su capacidad. kind='normal'
+  -- resta del límite de pendientes de esa biblioteca; kind='monthly' resta del
+  -- cupo mensual — de esa biblioteca si el modo es 'per_library', o del total
+  -- (library_id NULL) si el modo es 'total'. Varias penalizaciones activas a la
+  -- vez se SUMAN (pedido explícito de Edu). Caduca sola en ends_at, sin pantalla
+  -- de gestión en v1 (Edu no la pidió) — el user_id es el cacheId de
+  -- quotaIdentity, igual que en overrides (real o -group_id).
+  CREATE TABLE IF NOT EXISTS penalties (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    library_id INTEGER,
+    kind TEXT NOT NULL,
+    holes INTEGER NOT NULL,
+    note TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    ends_at TEXT NOT NULL
+  );
 `);
 
 // Roles por defecto pedidos por Edu: se siembran una sola vez si la tabla está

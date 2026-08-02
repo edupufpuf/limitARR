@@ -967,6 +967,87 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
 }
 
 // Cargo manual con buscador contra Plex (vía Tautulli): para algo que ya está
+// Tras quitar un pendiente del cupo (pedido de Edu, 2 ago 2026): opción de
+// penalizar por no haberlo visto. "No penalizar" (onClose) es la respuesta
+// negativa — solo se pide huecos/meses si de verdad va a penalizar.
+function PenaltyModal({ username, title, monthlyAvailable, onClose, onSubmit }) {
+  const [kind, setKind] = useState('normal');
+  const [holes, setHoles] = useState(1);
+  const [months, setMonths] = useState(1);
+  const [saving, setSaving] = useState(false);
+
+  async function confirmPenalty() {
+    setSaving(true);
+    try {
+      await onSubmit({ kind, holes: Number(holes), months: Number(months) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
+      <div className="card w-full max-w-sm p-4 sm:p-5" onClick={(e) => e.stopPropagation()}>
+        <h3 className="font-bold text-lg mb-1">¿Penalizar a {username}?</h3>
+        <p className="text-xs text-gray-400 mb-4">
+          No vio "{title ?? 'esto'}". Puedes reducirle el cupo una temporada por no verlo.
+        </p>
+        <div className="space-y-2 mb-4">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="radio" name="penalty-kind" checked={kind === 'normal'} onChange={() => setKind('normal')} />
+            Límite normal (pendientes)
+          </label>
+          <label className={`flex items-center gap-2 text-sm ${monthlyAvailable ? 'cursor-pointer' : 'opacity-40'}`}>
+            <input
+              type="radio"
+              name="penalty-kind"
+              checked={kind === 'monthly'}
+              onChange={() => setKind('monthly')}
+              disabled={!monthlyAvailable}
+            />
+            Cupo mensual{!monthlyAvailable ? ' (no activado)' : ''}
+          </label>
+        </div>
+        <div className="flex gap-3 mb-5">
+          <label className="flex-1 text-xs text-gray-400">
+            Huecos
+            <input
+              type="number"
+              min="1"
+              className="input mt-1 w-full"
+              value={holes}
+              onChange={(e) => setHoles(e.target.value)}
+            />
+          </label>
+          <label className="flex-1 text-xs text-gray-400">
+            Meses
+            <input
+              type="number"
+              min="1"
+              className="input mt-1 w-full"
+              value={months}
+              onChange={(e) => setMonths(e.target.value)}
+            />
+          </label>
+        </div>
+        <div className="flex justify-end gap-2">
+          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>
+            No penalizar
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={confirmPenalty}
+            disabled={saving || !holes || !months}
+          >
+            {saving ? 'Aplicando…' : 'Penalizar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // en la biblioteca pero nunca se pidió en Seerr. Elegir el resultado real evita
 // el problema del título a mano (si no coincide letra a letra con Tautulli, el
 // visionado nunca se detecta solo, ver addManualCharge). Se deja también un
@@ -1102,6 +1183,9 @@ export default function Quota() {
   const [monthlyHistoryTarget, setMonthlyHistoryTarget] = useState(null);
   // Cargo manual abierto: { userId, libraryId, username } o null.
   const [chargeModal, setChargeModal] = useState(null);
+  // Penalización tras quitar del cupo (pedido de Edu, 2 ago 2026):
+  // { userId, libraryId, username, title, monthlyAvailable } o null.
+  const [penaltyTarget, setPenaltyTarget] = useState(null);
   // Base para enlazar pósters con Tautulli: la URL pública si está configurada
   // (la interna suele ser un hostname docker que el navegador no resuelve).
   const [statsBase, setStatsBase] = useState('');
@@ -1266,7 +1350,31 @@ export default function Quota() {
       username,
     });
     load();
+    // Pedido de Edu (2 ago 2026): al quitar algo por no verlo, ofrecer
+    // penalizar — la ficha completa (huecos/meses/tipo) se pide en el modal,
+    // "No penalizar" ahí mismo es la respuesta negativa.
+    const u = users.find((x) => x.userId === userId);
+    const lib = u?.libraries.find((l) => l.libraryId === Number(libraryId));
+    setPenaltyTarget({
+      userId,
+      libraryId,
+      username,
+      title: item.title,
+      monthlyAvailable: Boolean(lib?.monthly?.enabled || u?.monthlyTotal?.enabled),
+    });
     return true;
+  }
+
+  async function submitPenalty({ kind, holes, months }) {
+    if (!penaltyTarget) return;
+    await api.penalize(penaltyTarget.userId, penaltyTarget.libraryId, {
+      kind,
+      holes,
+      months,
+      username: penaltyTarget.username,
+    });
+    setPenaltyTarget(null);
+    load();
   }
 
   function toggle(userId) {
@@ -1455,6 +1563,16 @@ export default function Quota() {
           sectionType={chargeModal.sectionType}
           onClose={() => setChargeModal(null)}
           onSubmit={submitManualCharge}
+        />
+      )}
+
+      {penaltyTarget && (
+        <PenaltyModal
+          username={penaltyTarget.username}
+          title={penaltyTarget.title}
+          monthlyAvailable={penaltyTarget.monthlyAvailable}
+          onClose={() => setPenaltyTarget(null)}
+          onSubmit={submitPenalty}
         />
       )}
 

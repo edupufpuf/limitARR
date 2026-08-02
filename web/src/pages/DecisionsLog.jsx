@@ -28,6 +28,7 @@ const decisionBadge = {
   watched: 'bg-green-400/10 text-green-400 ring-green-400/25',
   expired: 'bg-bg-700/60 text-gray-400 ring-bg-600',
   unavailable_reminder: 'bg-sky-400/10 text-sky-400 ring-sky-400/25',
+  penalty_applied: 'bg-orange-400/10 text-orange-400 ring-orange-400/25',
 };
 
 const decisionLabel = {
@@ -54,6 +55,7 @@ const decisionLabel = {
   watched: '👁️ visto (cupo liberado)',
   expired: '⌛ caducado (cupo liberado)',
   unavailable_reminder: '🕐 aviso: aún no disponible (12h)',
+  penalty_applied: '⛔ penalización aplicada',
 };
 
 // created_at viene de SQLite en UTC ('YYYY-MM-DD HH:MM:SS'); se enseña en local.
