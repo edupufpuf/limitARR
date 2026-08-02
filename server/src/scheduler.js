@@ -3,7 +3,7 @@ import path from 'node:path';
 import { db } from './db.js';
 import { config } from './config.js';
 import { getRawSetting, setRawSetting } from './settings.js';
-import { listPendingRequests, approveRequest, declineRequest, getMediaDetails } from './services/seerr.js';
+import { listPendingRequests, approveRequest, declineRequest, getMediaDetails, getMovieAvailability } from './services/seerr.js';
 import { getUsers } from './services/tautulli.js';
 import { getBalance, getMonthlyTotalQuota, reconcileVoidedRequests, refreshQuotaCache, listStaleOutstandingPairs, normalize, getRequestHold, clearRequestHold, pruneStaleQuotaCache } from './quota.js';
 import { sendMessage, getNotifyTarget, pendingButton, renderNoQuotaMessage } from './services/telegram.js';
@@ -35,6 +35,31 @@ const getLastUsernameForUser = db.prepare(`
   SELECT username FROM decisions_log
   WHERE user_id = ? AND library_id = ? AND username IS NOT NULL
   ORDER BY id DESC LIMIT 1
+`);
+// Pedido de Edu (2 ago 2026): si a las 12h de aprobarse sigue sin estar en
+// Plex, avisar una vez de que aún no está disponible — antes solo se avisaba
+// al aprobar/rechazar, y el usuario se quedaba sin saber por qué no llegaba.
+const STILL_UNAVAILABLE_HOURS = 12;
+const getUnnotifiedOldApprovals = db.prepare(`
+  SELECT dl.id, dl.request_id, dl.user_id, dl.username, dl.library_id, dl.media_title, dl.media_type,
+         dl.tmdb_id, dl.season_number, dl.created_at, l.kind AS library_kind
+  FROM decisions_log dl
+  JOIN libraries l ON l.id = dl.library_id
+  WHERE dl.decision = 'approved' AND dl.voided_at IS NULL AND l.enabled = 1
+    AND dl.tmdb_id IS NOT NULL AND dl.user_id IS NOT NULL
+    AND dl.created_at <= datetime('now', '-' || ? || ' hours')
+    AND NOT EXISTS (
+      SELECT 1 FROM decisions_log r
+      WHERE r.request_id = dl.request_id AND r.media_type = dl.media_type
+        AND COALESCE(r.season_number, -1) = COALESCE(dl.season_number, -1)
+        AND r.decision = 'unavailable_reminder'
+    )
+`);
+const insertUnavailableReminder = db.prepare(`
+  INSERT INTO decisions_log
+    (request_id, user_id, username, library_id, media_title, media_type, tmdb_id, season_number, decision, created_at)
+  VALUES
+    (@requestId, @userId, @username, @libraryId, @mediaTitle, @mediaType, @tmdbId, @seasonNumber, 'unavailable_reminder', datetime('now'))
 `);
 
 // Avoids re-logging (and re-notifying) the same still-pending request every poll
@@ -177,19 +202,13 @@ async function notifySeasonHold(base) {
 }
 
 // "Te quedan N huecos" (saldo/cupo) resultaba lioso para Edu — un usuario no
-// entiende bien qué es un "hueco". Cuenta en su lugar lo que YA puede ver
-// ahora mismo (pendientes aprobados que ya están en Plex, sin contar lo que
-// aún se está descargando), que es la pregunta real del usuario.
-function availableCountPhrase(isTv, count) {
-  const noun = isTv ? (count === 1 ? 'serie' : 'series') : (count === 1 ? 'película' : 'películas');
-  const adj = count === 1 ? 'disponible' : 'disponibles';
-  return `${count} ${noun} ${adj}`;
-}
-
+// entiende bien qué es un "hueco". Lista en su lugar los títulos que tiene
+// pendientes de ver en esta biblioteca (aprobados, estén ya en Plex o no),
+// que es la pregunta real del usuario.
 // Aviso de aprobación: cierra el ciclo con el usuario (antes solo se le avisaba
-// de lo malo, el "sin cupo"). `availableCount` = pendientes de esta biblioteca
-// ya disponibles para ver (incluida esta aprobación, si ya está en Plex).
-async function notifyApproved(base, availableCount, isTv) {
+// de lo malo, el "sin cupo"). `pendingItems` = pendientes de esta biblioteca
+// tras la aprobación (incluye la recién aprobada).
+async function notifyApproved(base, pendingItems) {
   const target = getNotifyTarget();
   if (!target.notifyApproved) return;
 
@@ -197,9 +216,15 @@ async function notifyApproved(base, availableCount, isTv) {
   const chatId = getChatId.get(base.userId)?.chat_id;
   if (!chatId) return;
   const libraryName = getLibraryName.get(base.libraryId)?.name ?? `biblioteca #${base.libraryId}`;
-  const phrase = availableCountPhrase(isTv, availableCount);
+  const titles = pendingItems.map((item) => item.title).filter(Boolean);
+  const list = titles.length > 0
+    ? titles.map((t) => `• ${t}`).join('\n')
+    : 'nada más por ahora';
   try {
-    await sendMessage(chatId, `✅ Solicitud aprobada: ${base.mediaTitle} (${libraryName}). Tienes ${phrase} para ver.`);
+    await sendMessage(
+      chatId,
+      `✅ Solicitud aprobada: ${base.mediaTitle} (${libraryName}).\nPendiente de ver en ${libraryName}:\n${list}`
+    );
   } catch (err) {
     console.error('[scheduler] telegram notify failed:', err.message);
   }
@@ -283,6 +308,65 @@ async function refreshStaleAndNotify() {
     }
   }
   return pairs.length;
+}
+
+// Pedido de Edu (2 ago 2026): aviso único a las 12h si la aprobación sigue sin
+// llegar a Plex. Idempotente vía el propio 'unavailable_reminder' en
+// decisions_log (mismo patrón que hasWatchedOrExpired en quota.js) — no se
+// repite aunque tarde más. Se agrupan las películas por kind (HD/4K) para
+// consultar Seerr una vez por biblioteca en vez de una por título.
+export async function notifyStillUnavailable() {
+  const rows = getUnnotifiedOldApprovals.all(STILL_UNAVAILABLE_HOURS);
+  if (rows.length === 0) return;
+
+  const movieTmdbIdsByKind = new Map();
+  for (const row of rows) {
+    if (row.media_type === 'tv') continue;
+    const kind = row.library_kind || 'standard';
+    if (!movieTmdbIdsByKind.has(kind)) movieTmdbIdsByKind.set(kind, new Set());
+    movieTmdbIdsByKind.get(kind).add(row.tmdb_id);
+  }
+  const movieAvailabilityByKind = new Map();
+  for (const [kind, ids] of movieTmdbIdsByKind) {
+    movieAvailabilityByKind.set(kind, await getMovieAvailability([...ids], kind === '4k'));
+  }
+  const tvDetailsCache = new Map();
+
+  for (const row of rows) {
+    let unavailable;
+    if (row.media_type === 'tv') {
+      const cacheKey = `${row.tmdb_id}:${row.season_number}`;
+      if (!tvDetailsCache.has(cacheKey)) {
+        tvDetailsCache.set(cacheKey, await getMediaDetails('tv', row.tmdb_id, row.season_number));
+      }
+      const details = tvDetailsCache.get(cacheKey);
+      // seasonStatuses null = error de red: no se sabe, no se avisa de nada.
+      unavailable = details?.seasonStatuses != null && (details.seasonStatuses[row.season_number] ?? 0) < 4;
+    } else {
+      const kind = row.library_kind || 'standard';
+      unavailable = movieAvailabilityByKind.get(kind)?.get(row.tmdb_id)?.unavailable ?? false;
+    }
+    if (!unavailable) continue; // ya llegó entretanto, no hace falta avisar de esto
+
+    insertUnavailableReminder.run({
+      requestId: row.request_id,
+      userId: row.user_id,
+      username: row.username,
+      libraryId: row.library_id,
+      mediaTitle: row.media_title,
+      mediaType: row.media_type,
+      tmdbId: row.tmdb_id,
+      seasonNumber: row.season_number,
+    });
+
+    const chatId = getChatId.get(row.user_id)?.chat_id;
+    if (!chatId) continue;
+    try {
+      await sendMessage(chatId, `🕐 ${row.media_title ?? 'Tu solicitud'} sigue sin estar disponible. Se descargará en cuanto esté lista.`);
+    } catch (err) {
+      console.error('[scheduler] telegram notify failed:', err.message);
+    }
+  }
 }
 
 // Mantenimiento diario, colgado del propio ciclo de sondeo (no hace falta otro
@@ -494,11 +578,10 @@ export async function runPollCycle() {
     // Recalcula la caché de verdad (con la aprobación recién logueada incluida)
     // en vez de ajustar el contador a mano — así pending_items queda al día y
     // el panel enseña la película nueva sin esperar al siguiente sondeo. El
-    // aviso de aprobado necesita este resultado para contar lo YA disponible.
+    // aviso de aprobado necesita este resultado para listar lo pendiente.
     const refreshed = await refreshQuotaCache(tautulliUser.id, library.id);
     if (decision === 'approved' && isNew) {
-      const availableCount = refreshed.pendingItems.filter((item) => !item.unavailable).length;
-      await notifyApproved(base, availableCount, library.section_type === 'show');
+      await notifyApproved(base, refreshed.pendingItems);
     }
   }
 
@@ -506,6 +589,7 @@ export async function runPollCycle() {
   // los pares recién refrescados arriba quedan excluidos por su computed_at.
   // Además avisa por Telegram del cupo liberado (si está activado).
   await refreshStaleAndNotify();
+  await notifyStillUnavailable();
 }
 
 function formatMediaTitle(mediaType, title, seasonNumber = null) {

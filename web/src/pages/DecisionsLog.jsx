@@ -27,6 +27,7 @@ const decisionBadge = {
   role_monthly_total_override_changed: 'bg-violet-400/10 text-violet-400 ring-violet-400/25',
   watched: 'bg-green-400/10 text-green-400 ring-green-400/25',
   expired: 'bg-bg-700/60 text-gray-400 ring-bg-600',
+  unavailable_reminder: 'bg-sky-400/10 text-sky-400 ring-sky-400/25',
 };
 
 const decisionLabel = {
@@ -52,6 +53,7 @@ const decisionLabel = {
   role_monthly_total_override_changed: 'override de cupo mensual total (rol) cambiado',
   watched: '👁️ visto (cupo liberado)',
   expired: '⌛ caducado (cupo liberado)',
+  unavailable_reminder: '🕐 aviso: aún no disponible (12h)',
 };
 
 // created_at viene de SQLite en UTC ('YYYY-MM-DD HH:MM:SS'); se enseña en local.
