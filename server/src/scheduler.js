@@ -538,7 +538,7 @@ export async function runPollCycle() {
     // v3: cupo mensual TOTAL — igual que el anterior, pero sumando todas las
     // bibliotecas; se comprueba aparte porque puede estar activado aunque esta
     // biblioteca en concreto no tenga cupo mensual propio.
-    const monthlyTotal = getMonthlyTotalQuota(tautulliUser.id);
+    const monthlyTotal = await getMonthlyTotalQuota(tautulliUser.id);
     const monthlyTotalOk = !monthlyTotal.enabled || monthlyTotal.remaining >= requiredUnits;
     const decision =
       balance >= requiredUnits && monthlyOk && monthlyTotalOk

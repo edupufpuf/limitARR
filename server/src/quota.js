@@ -179,28 +179,72 @@ const getLibraryForRequest = db.prepare(`
 // cualquier biblioteca. El límite por defecto vive en settings (Ajustes),
 // no en libraries.
 const DEFAULT_MONTHLY_TOTAL_LIMIT = 20;
-const getMonthlyApprovedCountTotal = db.prepare(`
-  SELECT COUNT(*) AS n FROM decisions_log
-  WHERE user_id = ? AND decision = 'approved' AND voided_at IS NULL
-    AND created_at >= datetime('now', 'start of month')
-`);
-// Issue #20: mismas filas que cuenta getMonthlyApprovedCountTotal, pero con el
-// detalle (título/fecha) para pintar el historial en la pestaña Cupo.
-const getMonthlyApprovedRowsTotal = db.prepare(`
-  SELECT id, media_title, media_type, tmdb_id, season_number, poster_url, username, library_id, created_at
-  FROM decisions_log
-  WHERE user_id = ? AND decision = 'approved' AND voided_at IS NULL
-    AND created_at >= datetime('now', 'start of month')
-  ORDER BY created_at DESC
+
+// Filas aprobadas de un usuario en TODAS las bibliotecas habilitadas, con el
+// kind (HD/4K) de cada una — Seerr guarda disponibilidad por separado para
+// cada calidad, hace falta saber cuál mirar (ver filterAvailableThisMonth).
+const getApprovedRowsAllLibraries = db.prepare(`
+  SELECT dl.id, dl.media_title, dl.media_type, dl.tmdb_id, dl.season_number, dl.poster_url,
+         dl.username, dl.library_id, dl.created_at, l.kind AS kind
+  FROM decisions_log dl
+  JOIN libraries l ON l.id = dl.library_id
+  WHERE dl.user_id = ? AND dl.decision = 'approved' AND dl.voided_at IS NULL AND l.enabled = 1
 `);
 
-// Issue #20: filas detrás del contador getMonthlyTotalQuota, para el mismo
-// usuario/grupo agregado que ya suma memberIds en getMonthlyTotalQuota.
-export function getMonthlyHistoryRowsTotal(userId) {
+// Pedido de Edu (2 ago 2026): lo que aún no está descargado no debe contar
+// para el cupo mensual — antes se contaba igual que lo ya disponible,
+// dejando "gastar" cupo mensual en algo que ni siquiera ha llegado a Plex.
+// Filtra `rows` (aprobadas, cualquier estado, con `kind` en las de película)
+// a las de este mes que YA están disponibles — vista o no, da igual, con que
+// se pueda ver ya. Async: consulta Seerr igual que el cálculo del saldo.
+async function filterAvailableThisMonth(rows) {
+  const now = new Date();
+  const startOfMonthMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+  const thisMonth = rows.filter((r) => rowTimeMs(r) >= startOfMonthMs);
+  if (thisMonth.length === 0) return [];
+
+  const movieRows = thisMonth.filter((r) => r.media_type !== 'tv');
+  const tvRows = thisMonth.filter((r) => r.media_type === 'tv');
+  const available = [];
+
+  const moviesByKind = new Map();
+  for (const r of movieRows) {
+    const kind = r.kind || 'standard';
+    if (!moviesByKind.has(kind)) moviesByKind.set(kind, []);
+    moviesByKind.get(kind).push(r);
+  }
+  for (const [kind, kindRows] of moviesByKind) {
+    const availability = await getMovieAvailability(kindRows.map((r) => r.tmdb_id), kind === '4k');
+    for (const r of kindRows) {
+      if (r.tmdb_id == null || !availability.get(r.tmdb_id)?.unavailable) available.push(r);
+    }
+  }
+
+  const tvDetailsCache = new Map();
+  for (const r of tvRows) {
+    if (r.tmdb_id == null || r.season_number == null) {
+      available.push(r);
+      continue;
+    }
+    const key = `${r.tmdb_id}:${r.season_number}`;
+    if (!tvDetailsCache.has(key)) tvDetailsCache.set(key, await getMediaDetails('tv', r.tmdb_id, r.season_number));
+    const details = tvDetailsCache.get(key);
+    // seasonStatuses null = error de red: no se sabe, se cuenta igual (mismo
+    // criterio que el resto del código: en la duda, cuenta).
+    const status = details?.seasonStatuses?.[r.season_number] ?? 0;
+    const unavailable = details?.seasonStatuses != null && status < 4;
+    if (!unavailable) available.push(r);
+  }
+  return available;
+}
+
+// Issue #20: filas detrás del contador getMonthlyTotalQuota (mismo filtro de
+// disponibilidad), para el mismo usuario/grupo agregado.
+export async function getMonthlyHistoryRowsTotal(userId) {
   const identity = quotaIdentity(userId);
-  return identity.memberIds
-    .flatMap((memberId) => getMonthlyApprovedRowsTotal.all(memberId))
-    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  const rows = identity.memberIds.flatMap((memberId) => getApprovedRowsAllLibraries.all(memberId));
+  const available = await filterAvailableThisMonth(rows);
+  return available.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
 }
 const getMonthlyTotalOverrideRaw = db.prepare('SELECT * FROM monthly_total_overrides WHERE user_id = ?');
 const getGroupMonthlyTotalOverrideForUser = db.prepare(`
@@ -246,7 +290,7 @@ export function setMonthlyTotalSettings({ limit }) {
 // TODAS las bibliotecas (no una sola) contra el límite de Ajustes, con la
 // misma precedencia de overrides (individual > grupo > rol > global). Un
 // grupo agregado no tiene rol propio, igual que en getBalance.
-export function getMonthlyTotalQuota(userId) {
+export async function getMonthlyTotalQuota(userId) {
   const { enabled, limit: globalLimit } = getMonthlyTotalSettings();
   const identity = quotaIdentity(userId);
   let limit;
@@ -263,33 +307,33 @@ export function getMonthlyTotalQuota(userId) {
     );
   }
   limit = Math.max(0, limit - getActiveTotalPenaltyHoles.get(identity.cacheId).total);
-  const used = identity.memberIds.reduce((sum, memberId) => sum + getMonthlyApprovedCountTotal.get(memberId).n, 0);
+  let used = 0;
+  if (enabled) {
+    const rows = identity.memberIds.flatMap((memberId) => getApprovedRowsAllLibraries.all(memberId));
+    used = (await filterAvailableThisMonth(rows)).length;
+  }
   return { enabled, limit, used, remaining: Math.max(0, limit - used) };
 }
 
-// v2: cupo mensual — cuenta lo aprobado (y no anulado) en el mes en curso,
-// para TODOS los miembros de la identidad de cupo (igual que el saldo). Un
-// cargo manual también es una fila 'approved' en esta tabla, así que cuenta
-// igual sin lógica extra. 'start of month' es local a la fecha guardada (UTC).
-const getMonthlyApprovedCount = db.prepare(`
-  SELECT COUNT(*) AS n FROM decisions_log
-  WHERE user_id = ? AND library_id = ? AND decision = 'approved' AND voided_at IS NULL
-    AND created_at >= datetime('now', 'start of month')
-`);
-// Issue #20: mismas filas que cuenta getMonthlyApprovedCount, con detalle.
-const getMonthlyApprovedRows = db.prepare(`
+// v2: cupo mensual — cuenta lo aprobado (y no anulado, y ya disponible en
+// Plex — ver filterAvailableThisMonth) en el mes en curso, para TODOS los
+// miembros de la identidad de cupo (igual que el saldo). Un cargo manual
+// también es una fila 'approved' en esta tabla, así que cuenta igual sin
+// lógica extra (siempre que tenga tmdb_id; si no, se trata como disponible).
+const getApprovedRowsForLibrary = db.prepare(`
   SELECT id, media_title, media_type, tmdb_id, season_number, poster_url, username, created_at
   FROM decisions_log
   WHERE user_id = ? AND library_id = ? AND decision = 'approved' AND voided_at IS NULL
-    AND created_at >= datetime('now', 'start of month')
-  ORDER BY created_at DESC
 `);
 
-export function getMonthlyHistoryRows(userId, libraryId) {
+export async function getMonthlyHistoryRows(userId, libraryId) {
   const identity = quotaIdentity(userId);
-  return identity.memberIds
-    .flatMap((memberId) => getMonthlyApprovedRows.all(memberId, libraryId))
-    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  const library = getLibrary.get(libraryId);
+  const rows = identity.memberIds.flatMap((memberId) =>
+    getApprovedRowsForLibrary.all(memberId, libraryId).map((r) => ({ ...r, kind: library?.kind }))
+  );
+  const available = await filterAvailableThisMonth(rows);
+  return available.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
 }
 const requestUnitAlreadyLogged = db.prepare(`
   SELECT 1 FROM decisions_log
@@ -686,14 +730,21 @@ export async function getBalance(userId, libraryId) {
   // NULL (ver addPenalty) — aquí no aplica, la resta getMonthlyTotalQuota.
   monthlyLimit = Math.max(0, monthlyLimit - getActivePenaltyHoles.get(identity.cacheId, 'monthly', libraryId).total);
   const resetAt = getResetAt.get(identity.cacheId, libraryId)?.reset_at ?? '0000-01-01';
-  // v2: cupo mensual — independiente de si se ha visto o no. Solo se aplica si
-  // la biblioteca lo tiene activado; el resto del cálculo de saldo no cambia.
-  const monthlyUsed = identity.memberIds.reduce(
-    (sum, memberId) => sum + getMonthlyApprovedCount.get(memberId, libraryId).n,
-    0
-  );
+  // v2: cupo mensual — independiente de si se ha visto o no, pero NO de si ya
+  // está disponible en Plex (pedido de Edu, 2 ago 2026: lo aún no descargado
+  // no debe contar). Consulta propia sin filtrar por resetAt: un reset del
+  // saldo normal no afecta al mensual, igual que antes. Solo se calcula si
+  // está activado — si no, ahorra la consulta a Seerr en cada ciclo/biblioteca.
+  const monthlyEnabled = getMonthlyQuotaMode() === 'per_library' && Boolean(library.monthly_quota_enabled);
+  let monthlyUsed = 0;
+  if (monthlyEnabled) {
+    const monthlyRows = identity.memberIds.flatMap((memberId) =>
+      getApprovedRowsForLibrary.all(memberId, libraryId).map((r) => ({ ...r, kind: library.kind }))
+    );
+    monthlyUsed = (await filterAvailableThisMonth(monthlyRows)).length;
+  }
   const monthly = {
-    enabled: getMonthlyQuotaMode() === 'per_library' && Boolean(library.monthly_quota_enabled),
+    enabled: monthlyEnabled,
     limit: monthlyLimit,
     used: monthlyUsed,
     remaining: Math.max(0, monthlyLimit - monthlyUsed),

@@ -177,7 +177,7 @@ router.get('/me/quota', ah(async (req, res) => {
     buildPendingApprovalItems(),
   ]);
   const card = quotaCards.find((item) => item.userId === cacheId)
-    ?? { userId: cacheId, username: req.session.user.username, monthlyTotal: getMonthlyTotalQuota(cacheId), libraries: [] };
+    ?? { userId: cacheId, username: req.session.user.username, monthlyTotal: await getMonthlyTotalQuota(cacheId), libraries: [] };
   const ownPending = pendingApprovals.filter((item) => item.userId === Number(req.session.user.id));
   const byLibrary = new Map();
   for (const item of ownPending) {
@@ -265,13 +265,13 @@ router.get('/me/quota/pending-detail/:libraryId', ah(async (req, res) => {
 router.get('/me/quota/monthly-history/:libraryId', ah(async (req, res) => {
   if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });
   const cacheId = quotaIdentity(req.session.user.id).cacheId;
-  res.json(getMonthlyHistoryRows(cacheId, Number(req.params.libraryId)));
+  res.json(await getMonthlyHistoryRows(cacheId, Number(req.params.libraryId)));
 }));
 
 router.get('/me/quota/monthly-history-total', ah(async (req, res) => {
   if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });
   const cacheId = quotaIdentity(req.session.user.id).cacheId;
-  res.json(getMonthlyHistoryRowsTotal(cacheId));
+  res.json(await getMonthlyHistoryRowsTotal(cacheId));
 }));
 
 // Películas que este usuario salvó con el botón de Telegram y siguen a tiempo de ver.
@@ -942,7 +942,7 @@ async function buildQuotaByUser() {
           approved7d: memberIds.reduce((sum, uid) => sum + (recentMap.get(uid)?.approved7d ?? 0), 0),
           blocked7d: memberIds.reduce((sum, uid) => sum + (recentMap.get(uid)?.blocked7d ?? 0), 0),
           requestedTotal: memberIds.reduce((sum, uid) => sum + (requestedMap.get(uid) ?? 0), 0),
-          monthlyTotal: getMonthlyTotalQuota(row.user_id),
+          monthlyTotal: await getMonthlyTotalQuota(row.user_id),
           recentlyWatched: recentlyWatchedFor(memberIds),
           libraries: [],
         });
@@ -955,7 +955,7 @@ async function buildQuotaByUser() {
           approved7d: recentMap.get(row.user_id)?.approved7d ?? 0,
           blocked7d: recentMap.get(row.user_id)?.blocked7d ?? 0,
           requestedTotal: requestedMap.get(row.user_id) ?? 0,
-          monthlyTotal: getMonthlyTotalQuota(row.user_id),
+          monthlyTotal: await getMonthlyTotalQuota(row.user_id),
           recentlyWatched: recentlyWatchedFor([row.user_id]),
           libraries: [],
         });
@@ -1164,11 +1164,11 @@ router.get('/quota/pending-detail/:userId/:libraryId', ah(async (req, res) => {
 // activo) — las mismas filas que ya cuenta getMonthlyApprovedCount(Total), con
 // título/fecha para pintarlas en la pestaña Cupo.
 router.get('/quota/monthly-history/:userId/:libraryId', ah(async (req, res) => {
-  res.json(getMonthlyHistoryRows(Number(req.params.userId), Number(req.params.libraryId)));
+  res.json(await getMonthlyHistoryRows(Number(req.params.userId), Number(req.params.libraryId)));
 }));
 
 router.get('/quota/monthly-history-total/:userId', ah(async (req, res) => {
-  res.json(getMonthlyHistoryRowsTotal(Number(req.params.userId)));
+  res.json(await getMonthlyHistoryRowsTotal(Number(req.params.userId)));
 }));
 
 // --- Issue #11: solicitudes fuera de cupo, pendientes de aprobación en Seerr ---

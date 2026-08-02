@@ -106,6 +106,11 @@ test('auth Plex: usuario normal solo ve su cupo y gestiona su propio chat', asyn
     if (url === 'http://seerr.test/api/v1/movie/603') {
       return new Response(JSON.stringify({ title: 'Matrix', posterPath: '/matrix.jpg' }), { status: 200 });
     }
+    // Historial de cupo mensual (issue #20): solo cuenta lo YA disponible, así
+    // que Dune necesita mediaInfo.status >= 4 para no quedar fuera.
+    if (url === 'http://seerr.test/api/v1/movie/438631') {
+      return new Response(JSON.stringify({ title: 'Dune', mediaInfo: { status: 5 } }), { status: 200 });
+    }
     if (url.startsWith('http://seerr.test')) {
       return new Response(JSON.stringify({ results: [] }), { status: 200 });
     }
@@ -540,6 +545,118 @@ test('cupo mensual: cuenta cargos aprobados en el mes, independientemente de si 
     db.prepare('DELETE FROM quota_cache WHERE library_id = 1779').run();
     db.prepare('DELETE FROM libraries WHERE id = 1779').run();
     db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
+  }
+});
+
+test('cupo mensual: lo aprobado pero aún no descargado no cuenta (pedido de Edu, 2 ago 2026)', async () => {
+  const upsertSetting = db.prepare(`
+    INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+  `);
+  upsertSetting.run('tautulli_url', 'http://tautulli.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
+  upsertSetting.run('seerr_url', 'http://seerr.test');
+  upsertSetting.run('seerr_api_key', 'test-key');
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit, monthly_quota_enabled, monthly_limit)
+    VALUES (1786, 'Películas', 'movie', 'standard', 1, 4, 1, 5)
+  `).run();
+  // Aprobada este mes pero todavía sin descargar (status 2 = pedida, no lista).
+  db.prepare(`
+    INSERT INTO decisions_log (request_id, user_id, username, library_id, media_title, media_type, tmdb_id, decision, created_at)
+    VALUES (-9201, 1896, 'jesus', 1786, 'Aún descargando', 'movie', 777001, 'approved', datetime('now'))
+  `).run();
+
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith('http://tautulli.test')) {
+      const cmd = new URL(url).searchParams.get('cmd');
+      const data = cmd === 'get_users' ? [{ user_id: 1896, username: 'jesus' }] : { data: [] };
+      return new Response(JSON.stringify({ response: { result: 'success', data } }), { status: 200 });
+    }
+    if (url === 'http://seerr.test/api/v1/movie/777001') {
+      return new Response(JSON.stringify({ title: 'Aún descargando', mediaInfo: { status: 2 } }), { status: 200 });
+    }
+    if (url.startsWith('http://seerr.test')) {
+      return new Response(JSON.stringify({ results: [] }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    // Un cargo manual (sin tmdb_id, siempre cuenta) sube used a 1, no a 2: la
+    // que aún no está en Plex no debe aportar nada al cupo mensual.
+    const res = await agent
+      .post('/api/quota/manual-charge/1896/1786')
+      .send({ title: 'Vista fuera de Seerr' })
+      .expect(200);
+    assert.deepEqual(res.body.monthly, { enabled: true, limit: 5, used: 1, remaining: 4 });
+
+    const history = (await agent.get('/api/quota/monthly-history/1896/1786').expect(200)).body;
+    assert.deepEqual(history.map((r) => r.media_title), ['Vista fuera de Seerr']);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM decisions_log WHERE library_id = 1786').run();
+    db.prepare('DELETE FROM quota_cache WHERE library_id = 1786').run();
+    db.prepare('DELETE FROM libraries WHERE id = 1786').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
+  }
+});
+
+test('cupo mensual total: lo aún no descargado tampoco cuenta para el total', async () => {
+  const upsertSetting = db.prepare(`
+    INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+  `);
+  upsertSetting.run('monthly_quota_mode', 'total');
+  upsertSetting.run('monthly_total_limit', '5');
+  upsertSetting.run('tautulli_url', 'http://tautulli.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
+  upsertSetting.run('seerr_url', 'http://seerr.test');
+  upsertSetting.run('seerr_api_key', 'test-key');
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (1787, 'Películas', 'movie', 'standard', 1, 4)
+  `).run();
+  db.prepare(`
+    INSERT INTO decisions_log (request_id, user_id, username, library_id, media_title, media_type, tmdb_id, decision, created_at)
+    VALUES (-9202, 1897, 'jesus', 1787, 'Aún descargando', 'movie', 777002, 'approved', datetime('now'))
+  `).run();
+
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith('http://tautulli.test')) {
+      const cmd = new URL(url).searchParams.get('cmd');
+      const data = cmd === 'get_users' ? [{ user_id: 1897, username: 'jesus' }] : { data: [] };
+      return new Response(JSON.stringify({ response: { result: 'success', data } }), { status: 200 });
+    }
+    if (url === 'http://seerr.test/api/v1/movie/777002') {
+      return new Response(JSON.stringify({ title: 'Aún descargando', mediaInfo: { status: 2 } }), { status: 200 });
+    }
+    if (url.startsWith('http://seerr.test')) {
+      return new Response(JSON.stringify({ results: [] }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    await agent
+      .post('/api/quota/manual-charge/1897/1787')
+      .send({ title: 'Vista fuera de Seerr' })
+      .expect(200);
+    const quota = (await agent.get('/api/quota').expect(200)).body;
+    const user = quota.find((u) => u.userId === 1897);
+    assert.equal(user.monthlyTotal.used, 1); // solo el cargo manual, no la que aún descarga
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM decisions_log WHERE library_id = 1787').run();
+    db.prepare('DELETE FROM quota_cache WHERE library_id = 1787').run();
+    db.prepare('DELETE FROM libraries WHERE id = 1787').run();
+    db.prepare(
+      "DELETE FROM settings WHERE key IN ('monthly_quota_mode', 'monthly_total_limit', 'tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')"
+    ).run();
   }
 });
 
