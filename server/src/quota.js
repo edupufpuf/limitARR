@@ -494,6 +494,21 @@ function seasonCompletionDate(dateIndex, episodes, { showTitle, showRatingKey, s
   return latest;
 }
 
+// Caso Seve/Silo (2 ago 2026): Maintainerr puede borrar una temporada de Plex
+// tras verla (colección tipo "temporada" con borrado a los N días); Tautulli
+// deja entonces de tener sus episodios en get_children_metadata y
+// seasonWatchState no puede confirmar el visionado (total=0, nunca "complete"),
+// así que la temporada resucitaba como pendiente pese a haberse liberado ya el
+// cupo. Respaldo: si ya hay un 'watched'/'expired' logueado para esta fila
+// exacta (mismo criterio que hasWatchedOrExpired/requestUnitAlreadyLogged),
+// se confía en ese registro en vez de en Tautulli.
+const hasWatchedOrExpiredForRow = db.prepare(`
+  SELECT 1 FROM decisions_log
+  WHERE request_id = ? AND media_type = 'tv' AND COALESCE(season_number, -1) = COALESCE(?, -1)
+    AND decision IN ('watched', 'expired')
+  LIMIT 1
+`);
+
 async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatchedPercent = DEFAULT_SEASON_WATCHED_PERCENT, expiryDays = null) {
   await hydrateMissingPosters(approvedRows);
   const watchedIndex = buildWatchedEpisodeIndex(watchedEpisodes);
@@ -534,7 +549,8 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatc
       },
       seasonWatchedPercent
     );
-    if (!state.complete) {
+    const alreadyFreed = state.total === 0 && Boolean(hasWatchedOrExpiredForRow.get(row.request_id, row.season_number));
+    if (!state.complete && !alreadyFreed) {
       // Mismo criterio que en películas (issue #1): una temporada que Seerr aún
       // no da por disponible (status < 4: nada descargado) no resta cupo, pero
       // se lista con marca. seasonStatuses null = error de red → cuenta.

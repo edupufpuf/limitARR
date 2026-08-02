@@ -25,6 +25,7 @@ import {
   deleteGroupOverride,
   setRoleOverride,
   deleteRoleOverride,
+  refreshQuotaCache,
 } from '../src/quota.js';
 import { setRawSetting, updateSettings } from '../src/settings.js';
 import { db } from '../src/db.js';
@@ -773,4 +774,70 @@ test('computeBalance: una no disponible no lleva fecha de caducidad', () => {
   assert.equal(r.pendingItems[0].mediaStatus, 3);
   assert.equal(r.pendingItems[0].expiresAt, null);
   assert.equal(r.pendingItems[0].availableSince, null);
+});
+
+// Caso Seve/Silo (2 ago 2026): Maintainerr borra la temporada de Plex a los N
+// días de verse, y Tautulli deja de tener sus episodios en get_children_metadata
+// — sin respaldo, computeTvBalance no podía confirmar el visionado (total=0) y
+// la temporada resucitaba como pendiente pese a haberse liberado ya el cupo.
+test('refreshQuotaCache: una temporada ya confirmada como vista no revive si Maintainerr la borró de Plex', async () => {
+  updateSettings({
+    tautulli_url: 'http://tautulli.test',
+    tautulli_api_key: 'k',
+    seerr_url: 'http://seerr.test',
+    seerr_api_key: 'k',
+  });
+  db.prepare(`
+    INSERT INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (9500, 'Series', 'show', 'standard', 1, 2)
+  `).run();
+  db.prepare(`
+    INSERT INTO decisions_log (request_id, user_id, library_id, media_title, media_type, tmdb_id, season_number, decision, created_at)
+    VALUES (8001, 9600, 9500, 'Silo - Temporada 2', 'tv', 125988, 2, 'approved', datetime('now', '-10 days'))
+  `).run();
+  // Ya se confirmó vista antes de que Maintainerr borrara la temporada de Plex.
+  db.prepare(`
+    INSERT INTO decisions_log (request_id, user_id, library_id, media_title, media_type, tmdb_id, season_number, decision, created_at)
+    VALUES (8001, 9600, 9500, 'Silo - Temporada 2', 'tv', 125988, 2, 'watched', datetime('now', '-2 days'))
+  `).run();
+
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes('cmd=get_history')) {
+      return new Response(JSON.stringify({ response: { result: 'success', data: [] } }), { status: 200 });
+    }
+    if (url === 'http://seerr.test/api/v1/tv/125988') {
+      return new Response(JSON.stringify({
+        name: 'Silo',
+        mediaInfo: { ratingKey: '8715', seasons: [{ seasonNumber: 2, status: 7, updatedAt: '2026-07-29T00:00:00.000Z' }] },
+      }), { status: 200 });
+    }
+    if (url.includes('cmd=get_children_metadata') && url.includes('rating_key=8715')) {
+      // Temporada 2 ya no existe en Plex (Maintainerr la borró) — Tautulli solo
+      // conserva la temporada 3.
+      return new Response(JSON.stringify({
+        response: {
+          result: 'success',
+          data: { children_list: [{ rating_key: '8716', media_index: '3', media_type: 'season', title: 'Temporada 3' }] },
+        },
+      }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const result = await refreshQuotaCache(9600, 9500);
+    assert.equal(result.outstanding, 0);
+    assert.deepEqual(result.pendingItems, []);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM decisions_log WHERE library_id = 9500').run();
+    db.prepare('DELETE FROM quota_cache WHERE library_id = 9500').run();
+    db.prepare('DELETE FROM libraries WHERE id = 9500').run();
+    setRawSetting('tautulli_url', '');
+    setRawSetting('tautulli_api_key', '');
+    setRawSetting('seerr_url', '');
+    setRawSetting('seerr_api_key', '');
+  }
 });
