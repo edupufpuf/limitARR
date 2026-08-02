@@ -176,9 +176,20 @@ async function notifySeasonHold(base) {
   }
 }
 
+// "Te quedan N huecos" (saldo/cupo) resultaba lioso para Edu — un usuario no
+// entiende bien qué es un "hueco". Cuenta en su lugar lo que YA puede ver
+// ahora mismo (pendientes aprobados que ya están en Plex, sin contar lo que
+// aún se está descargando), que es la pregunta real del usuario.
+function availableCountPhrase(isTv, count) {
+  const noun = isTv ? (count === 1 ? 'serie' : 'series') : (count === 1 ? 'película' : 'películas');
+  const adj = count === 1 ? 'disponible' : 'disponibles';
+  return `${count} ${noun} ${adj}`;
+}
+
 // Aviso de aprobación: cierra el ciclo con el usuario (antes solo se le avisaba
-// de lo malo, el "sin cupo"). `remaining` = saldo tras descontar esta solicitud.
-async function notifyApproved(base, remaining) {
+// de lo malo, el "sin cupo"). `availableCount` = pendientes de esta biblioteca
+// ya disponibles para ver (incluida esta aprobación, si ya está en Plex).
+async function notifyApproved(base, availableCount, isTv) {
   const target = getNotifyTarget();
   if (!target.notifyApproved) return;
 
@@ -186,9 +197,9 @@ async function notifyApproved(base, remaining) {
   const chatId = getChatId.get(base.userId)?.chat_id;
   if (!chatId) return;
   const libraryName = getLibraryName.get(base.libraryId)?.name ?? `biblioteca #${base.libraryId}`;
-  const holes = remaining === 1 ? '1 hueco' : `${remaining} huecos`;
+  const phrase = availableCountPhrase(isTv, availableCount);
   try {
-    await sendMessage(chatId, `✅ Solicitud aprobada: ${base.mediaTitle} (${libraryName}). Te quedan ${holes}.`);
+    await sendMessage(chatId, `✅ Solicitud aprobada: ${base.mediaTitle} (${libraryName}). Tienes ${phrase} para ver.`);
   } catch (err) {
     console.error('[scheduler] telegram notify failed:', err.message);
   }
@@ -479,14 +490,16 @@ export async function runPollCycle() {
     if (decision === 'no_quota' && isNew) await notifyNoQuota(base);
     if (decision === 'no_monthly_quota' && isNew) await notifyNoMonthlyQuota(base, monthly);
     if (decision === 'no_monthly_total_quota' && isNew) await notifyNoMonthlyTotalQuota(base, monthlyTotal);
-    if (decision === 'approved' && isNew) {
-      await notifyApproved(base, Math.max(0, balance - requiredUnits));
-    }
 
     // Recalcula la caché de verdad (con la aprobación recién logueada incluida)
     // en vez de ajustar el contador a mano — así pending_items queda al día y
-    // el panel enseña la película nueva sin esperar al siguiente sondeo.
-    await refreshQuotaCache(tautulliUser.id, library.id);
+    // el panel enseña la película nueva sin esperar al siguiente sondeo. El
+    // aviso de aprobado necesita este resultado para contar lo YA disponible.
+    const refreshed = await refreshQuotaCache(tautulliUser.id, library.id);
+    if (decision === 'approved' && isNew) {
+      const availableCount = refreshed.pendingItems.filter((item) => !item.unavailable).length;
+      await notifyApproved(base, availableCount, library.section_type === 'show');
+    }
   }
 
   // Issue #5: detectar visionados sin esperar a un "recalcular todo" manual —
