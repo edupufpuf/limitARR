@@ -287,19 +287,6 @@ router.get('/me/notifications', (req, res) => {
   res.json(link ?? null);
 });
 
-// Pedido de Edu (2 ago 2026): cada usuario decide si se le corta la sesión de
-// Plex duplicada (activado por defecto, ver sessionGuard.js). Los admins no
-// ven esto — nunca se les corta, tengan el toggle en lo que tengan.
-router.get('/me/session-guard', (req, res) => {
-  if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });
-  res.json({ enabled: isSessionGuardEnabled(req.session.user.id) });
-});
-
-router.put('/me/session-guard', (req, res) => {
-  if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });
-  setSessionGuardEnabled(req.session.user.id, Boolean(req.body?.enabled));
-  res.json({ enabled: isSessionGuardEnabled(req.session.user.id) });
-});
 
 // Vinculación con un click: token de un solo uso que el bot resuelve al
 // recibir /start desde el deep link, sin que el usuario copie ningún ID.
@@ -582,6 +569,18 @@ router.put('/libraries/:id', ah(async (req, res) => {
 router.get('/users', ah(async (req, res) => {
   res.json(await getUsers());
 }));
+
+// Pedido de Edu (2 ago 2026): solo el admin decide si a un usuario se le
+// corta la sesión de Plex duplicada (activado por defecto, ver
+// sessionGuard.js) — no es un ajuste que el propio usuario controle.
+router.get('/users/:userId/session-guard', (req, res) => {
+  res.json({ enabled: isSessionGuardEnabled(Number(req.params.userId)) });
+});
+
+router.put('/users/:userId/session-guard', (req, res) => {
+  setSessionGuardEnabled(Number(req.params.userId), Boolean(req.body?.enabled));
+  res.json({ enabled: isSessionGuardEnabled(Number(req.params.userId)) });
+});
 
 // --- Overrides ---
 

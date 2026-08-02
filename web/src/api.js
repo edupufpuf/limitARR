@@ -27,6 +27,9 @@ export const api = {
   updateLibrary: (id, body) => request(`/libraries/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
 
   users: () => request('/users'),
+  sessionGuard: (userId) => request(`/users/${userId}/session-guard`),
+  updateSessionGuard: (userId, enabled) =>
+    request(`/users/${userId}/session-guard`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
   myQuota: () => request('/me/quota'),
   myPendingDetail: (libraryId, params) => {
     const query = new URLSearchParams(
@@ -40,9 +43,6 @@ export const api = {
   updateMyNotifications: (body) => request('/me/notifications', { method: 'PUT', body: JSON.stringify(body) }),
   deleteMyNotifications: () => request('/me/notifications', { method: 'DELETE' }),
   myNotificationLinkToken: () => request('/me/notifications/link-token', { method: 'POST' }),
-  mySessionGuard: () => request('/me/session-guard'),
-  updateMySessionGuard: (enabled) =>
-    request('/me/session-guard', { method: 'PUT', body: JSON.stringify({ enabled }) }),
 
   overrides: () => request('/overrides'),
   setOverride: (userId, libraryId, body) =>

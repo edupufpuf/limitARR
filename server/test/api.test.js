@@ -158,12 +158,13 @@ test('auth Plex: usuario normal solo ve su cupo y gestiona su propio chat', asyn
     assert.equal(db.prepare('SELECT chat_id FROM telegram_links WHERE user_id = 1880').get().chat_id, '123456');
     await plexAgent.delete('/api/me/notifications').expect(204);
 
-    // Pedido de Edu (2 ago 2026): activado por defecto sin tocar nada.
-    const guardDefault = (await plexAgent.get('/api/me/session-guard').expect(200)).body;
-    assert.equal(guardDefault.enabled, true);
-    const guardOff = (await plexAgent.put('/api/me/session-guard').send({ enabled: false }).expect(200)).body;
+    // Pedido de Edu (2 ago 2026): solo el admin lo toca, no el propio usuario.
+    await plexAgent.get('/api/users/1880/session-guard').expect(403);
+    const guardDefault = (await agent.get('/api/users/1880/session-guard').expect(200)).body;
+    assert.equal(guardDefault.enabled, true); // activado por defecto sin tocar nada
+    const guardOff = (await agent.put('/api/users/1880/session-guard').send({ enabled: false }).expect(200)).body;
     assert.equal(guardOff.enabled, false);
-    const guardCheck = (await plexAgent.get('/api/me/session-guard').expect(200)).body;
+    const guardCheck = (await agent.get('/api/users/1880/session-guard').expect(200)).body;
     assert.equal(guardCheck.enabled, false);
   } finally {
     global.fetch = originalFetch;

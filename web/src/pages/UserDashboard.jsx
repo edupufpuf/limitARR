@@ -79,8 +79,6 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
   // Historial de cupo mensual abierto (issue #20, también en el panel de
   // usuario): { lib } o { lib: null } para el total. null = cerrado.
   const [historyTarget, setHistoryTarget] = useState(null);
-  // Cortar sesión duplicada (pedido de Edu, 2 ago 2026): null = cargando.
-  const [sessionGuard, setSessionGuard] = useState(null);
   const connectingRef = useRef(false);
   const loadUserDetail = useCallback(
     (params) => api.myPendingDetail(detailTarget?.lib.libraryId, params),
@@ -105,18 +103,8 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
       .catch(() => setError('No se pudo cargar tu cupo. Inténtalo de nuevo más tarde.'));
     // Las salvadas son un extra: si el módulo Maintainerr no está, no rompe el panel.
     api.mySalvados().then(setSalvados).catch(() => {});
-    api.mySessionGuard().then((r) => setSessionGuard(r.enabled)).catch(() => {});
     return () => { connectingRef.current = false; };
   }, []);
-
-  async function toggleSessionGuard(enabled) {
-    setSessionGuard(enabled); // optimista, es solo un interruptor
-    try {
-      await api.updateMySessionGuard(enabled);
-    } catch {
-      setSessionGuard(!enabled); // revertir si falla
-    }
-  }
 
   // Un click: abre Telegram con /start precargado (deep link con token de un
   // solo uso) y sondea hasta que el bot lo resuelve y guarda el chat — el
@@ -360,28 +348,6 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
           )}
           {message && <p aria-live="polite" className={`text-sm mt-3 ${message.startsWith('No ') ? 'text-accent-400' : 'text-green-400'}`}>{message}</p>}
         </section>
-
-        {sessionGuard != null && (
-          <section className="card p-5 mt-8 max-w-xl">
-            <h2 className="font-extrabold text-xl mb-1">Sesión única</h2>
-            <p className="text-sm text-gray-500 mb-4">
-              Si ves algo con esta cuenta a la vez en dos sitios, se corta la más nueva avisando en el propio
-              reproductor. Desactívalo si compartes esta cuenta a propósito entre dos pantallas.
-            </p>
-            <label className="flex items-center justify-between gap-4 rounded-xl border border-bg-600 bg-bg-950/30 p-4 cursor-pointer">
-              <span>
-                <span className="block font-bold">Cortar sesión duplicada</span>
-                <span className="block text-xs text-gray-500 mt-1">Activado por defecto para todos.</span>
-              </span>
-              <input
-                type="checkbox"
-                checked={sessionGuard}
-                onChange={(e) => toggleSessionGuard(e.target.checked)}
-                className="w-5 h-5 accent-red-500"
-              />
-            </label>
-          </section>
-        )}
       </main>
       {detailTarget && (
         <PendingDetailModal

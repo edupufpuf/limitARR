@@ -448,6 +448,9 @@ function UserFichaModal({ user, group, role, allGroups, allRoles, overrides, mon
   const [links, setLinks] = useState([]);
   const [salvadosAll, setSalvadosAll] = useState([]);
   const [acting, setActing] = useState({});
+  // Pedido de Edu (2 ago 2026): solo el admin decide esto, no el propio
+  // usuario. null = cargando.
+  const [sessionGuard, setSessionGuard] = useState(null);
 
   const [limits, setLimits] = useState({});
   const [expiries, setExpiries] = useState({});
@@ -459,9 +462,19 @@ function UserFichaModal({ user, group, role, allGroups, allRoles, overrides, mon
     api.pendingApprovals().then(setPendingAll).catch(() => setPendingAll([]));
     api.notificationLinks().then(setLinks).catch(() => setLinks([]));
     api.salvados().then(setSalvadosAll).catch(() => setSalvadosAll([]));
+    api.sessionGuard(user.id).then((r) => setSessionGuard(r.enabled)).catch(() => {});
   }
 
   useEffect(loadExtra, [user.id]);
+
+  async function toggleSessionGuard(enabled) {
+    setSessionGuard(enabled);
+    try {
+      await api.updateSessionGuard(user.id, enabled);
+    } catch {
+      setSessionGuard(!enabled);
+    }
+  }
 
   useEffect(() => {
     setLimits(Object.fromEntries(libraries.map((l) => [l.id, overrides.find((o) => o.library_id === l.id)?.limit_override ?? ''])));
@@ -681,6 +694,21 @@ function UserFichaModal({ user, group, role, allGroups, allRoles, overrides, mon
                 <span className="text-green-400">vinculado{myLink.label ? ` — ${myLink.label}` : ''}</span>
               ) : (
                 <span className="text-gray-500">sin vincular</span>
+              )}
+            </FichaRow>
+            <FichaRow label="Sesión única">
+              {sessionGuard == null ? (
+                <span className="text-gray-500">cargando…</span>
+              ) : (
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={sessionGuard}
+                    onChange={(e) => toggleSessionGuard(e.target.checked)}
+                    className="w-4 h-4 accent-red-500"
+                  />
+                  <span className="text-xs text-gray-400">Cortar su sesión de Plex si tiene dos a la vez</span>
+                </label>
               )}
             </FichaRow>
           </div>
