@@ -220,6 +220,29 @@ function PendingPoster({ item, onDetail, onDismiss }) {
   );
 }
 
+// Pedidas y ya vistas en los últimos 30 días — grid en gris, sin acciones
+// (no está en cupo, es solo historial, a diferencia de PendingPoster).
+function RecentlyWatchedPoster({ item }) {
+  const watchedAtMs = item.watchedAt ? Date.parse(item.watchedAt.replace(' ', 'T') + 'Z') : null;
+  return (
+    <div
+      className="relative w-16 h-24 rounded-lg overflow-hidden shadow-card flex-shrink-0"
+      title={`${item.title ?? '—'}${watchedAtMs ? ` — vista ${daysAgo(watchedAtMs)}` : ''}`}
+    >
+      {item.posterUrl ? (
+        <img src={item.posterUrl} alt="" loading="lazy" className="w-full h-full object-cover grayscale opacity-60" />
+      ) : (
+        <div className="w-full h-full bg-gradient-to-br from-bg-600 to-bg-700 flex items-center justify-center text-xl grayscale opacity-60">🎬</div>
+      )}
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent pt-6 pb-1 px-1.5 pointer-events-none">
+        <span className="block text-[9px] leading-tight text-gray-300 font-medium line-clamp-2">
+          {item.title ?? '—'}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function fmtDate(ms) {
   return new Date(ms).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
 }
@@ -921,6 +944,16 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
             <div>
               <div className="text-sm font-medium mb-1.5">💾 Salvadas del borrado</div>
               <SalvadosGrid items={salvados} compact />
+            </div>
+          )}
+          {user.recentlyWatched?.length > 0 && (
+            <div>
+              <div className="text-xs uppercase tracking-wider text-gray-500 mb-1.5">Vistas en los últimos 30 días</div>
+              <div className="flex flex-wrap gap-2">
+                {user.recentlyWatched.map((item, i) => (
+                  <RecentlyWatchedPoster key={`${item.tmdbId ?? 'x'}-${item.seasonNumber ?? 0}-${i}`} item={item} />
+                ))}
+              </div>
             </div>
           )}
         </div>

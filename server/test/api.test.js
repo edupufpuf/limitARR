@@ -524,6 +524,57 @@ test('cupo mensual: cuenta cargos aprobados en el mes, independientemente de si 
   }
 });
 
+test('GET /quota: recentlyWatched trae lo visto en los últimos 30 días, no lo más viejo', async () => {
+  const upsertSetting = db.prepare(`
+    INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+  `);
+  upsertSetting.run('tautulli_url', 'http://tautulli.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
+  upsertSetting.run('seerr_url', 'http://seerr.test');
+  upsertSetting.run('seerr_api_key', 'test-key');
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (1782, 'Películas', 'movie', 'standard', 1, 4)
+  `).run();
+  db.prepare('INSERT INTO quota_cache (user_id, library_id, limit_applied, outstanding, balance) VALUES (1892, 1782, 4, 0, 4)').run();
+  db.prepare(`
+    INSERT INTO decisions_log (request_id, user_id, library_id, media_title, poster_url, decision, created_at)
+    VALUES (-9101, 1892, 1782, 'Vista hace poco', 'https://image.tmdb.org/x.jpg', 'watched', datetime('now', '-5 days'))
+  `).run();
+  db.prepare(`
+    INSERT INTO decisions_log (request_id, user_id, library_id, media_title, decision, created_at)
+    VALUES (-9102, 1892, 1782, 'Vista hace 40 días', 'watched', datetime('now', '-40 days'))
+  `).run();
+
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith('http://tautulli.test')) {
+      const cmd = new URL(url).searchParams.get('cmd');
+      const data = cmd === 'get_users' ? [{ user_id: 1892, username: 'jesus' }] : { data: [] };
+      return new Response(JSON.stringify({ response: { result: 'success', data } }), { status: 200 });
+    }
+    if (url.startsWith('http://seerr.test')) {
+      return new Response(JSON.stringify({ results: [] }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const quota = (await agent.get('/api/quota').expect(200)).body;
+    const user = quota.find((u) => u.userId === 1892);
+    assert.deepEqual(user.recentlyWatched.map((r) => r.title), ['Vista hace poco']);
+    assert.equal(user.recentlyWatched[0].posterUrl, 'https://image.tmdb.org/x.jpg');
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM decisions_log WHERE library_id = 1782').run();
+    db.prepare('DELETE FROM quota_cache WHERE library_id = 1782').run();
+    db.prepare('DELETE FROM libraries WHERE id = 1782').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
+  }
+});
+
 test('cupo mensual total: el historial trae las filas aprobadas de todas las bibliotecas', async () => {
   db.prepare(`
     INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)

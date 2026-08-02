@@ -871,6 +871,33 @@ async function buildQuotaByUser() {
     GROUP BY user_id
   `).all();
   const requestedMap = new Map(requestedRows.map((r) => [r.user_id, r.requested]));
+  // Pedidas y ya vistas en los últimos 30 días (grid gris en la pestaña Cupo):
+  // mismo criterio de "visto" que ya usa el scheduler para loguear 'watched'
+  // (issue del caso Seve/Silo) — no 'expired', eso no es "la vio".
+  const watchedRows = db.prepare(`
+    SELECT user_id, media_title, media_type, tmdb_id, season_number, poster_url, created_at
+    FROM decisions_log
+    WHERE decision = 'watched' AND created_at >= datetime('now', '-30 days') AND user_id IS NOT NULL
+    ORDER BY created_at DESC
+  `).all();
+  const watchedByUser = new Map();
+  for (const r of watchedRows) {
+    if (!watchedByUser.has(r.user_id)) watchedByUser.set(r.user_id, []);
+    watchedByUser.get(r.user_id).push(r);
+  }
+  function recentlyWatchedFor(memberIds) {
+    return memberIds
+      .flatMap((uid) => watchedByUser.get(uid) ?? [])
+      .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+      .map((r) => ({
+        title: r.media_title,
+        mediaType: r.media_type,
+        seasonNumber: r.season_number,
+        tmdbId: r.tmdb_id,
+        posterUrl: r.poster_url,
+        watchedAt: r.created_at,
+      }));
+  }
   const groupMap = new Map(db.prepare('SELECT id, name FROM groups').all().map((g) => [g.id, g]));
   const membersByGroup = new Map();
   for (const m of db.prepare('SELECT user_id, group_id FROM group_members').all()) {
@@ -901,6 +928,7 @@ async function buildQuotaByUser() {
           blocked7d: memberIds.reduce((sum, uid) => sum + (recentMap.get(uid)?.blocked7d ?? 0), 0),
           requestedTotal: memberIds.reduce((sum, uid) => sum + (requestedMap.get(uid) ?? 0), 0),
           monthlyTotal: getMonthlyTotalQuota(row.user_id),
+          recentlyWatched: recentlyWatchedFor(memberIds),
           libraries: [],
         });
       } else {
@@ -913,6 +941,7 @@ async function buildQuotaByUser() {
           blocked7d: recentMap.get(row.user_id)?.blocked7d ?? 0,
           requestedTotal: requestedMap.get(row.user_id) ?? 0,
           monthlyTotal: getMonthlyTotalQuota(row.user_id),
+          recentlyWatched: recentlyWatchedFor([row.user_id]),
           libraries: [],
         });
       }
