@@ -83,6 +83,8 @@ export const api = {
     );
     return request(`/quota/pending-detail/${userId}/${libraryId}?${query}`);
   },
+  monthlyHistory: (userId, libraryId) => request(`/quota/monthly-history/${userId}/${libraryId}`),
+  monthlyHistoryTotal: (userId) => request(`/quota/monthly-history-total/${userId}`),
   importSeerrHistory: () => request('/quota/import-seerr-history', { method: 'POST' }),
   backfillWatchedHistory: () => request('/quota/backfill-watched-history', { method: 'POST' }),
   pendingApprovals: () => request('/requests/pending-approval'),

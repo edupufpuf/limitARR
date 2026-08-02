@@ -23,7 +23,7 @@ import {
   getPendingItemDetail, quotaIdentity, getBalance, getRequestHold, setRequestHold, clearRequestHold,
   pruneStaleQuotaCache, setOverride, deleteOverride, setGroupOverride, deleteGroupOverride, setRoleOverride,
   deleteRoleOverride, getMonthlyTotalSettings, setMonthlyTotalSettings, getMonthlyTotalQuota,
-  getMonthlyQuotaMode, setMonthlyQuotaMode,
+  getMonthlyQuotaMode, setMonthlyQuotaMode, getMonthlyHistoryRows, getMonthlyHistoryRowsTotal,
   setMonthlyTotalOverride, deleteMonthlyTotalOverride, setGroupMonthlyTotalOverride, deleteGroupMonthlyTotalOverride,
   setRoleMonthlyTotalOverride, deleteRoleMonthlyTotalOverride,
 } from '../quota.js';
@@ -1100,6 +1100,17 @@ router.get('/quota/pending-detail/:userId/:libraryId', ah(async (req, res) => {
     ? `${seerrBase}/${mediaType === 'tv' ? 'tv' : 'movie'}/${tmdbId}`
     : null;
   res.json({ ...detail, seerrUrl });
+}));
+
+// Issue #20: historial del cupo mensual (por biblioteca o total, según el modo
+// activo) — las mismas filas que ya cuenta getMonthlyApprovedCount(Total), con
+// título/fecha para pintarlas en la pestaña Cupo.
+router.get('/quota/monthly-history/:userId/:libraryId', ah(async (req, res) => {
+  res.json(getMonthlyHistoryRows(Number(req.params.userId), Number(req.params.libraryId)));
+}));
+
+router.get('/quota/monthly-history-total/:userId', ah(async (req, res) => {
+  res.json(getMonthlyHistoryRowsTotal(Number(req.params.userId)));
 }));
 
 // --- Issue #11: solicitudes fuera de cupo, pendientes de aprobación en Seerr ---

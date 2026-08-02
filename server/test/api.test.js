@@ -507,12 +507,41 @@ test('cupo mensual: cuenta cargos aprobados en el mes, independientemente de si 
     const quota = (await agent.get('/api/quota').expect(200)).body;
     const lib = quota.find((u) => u.userId === 1890)?.libraries.find((l) => l.libraryId === 1779);
     assert.deepEqual(lib.monthly, { enabled: true, limit: 1, used: 2 });
+
+    // Issue #20: el historial detrás del contador trae las mismas 2 filas.
+    const history = (await agent.get('/api/quota/monthly-history/1890/1779').expect(200)).body;
+    assert.equal(history.length, 2);
+    assert.deepEqual(
+      history.map((r) => r.media_title).sort(),
+      ['Vista fuera de Seerr 1', 'Vista fuera de Seerr 2']
+    );
   } finally {
     global.fetch = originalFetch;
     db.prepare('DELETE FROM decisions_log WHERE library_id = 1779').run();
     db.prepare('DELETE FROM quota_cache WHERE library_id = 1779').run();
     db.prepare('DELETE FROM libraries WHERE id = 1779').run();
     db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
+  }
+});
+
+test('cupo mensual total: el historial trae las filas aprobadas de todas las bibliotecas', async () => {
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (1781, 'Películas', 'movie', 'standard', 1, 4)
+  `).run();
+  db.prepare(`
+    INSERT INTO decisions_log (request_id, user_id, username, library_id, media_title, decision, created_at)
+    VALUES (-9001, 1891, 'bea', 1781, 'Película del mes', 'approved', datetime('now'))
+  `).run();
+
+  try {
+    const history = (await agent.get('/api/quota/monthly-history-total/1891').expect(200)).body;
+    assert.equal(history.length, 1);
+    assert.equal(history[0].media_title, 'Película del mes');
+    assert.equal(history[0].library_id, 1781);
+  } finally {
+    db.prepare('DELETE FROM decisions_log WHERE library_id = 1781').run();
+    db.prepare('DELETE FROM libraries WHERE id = 1781').run();
   }
 });
 

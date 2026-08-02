@@ -139,6 +139,24 @@ const getMonthlyApprovedCountTotal = db.prepare(`
   WHERE user_id = ? AND decision = 'approved' AND voided_at IS NULL
     AND created_at >= datetime('now', 'start of month')
 `);
+// Issue #20: mismas filas que cuenta getMonthlyApprovedCountTotal, pero con el
+// detalle (título/fecha) para pintar el historial en la pestaña Cupo.
+const getMonthlyApprovedRowsTotal = db.prepare(`
+  SELECT id, media_title, media_type, tmdb_id, season_number, poster_url, username, library_id, created_at
+  FROM decisions_log
+  WHERE user_id = ? AND decision = 'approved' AND voided_at IS NULL
+    AND created_at >= datetime('now', 'start of month')
+  ORDER BY created_at DESC
+`);
+
+// Issue #20: filas detrás del contador getMonthlyTotalQuota, para el mismo
+// usuario/grupo agregado que ya suma memberIds en getMonthlyTotalQuota.
+export function getMonthlyHistoryRowsTotal(userId) {
+  const identity = quotaIdentity(userId);
+  return identity.memberIds
+    .flatMap((memberId) => getMonthlyApprovedRowsTotal.all(memberId))
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+}
 const getMonthlyTotalOverrideRaw = db.prepare('SELECT * FROM monthly_total_overrides WHERE user_id = ?');
 const getGroupMonthlyTotalOverrideForUser = db.prepare(`
   SELECT gmto.limit_override FROM group_members gm
@@ -212,6 +230,21 @@ const getMonthlyApprovedCount = db.prepare(`
   WHERE user_id = ? AND library_id = ? AND decision = 'approved' AND voided_at IS NULL
     AND created_at >= datetime('now', 'start of month')
 `);
+// Issue #20: mismas filas que cuenta getMonthlyApprovedCount, con detalle.
+const getMonthlyApprovedRows = db.prepare(`
+  SELECT id, media_title, media_type, tmdb_id, season_number, poster_url, username, created_at
+  FROM decisions_log
+  WHERE user_id = ? AND library_id = ? AND decision = 'approved' AND voided_at IS NULL
+    AND created_at >= datetime('now', 'start of month')
+  ORDER BY created_at DESC
+`);
+
+export function getMonthlyHistoryRows(userId, libraryId) {
+  const identity = quotaIdentity(userId);
+  return identity.memberIds
+    .flatMap((memberId) => getMonthlyApprovedRows.all(memberId, libraryId))
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+}
 const requestUnitAlreadyLogged = db.prepare(`
   SELECT 1 FROM decisions_log
   WHERE request_id = ?

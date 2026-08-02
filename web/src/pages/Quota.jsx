@@ -744,7 +744,65 @@ function DebtorBubbles({ debtors, onDetail }) {
   );
 }
 
-function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss, onManualCharge, onDetail, resetting, charging }) {
+// Issue #20: historial de aprobadas del mes en curso (mismas filas que cuenta
+// el contador "mensual X/Y"), por biblioteca (lib) o total (lib=null).
+function MonthlyHistoryModal({ user, lib, libraryNameById, onClose }) {
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    setRows(null);
+    setError(false);
+    const request = lib
+      ? api.monthlyHistory(user.userId, lib.libraryId)
+      : api.monthlyHistoryTotal(user.userId);
+    request.then(setRows).catch(() => setError(true));
+  }, [user.userId, lib?.libraryId]);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
+      <div
+        className="card w-full max-w-md max-h-[80vh] overflow-y-auto p-4 sm:p-5"
+        style={{ maxHeight: '80dvh' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-2 mb-3">
+          <div>
+            <h3 className="font-semibold text-lg leading-tight">Cupo mensual — {user.username}</h3>
+            <div className="text-xs text-gray-500 mt-0.5">{lib ? lib.libraryName : 'todas las bibliotecas'} · mes en curso</div>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-200 text-xl leading-none flex-shrink-0">✕</button>
+        </div>
+        {error && <p className="text-sm text-accent-400">No se pudo cargar el historial.</p>}
+        {!error && rows == null && <p className="text-sm text-gray-500">Cargando…</p>}
+        {rows?.length === 0 && <p className="text-sm text-gray-500">Nada aprobado este mes todavía.</p>}
+        <div className="space-y-2">
+          {rows?.map((r) => (
+            <div key={r.id} className="flex items-center gap-3 text-sm">
+              <span className="w-8 h-12 rounded overflow-hidden bg-bg-600 flex-shrink-0">
+                {r.poster_url && <img src={r.poster_url} alt="" loading="lazy" className="w-full h-full object-cover" />}
+              </span>
+              <span className="flex-1 min-w-0">
+                <span className="block truncate font-medium">
+                  {r.media_title ?? '—'}
+                  {r.season_number != null ? ` · T${r.season_number}` : ''}
+                </span>
+                <span className="block text-xs text-gray-500 truncate">
+                  {!lib ? (libraryNameById.get(r.library_id) ?? `biblioteca #${r.library_id}`) : r.username}
+                </span>
+              </span>
+              <span className="text-xs text-gray-500 tabular-nums flex-shrink-0">
+                {new Date(r.created_at.replace(' ', 'T') + 'Z').toLocaleDateString()}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss, onManualCharge, onDetail, onMonthlyHistory, resetting, charging }) {
   const worst = worstLib(user.libraries);
   const pending = totalOutstanding(user.libraries);
   return (
@@ -794,6 +852,19 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
 
       {expanded && (
         <div className="border-t border-bg-700 p-4 space-y-4 bg-bg-900/30">
+          {user.monthlyTotal?.enabled && (
+            <button
+              type="button"
+              onClick={() => onMonthlyHistory(user, null)}
+              title="Cupo mensual total: cosas aprobadas este mes en cualquier biblioteca — click para ver historial"
+              className={`w-full flex items-center justify-between text-xs rounded-lg px-2.5 py-1.5 hover:brightness-110 ${
+                user.monthlyTotal.used >= user.monthlyTotal.limit ? 'text-accent-400 bg-accent-500/10' : 'text-gray-400 bg-bg-700/40'
+              }`}
+            >
+              <span>📅 cupo mensual total</span>
+              <span className="font-bold tabular-nums">{user.monthlyTotal.used}/{user.monthlyTotal.limit}</span>
+            </button>
+          )}
           {user.libraries.map((lib) => {
             const key = `${user.userId}-${lib.libraryId}`;
             return (
@@ -822,12 +893,14 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
                 </div>
                 <QuotaBar balance={lib.balance} limit={lib.limitApplied} />
                 {lib.monthly?.enabled && (
-                  <div
-                    className={`text-[11px] mt-1 tabular-nums ${lib.monthly.used >= lib.monthly.limit ? 'text-accent-400' : 'text-gray-500'}`}
-                    title="Cupo mensual: cosas aprobadas este mes, aunque se vean"
+                  <button
+                    type="button"
+                    onClick={() => onMonthlyHistory(user, lib)}
+                    className={`block text-[11px] mt-1 tabular-nums hover:underline ${lib.monthly.used >= lib.monthly.limit ? 'text-accent-400' : 'text-gray-500'}`}
+                    title="Cupo mensual: cosas aprobadas este mes, aunque se vean — click para ver historial"
                   >
                     mensual {lib.monthly.used}/{lib.monthly.limit}
-                  </div>
+                  </button>
                 )}
                 {lib.pendingItems?.length > 0 && (
                   <div className="flex flex-wrap gap-2 mt-3">
@@ -987,6 +1060,9 @@ export default function Quota() {
   const [activeFilter, setActiveFilter] = useState('all');
   // Pendiente abierto en la ventana de detalle: { user, lib, item } o null.
   const [detailTarget, setDetailTarget] = useState(null);
+  // Historial de cupo mensual abierto (issue #20): { user, lib } o null; lib
+  // null = cupo mensual total (todas las bibliotecas).
+  const [monthlyHistoryTarget, setMonthlyHistoryTarget] = useState(null);
   // Cargo manual abierto: { userId, libraryId, username } o null.
   const [chargeModal, setChargeModal] = useState(null);
   // Base para enlazar pósters con Tautulli: la URL pública si está configurada
@@ -1078,6 +1154,12 @@ export default function Quota() {
   // menos deuda (a igualdad, peor proporción sin ver / pedido primero).
   // ratio ∈ (0,1] dimensiona el anillo (requested puede quedarse corto si el
   // historial no está importado — se acota con el propio owed para no pasar de 1).
+  // Nombre de biblioteca por id, para el historial de cupo mensual total
+  // (issue #20) — ahí no hay un `lib` concreto de dónde sacarlo.
+  const libraryNameById = useMemo(() => {
+    return new Map(mergedUsers.flatMap((u) => u.libraries.map((l) => [l.libraryId, l.libraryName])));
+  }, [mergedUsers]);
+
   const debtors = useMemo(() => {
     return mergedUsers
       .map((u) => {
@@ -1264,11 +1346,21 @@ export default function Quota() {
             onDismiss={dismiss}
             onManualCharge={manualCharge}
             onDetail={(user, lib, item) => setDetailTarget({ user, lib, item })}
+            onMonthlyHistory={(user, lib) => setMonthlyHistoryTarget({ user, lib })}
             resetting={resetting}
             charging={charging}
           />
         ))}
       </div>
+
+      {monthlyHistoryTarget && (
+        <MonthlyHistoryModal
+          user={monthlyHistoryTarget.user}
+          lib={monthlyHistoryTarget.lib}
+          libraryNameById={libraryNameById}
+          onClose={() => setMonthlyHistoryTarget(null)}
+        />
+      )}
 
       {detailTarget && (
         <PendingDetailModal
