@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { db } from '../src/db.js';
-import { notifyStillUnavailable } from '../src/scheduler.js';
+import { notifyStillUnavailable, enforceSingleSession } from '../src/scheduler.js';
+import { setSessionGuardEnabled } from '../src/sessionGuard.js';
 
 // Pedido de Edu (2 ago 2026): si a las 12h de aprobarse sigue sin estar en
 // Plex, avisar una vez de que aún no está disponible. Idempotente: no debe
@@ -111,5 +112,109 @@ test('notifyStillUnavailable: no avisa si ya está disponible en Plex', async ()
     db.prepare('DELETE FROM telegram_links WHERE user_id = 9801').run();
     db.prepare('DELETE FROM libraries WHERE id = 9701').run();
     db.prepare("DELETE FROM settings WHERE key IN ('seerr_url', 'seerr_api_key', 'telegram_bot_token')").run();
+  }
+});
+
+// Pedido de Edu (2 ago 2026): mismo usuario con 2 sesiones de Plex a la vez —
+// se corta la más nueva, se deja la que ya estaba viendo desde antes.
+
+function mockActivity({ tautulliUsers, sessions }) {
+  return async (input) => {
+    const url = String(input);
+    if (url.includes('cmd=get_users')) {
+      return new Response(JSON.stringify({ response: { result: 'success', data: tautulliUsers } }), { status: 200 });
+    }
+    if (url.includes('cmd=get_activity')) {
+      return new Response(JSON.stringify({ response: { result: 'success', data: { sessions } } }), { status: 200 });
+    }
+    if (url.includes('cmd=terminate_session')) {
+      return new Response(JSON.stringify({ response: { result: 'success', data: {} } }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+}
+
+test('enforceSingleSession: corta la sesión más nueva, deja la más vieja', async () => {
+  upsertSetting('tautulli_url', 'http://tautulli.test');
+  upsertSetting('tautulli_api_key', 'test-key');
+
+  const calls = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes('cmd=terminate_session')) calls.push(new URL(url).searchParams.get('session_key'));
+    return mockActivity({
+      tautulliUsers: [{ user_id: 900, username: 'jesus', is_admin: '0' }],
+      sessions: [
+        { session_key: 'old', user_id: 900, username: 'jesus', full_title: 'A', started: '1000' },
+        { session_key: 'new', user_id: 900, username: 'jesus', full_title: 'B', started: '2000' },
+      ],
+    })(input);
+  };
+
+  try {
+    await enforceSingleSession();
+    assert.deepEqual(calls, ['new']);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key')").run();
+  }
+});
+
+test('enforceSingleSession: a un admin nunca se le corta nada', async () => {
+  upsertSetting('tautulli_url', 'http://tautulli.test');
+  upsertSetting('tautulli_api_key', 'test-key');
+
+  const calls = [];
+  const originalFetch = global.fetch;
+  const mock = mockActivity({
+    tautulliUsers: [{ user_id: 901, username: 'edu', is_admin: '1' }],
+    sessions: [
+      { session_key: 'old', user_id: 901, username: 'edu', full_title: 'A', started: '1000' },
+      { session_key: 'new', user_id: 901, username: 'edu', full_title: 'B', started: '2000' },
+    ],
+  });
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes('cmd=terminate_session')) calls.push(new URL(url).searchParams.get('session_key'));
+    return mock(input);
+  };
+
+  try {
+    await enforceSingleSession();
+    assert.deepEqual(calls, []);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key')").run();
+  }
+});
+
+test('enforceSingleSession: no corta si el usuario lo desactivó en su panel', async () => {
+  upsertSetting('tautulli_url', 'http://tautulli.test');
+  upsertSetting('tautulli_api_key', 'test-key');
+  setSessionGuardEnabled(902, false);
+
+  const calls = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes('cmd=terminate_session')) calls.push(new URL(url).searchParams.get('session_key'));
+    const mock = mockActivity({
+      tautulliUsers: [{ user_id: 902, username: 'seve', is_admin: '0' }],
+      sessions: [
+        { session_key: 'old', user_id: 902, username: 'seve', full_title: 'A', started: '1000' },
+        { session_key: 'new', user_id: 902, username: 'seve', full_title: 'B', started: '2000' },
+      ],
+    });
+    return mock(input);
+  };
+
+  try {
+    await enforceSingleSession();
+    assert.deepEqual(calls, []);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM session_guard_settings WHERE user_id = 902').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key')").run();
   }
 });

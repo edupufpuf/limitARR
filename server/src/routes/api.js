@@ -29,6 +29,7 @@ import {
 } from '../quota.js';
 import { matchByEmailOrUsername } from '../userMatch.js';
 import { runPollCycle } from '../scheduler.js';
+import { isSessionGuardEnabled, setSessionGuardEnabled } from '../sessionGuard.js';
 import { getVersionInfo } from '../services/version.js';
 import { createPlexPin, claimPlexPin, getPlexAccount, testPlexServer } from '../services/plex.js';
 import { testRadarrServer } from '../services/radarr.js';
@@ -284,6 +285,20 @@ router.get('/me/notifications', (req, res) => {
   if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });
   const link = db.prepare('SELECT chat_id, label, linked_at FROM telegram_links WHERE user_id = ?').get(req.session.user.id);
   res.json(link ?? null);
+});
+
+// Pedido de Edu (2 ago 2026): cada usuario decide si se le corta la sesión de
+// Plex duplicada (activado por defecto, ver sessionGuard.js). Los admins no
+// ven esto — nunca se les corta, tengan el toggle en lo que tengan.
+router.get('/me/session-guard', (req, res) => {
+  if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });
+  res.json({ enabled: isSessionGuardEnabled(req.session.user.id) });
+});
+
+router.put('/me/session-guard', (req, res) => {
+  if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });
+  setSessionGuardEnabled(req.session.user.id, Boolean(req.body?.enabled));
+  res.json({ enabled: isSessionGuardEnabled(req.session.user.id) });
 });
 
 // Vinculación con un click: token de un solo uso que el bot resuelve al

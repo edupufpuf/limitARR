@@ -40,6 +40,9 @@ export const api = {
   updateMyNotifications: (body) => request('/me/notifications', { method: 'PUT', body: JSON.stringify(body) }),
   deleteMyNotifications: () => request('/me/notifications', { method: 'DELETE' }),
   myNotificationLinkToken: () => request('/me/notifications/link-token', { method: 'POST' }),
+  mySessionGuard: () => request('/me/session-guard'),
+  updateMySessionGuard: (enabled) =>
+    request('/me/session-guard', { method: 'PUT', body: JSON.stringify({ enabled }) }),
 
   overrides: () => request('/overrides'),
   setOverride: (userId, libraryId, body) =>

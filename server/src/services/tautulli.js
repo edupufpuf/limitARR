@@ -183,6 +183,24 @@ export async function getMediaTitle(ratingKey) {
   }
 }
 
+// Sesiones de Plex activas ahora mismo (pedido de Edu, 2 ago 2026: cortar
+// duplicados). `started` es un epoch en segundos — se pasa a ms para poder
+// comparar con Date.now()/ordenar por antigüedad sin más conversiones.
+export async function getActiveSessions() {
+  const data = await call('get_activity');
+  return (data.sessions || []).map((s) => ({
+    sessionKey: s.session_key,
+    userId: Number(s.user_id),
+    username: s.username,
+    title: s.full_title || s.title,
+    startedAt: Number(s.started) ? Number(s.started) * 1000 : null,
+  }));
+}
+
+export async function terminateSession(sessionKey, message) {
+  await call('terminate_session', { session_key: sessionKey, message });
+}
+
 export async function getSeasonEpisodes(showRatingKey, seasonNumber) {
   if (!showRatingKey || !seasonNumber) return [];
   const seasons = await call('get_children_metadata', { rating_key: showRatingKey });

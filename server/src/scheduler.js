@@ -4,10 +4,11 @@ import { db } from './db.js';
 import { config } from './config.js';
 import { getRawSetting, setRawSetting } from './settings.js';
 import { listPendingRequests, approveRequest, declineRequest, getMediaDetails, getMovieAvailability } from './services/seerr.js';
-import { getUsers } from './services/tautulli.js';
+import { getUsers, getActiveSessions, terminateSession } from './services/tautulli.js';
 import { getBalance, getMonthlyTotalQuota, reconcileVoidedRequests, refreshQuotaCache, listStaleOutstandingPairs, normalize, getRequestHold, clearRequestHold, pruneStaleQuotaCache } from './quota.js';
 import { sendMessage, getNotifyTarget, pendingButton, renderNoQuotaMessage } from './services/telegram.js';
 import { matchByEmailOrUsername } from './userMatch.js';
+import { isSessionGuardEnabled } from './sessionGuard.js';
 
 const insertLog = db.prepare(`
   INSERT INTO decisions_log
@@ -369,6 +370,50 @@ export async function notifyStillUnavailable() {
   }
 }
 
+// Pedido de Edu (2 ago 2026): mismo usuario con 2+ sesiones de Plex a la vez
+// — se corta(n) la(s) más nueva(s), se deja la que ya estaba viendo desde
+// antes. Los admins (is_admin de Tautulli) nunca se cortan; el resto puede
+// desactivarlo desde su panel (isSessionGuardEnabled, activado por defecto).
+// Sin catch general: si Tautulli no está configurado o está caído, que no
+// tumbe el resto del ciclo de sondeo por esto.
+const DUPLICATE_SESSION_MESSAGE = 'Ya tienes otra sesión activa en este usuario — ciérrala primero.';
+
+export async function enforceSingleSession() {
+  let sessions;
+  try {
+    sessions = await getActiveSessions();
+  } catch (err) {
+    console.error('[scheduler] get_activity failed:', err.message);
+    return;
+  }
+  if (sessions.length === 0) return;
+
+  const users = await getUsers();
+  const adminIds = new Set(users.filter((u) => u.isAdmin).map((u) => u.id));
+
+  const byUser = new Map();
+  for (const s of sessions) {
+    if (!byUser.has(s.userId)) byUser.set(s.userId, []);
+    byUser.get(s.userId).push(s);
+  }
+
+  for (const [userId, userSessions] of byUser) {
+    if (userSessions.length < 2) continue;
+    if (adminIds.has(userId)) continue;
+    if (!isSessionGuardEnabled(userId)) continue;
+
+    // La más vieja (started más bajo) se queda; el resto se corta.
+    const sorted = [...userSessions].sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
+    for (const session of sorted.slice(1)) {
+      try {
+        await terminateSession(session.sessionKey, DUPLICATE_SESSION_MESSAGE);
+      } catch (err) {
+        console.error('[scheduler] terminate_session failed:', err.message);
+      }
+    }
+  }
+}
+
 // Mantenimiento diario, colgado del propio ciclo de sondeo (no hace falta otro
 // timer): retención del registro y backup de la DB. Se apunta el día en
 // settings para ejecutarse una sola vez aunque haya muchos ciclos.
@@ -590,6 +635,7 @@ export async function runPollCycle() {
   // Además avisa por Telegram del cupo liberado (si está activado).
   await refreshStaleAndNotify();
   await notifyStillUnavailable();
+  await enforceSingleSession();
 }
 
 function formatMediaTitle(mediaType, title, seasonNumber = null) {

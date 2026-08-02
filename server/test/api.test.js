@@ -157,11 +157,20 @@ test('auth Plex: usuario normal solo ve su cupo y gestiona su propio chat', asyn
     await plexAgent.put('/api/me/notifications').send({ chatId: '123456' }).expect(200);
     assert.equal(db.prepare('SELECT chat_id FROM telegram_links WHERE user_id = 1880').get().chat_id, '123456');
     await plexAgent.delete('/api/me/notifications').expect(204);
+
+    // Pedido de Edu (2 ago 2026): activado por defecto sin tocar nada.
+    const guardDefault = (await plexAgent.get('/api/me/session-guard').expect(200)).body;
+    assert.equal(guardDefault.enabled, true);
+    const guardOff = (await plexAgent.put('/api/me/session-guard').send({ enabled: false }).expect(200)).body;
+    assert.equal(guardOff.enabled, false);
+    const guardCheck = (await plexAgent.get('/api/me/session-guard').expect(200)).body;
+    assert.equal(guardCheck.enabled, false);
   } finally {
     global.fetch = originalFetch;
     db.prepare('DELETE FROM telegram_links WHERE user_id = 1880').run();
     db.prepare('DELETE FROM quota_cache WHERE user_id = 1880 OR library_id = 1777').run();
     db.prepare('DELETE FROM decisions_log WHERE request_id IN (990, 992, 993)').run();
+    db.prepare('DELETE FROM session_guard_settings WHERE user_id = 1880').run();
     db.prepare('DELETE FROM libraries WHERE id = 1777').run();
     db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
   }

@@ -283,6 +283,17 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     ends_at TEXT NOT NULL
   );
+
+  -- Pedido de Edu (2 ago 2026): cortar la sesión de Plex más nueva si el mismo
+  -- usuario tiene dos (o más) a la vez, avisando. Activado por defecto (sin
+  -- fila = activado, ver sessionGuard.js) — cada usuario lo desactiva él mismo
+  -- desde su panel si de verdad comparte cuenta entre dos pantallas a propósito.
+  -- Los admins (is_admin de Tautulli) nunca se cortan, tengan esto o no.
+  CREATE TABLE IF NOT EXISTS session_guard_settings (
+    user_id INTEGER PRIMARY KEY,
+    enabled INTEGER NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
 
 // Roles por defecto pedidos por Edu: se siembran una sola vez si la tabla está
