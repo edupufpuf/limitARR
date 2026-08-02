@@ -103,7 +103,11 @@ function DashboardInner({ onLoggedOut }) {
         {version && (
           <div className="mt-5 rounded-xl border border-bg-600/90 bg-bg-950/45 px-5 py-5 text-base text-gray-300 shadow-card">
             <div className="flex items-center gap-4">
-              <span className="inline-flex w-11 h-11 rounded-lg border border-gray-500/70 items-center justify-center">
+              <span
+                className={`inline-flex w-11 h-11 rounded-lg border items-center justify-center ${
+                  version.updateAvailable ? 'border-yellow-400/70 bg-yellow-400/10 text-yellow-300' : 'border-gray-500/70'
+                }`}
+              >
                 <IconGear className="w-6 h-6" />
               </span>
               <div>
