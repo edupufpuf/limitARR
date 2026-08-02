@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Wordmark } from '../components/Brand.jsx';
 import { IconBell, IconLogout } from '../icons.jsx';
-import { PendingDetailModal, MonthlyHistoryModal } from './Quota.jsx';
+import { PendingDetailModal, MonthlyHistoryModal, RecentlyWatchedPoster } from './Quota.jsx';
 import { SalvadosGrid } from '../components/Salvados.jsx';
 import { downloadStatusLabel, downloadStatusBg, downloadStatusChipText } from '../mediaStatus.js';
 
@@ -294,6 +294,18 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
               Películas que salvaste del borrado con el botón de Telegram. Cuando acabe la cuenta atrás, se borran.
             </p>
             <SalvadosGrid items={salvados} />
+          </section>
+        )}
+
+        {quota?.recentlyWatched?.length > 0 && (
+          <section className="card p-5 mt-8">
+            <h2 className="font-extrabold text-xl mb-1">Vistas en los últimos 30 días</h2>
+            <p className="text-sm text-gray-500 mb-4">Lo que has pedido y ya has visto recientemente.</p>
+            <div className="flex flex-wrap gap-2">
+              {quota.recentlyWatched.map((item, i) => (
+                <RecentlyWatchedPoster key={`${item.tmdbId ?? 'x'}-${item.seasonNumber ?? 0}-${i}`} item={item} />
+              ))}
+            </div>
           </section>
         )}
 

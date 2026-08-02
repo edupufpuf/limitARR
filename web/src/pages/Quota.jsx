@@ -222,7 +222,7 @@ function PendingPoster({ item, onDetail, onDismiss }) {
 
 // Pedidas y ya vistas en los últimos 30 días — grid en gris, sin acciones
 // (no está en cupo, es solo historial, a diferencia de PendingPoster).
-function RecentlyWatchedPoster({ item }) {
+export function RecentlyWatchedPoster({ item }) {
   const watchedAtMs = item.watchedAt ? Date.parse(item.watchedAt.replace(' ', 'T') + 'Z') : null;
   return (
     <div
