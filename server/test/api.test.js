@@ -61,6 +61,20 @@ test('auth Plex: usuario normal solo ve su cupo y gestiona su propio chat', asyn
       (request_id, user_id, username, library_id, media_title, media_type, tmdb_id, decision, created_at)
     VALUES (990, 1880, 'ana', 1777, 'The Batman', 'movie', 414906, 'approved', '2026-07-01 12:00:00')
   `).run();
+  // Issue #20 en el panel de usuario: fila reciente (mes en curso de verdad,
+  // no la fecha fija de arriba) para /me/quota/monthly-history.
+  db.prepare(`
+    INSERT INTO decisions_log
+      (request_id, user_id, username, library_id, media_title, media_type, tmdb_id, decision, created_at)
+    VALUES (992, 1880, 'ana', 1777, 'Dune', 'movie', 438631, 'approved', datetime('now'))
+  `).run();
+  // De otro usuario, para comprobar que /me/ no deja verlo por mucho que se
+  // adivine el userId — el cacheId sale de la sesión, no de la URL.
+  db.prepare(`
+    INSERT INTO decisions_log
+      (request_id, user_id, username, library_id, media_title, media_type, tmdb_id, decision, created_at)
+    VALUES (993, 9999, 'otro', 1777, 'No es mío', 'movie', 111, 'approved', datetime('now'))
+  `).run();
 
   const originalFetch = global.fetch;
   global.fetch = async (input, options = {}) => {
@@ -130,6 +144,11 @@ test('auth Plex: usuario normal solo ve su cupo y gestiona su propio chat', asyn
       .get('/api/me/quota/pending-detail/1777?tmdbId=999999&ratingKey=secret')
       .expect(404);
 
+    const history = (await plexAgent.get('/api/me/quota/monthly-history/1777').expect(200)).body;
+    assert.deepEqual(history.map((r) => r.media_title), ['Dune']); // no la de 9999, ni la de 2026-07-01
+    const historyTotal = (await plexAgent.get('/api/me/quota/monthly-history-total').expect(200)).body;
+    assert.deepEqual(historyTotal.map((r) => r.media_title), ['Dune']);
+
     await plexAgent.put('/api/me/notifications').send({ chatId: '123456' }).expect(200);
     assert.equal(db.prepare('SELECT chat_id FROM telegram_links WHERE user_id = 1880').get().chat_id, '123456');
     await plexAgent.delete('/api/me/notifications').expect(204);
@@ -137,7 +156,7 @@ test('auth Plex: usuario normal solo ve su cupo y gestiona su propio chat', asyn
     global.fetch = originalFetch;
     db.prepare('DELETE FROM telegram_links WHERE user_id = 1880').run();
     db.prepare('DELETE FROM quota_cache WHERE user_id = 1880 OR library_id = 1777').run();
-    db.prepare('DELETE FROM decisions_log WHERE request_id = 990').run();
+    db.prepare('DELETE FROM decisions_log WHERE request_id IN (990, 992, 993)').run();
     db.prepare('DELETE FROM libraries WHERE id = 1777').run();
     db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
   }

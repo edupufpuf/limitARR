@@ -769,18 +769,22 @@ function DebtorBubbles({ debtors, onDetail }) {
 
 // Issue #20: historial de aprobadas del mes en curso (mismas filas que cuenta
 // el contador "mensual X/Y"), por biblioteca (lib) o total (lib=null).
-function MonthlyHistoryModal({ user, lib, libraryNameById, onClose }) {
+// `loadHistory` opcional (panel de usuario no admin, ver UserDashboard.jsx):
+// pega contra /me/quota/monthly-history(-total) en vez de la ruta de admin.
+export function MonthlyHistoryModal({ user, lib, libraryNameById, onClose, loadHistory }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(false);
 
   useEffect(() => {
     setRows(null);
     setError(false);
-    const request = lib
-      ? api.monthlyHistory(user.userId, lib.libraryId)
-      : api.monthlyHistoryTotal(user.userId);
+    const request = loadHistory
+      ? loadHistory(lib)
+      : lib
+        ? api.monthlyHistory(user.userId, lib.libraryId)
+        : api.monthlyHistoryTotal(user.userId);
     request.then(setRows).catch(() => setError(true));
-  }, [user.userId, lib?.libraryId]);
+  }, [user.userId, lib?.libraryId, loadHistory]);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>

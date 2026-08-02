@@ -34,6 +34,8 @@ export const api = {
     );
     return request(`/me/quota/pending-detail/${libraryId}?${query}`);
   },
+  myMonthlyHistory: (libraryId) => request(`/me/quota/monthly-history/${libraryId}`),
+  myMonthlyHistoryTotal: () => request('/me/quota/monthly-history-total'),
   myNotifications: () => request('/me/notifications'),
   updateMyNotifications: (body) => request('/me/notifications', { method: 'PUT', body: JSON.stringify(body) }),
   deleteMyNotifications: () => request('/me/notifications', { method: 'DELETE' }),

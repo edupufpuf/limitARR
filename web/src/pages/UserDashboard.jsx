@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Wordmark } from '../components/Brand.jsx';
 import { IconBell, IconLogout } from '../icons.jsx';
-import { PendingDetailModal } from './Quota.jsx';
+import { PendingDetailModal, MonthlyHistoryModal } from './Quota.jsx';
 import { SalvadosGrid } from '../components/Salvados.jsx';
 import { downloadStatusLabel, downloadStatusBg, downloadStatusChipText } from '../mediaStatus.js';
 
@@ -76,10 +76,21 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
   const [message, setMessage] = useState(null);
   const [error, setError] = useState(null);
   const [detailTarget, setDetailTarget] = useState(null);
+  // Historial de cupo mensual abierto (issue #20, también en el panel de
+  // usuario): { lib } o { lib: null } para el total. null = cerrado.
+  const [historyTarget, setHistoryTarget] = useState(null);
   const connectingRef = useRef(false);
   const loadUserDetail = useCallback(
     (params) => api.myPendingDetail(detailTarget?.lib.libraryId, params),
     [detailTarget?.lib.libraryId]
+  );
+  const loadUserHistory = useCallback(
+    (lib) => (lib ? api.myMonthlyHistory(lib.libraryId) : api.myMonthlyHistoryTotal()),
+    []
+  );
+  const libraryNameById = useMemo(
+    () => new Map((quota?.libraries ?? []).map((l) => [l.libraryId, l.libraryName])),
+    [quota]
   );
 
   useEffect(() => {
@@ -210,7 +221,12 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
               const pct = mt.limit > 0 ? Math.max(0, Math.min(100, (mt.used / mt.limit) * 100)) : 0;
               const maxed = mt.used >= mt.limit;
               return (
-                <div className="rounded-xl bg-bg-950/60 p-4 max-w-sm">
+                <button
+                  type="button"
+                  onClick={() => setHistoryTarget({ lib: null })}
+                  title="Ver qué has pedido este mes"
+                  className="w-full text-left rounded-xl bg-bg-950/60 p-4 max-w-sm hover:brightness-110"
+                >
                   <div className="flex items-center justify-between gap-4">
                     <span className="font-semibold">Todas las bibliotecas</span>
                     <div className={`text-2xl font-black tabular-nums ${maxed ? 'text-accent-400' : 'text-white'}`}>
@@ -224,7 +240,7 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
                     />
                   </div>
                   {maxed && <p className="text-xs text-accent-400 mt-2">Cupo del mes agotado</p>}
-                </div>
+                </button>
               );
             })()}
           </section>
@@ -244,7 +260,13 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
                   const pct = l.monthly.limit > 0 ? Math.max(0, Math.min(100, (l.monthly.used / l.monthly.limit) * 100)) : 0;
                   const maxed = l.monthly.used >= l.monthly.limit;
                   return (
-                    <div key={l.libraryId} className="rounded-xl bg-bg-950/60 p-4">
+                    <button
+                      type="button"
+                      key={l.libraryId}
+                      onClick={() => setHistoryTarget({ lib: l })}
+                      title="Ver qué has pedido este mes"
+                      className="text-left rounded-xl bg-bg-950/60 p-4 hover:brightness-110"
+                    >
                       <div className="flex items-center justify-between gap-4">
                         <span className="font-semibold">{l.libraryName}</span>
                         <div className={`text-2xl font-black tabular-nums ${maxed ? 'text-accent-400' : 'text-white'}`}>
@@ -258,7 +280,7 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
                         />
                       </div>
                       {maxed && <p className="text-xs text-accent-400 mt-2">Cupo del mes agotado</p>}
-                    </div>
+                    </button>
                   );
                 })}
             </div>
@@ -324,6 +346,15 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
           readOnly
           loadDetail={loadUserDetail}
           onClose={() => setDetailTarget(null)}
+        />
+      )}
+      {historyTarget && (
+        <MonthlyHistoryModal
+          user={{ userId: session?.id, username: session?.username }}
+          lib={historyTarget.lib}
+          libraryNameById={libraryNameById}
+          loadHistory={loadUserHistory}
+          onClose={() => setHistoryTarget(null)}
         />
       )}
     </div>

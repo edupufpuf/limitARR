@@ -259,6 +259,21 @@ router.get('/me/quota/pending-detail/:libraryId', ah(async (req, res) => {
   });
 }));
 
+// Historial de cupo mensual, versión "propia" (panel de usuario no admin) —
+// mismo dato que /quota/monthly-history(-total) pero derivando el userId de la
+// sesión en vez de la URL, para que no pueda pedir el historial de otro.
+router.get('/me/quota/monthly-history/:libraryId', ah(async (req, res) => {
+  if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });
+  const cacheId = quotaIdentity(req.session.user.id).cacheId;
+  res.json(getMonthlyHistoryRows(cacheId, Number(req.params.libraryId)));
+}));
+
+router.get('/me/quota/monthly-history-total', ah(async (req, res) => {
+  if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });
+  const cacheId = quotaIdentity(req.session.user.id).cacheId;
+  res.json(getMonthlyHistoryRowsTotal(cacheId));
+}));
+
 // Películas que este usuario salvó con el botón de Telegram y siguen a tiempo de ver.
 router.get('/me/salvados', ah(async (req, res) => {
   if (!req.session.user?.id) return res.status(403).json({ error: 'plex_user_required' });
