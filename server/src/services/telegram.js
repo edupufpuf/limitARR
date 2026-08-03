@@ -181,14 +181,9 @@ export function getInboxMessages() {
   return db.prepare('SELECT * FROM telegram_inbox ORDER BY id DESC LIMIT 50').all();
 }
 
-async function handlePendingCallback(callbackQuery) {
-  const [, userId, libraryId] = (callbackQuery.data || '').split(':');
-  await answerCallbackQuery(callbackQuery.id);
-
-  const chatId = callbackQuery.message.chat.id;
-  const messageThreadId = callbackQuery.message.message_thread_id;
-  const { pendingItems } = await getBalance(Number(userId), Number(libraryId));
-
+// Común a handlePendingCallback (botón "sin cupo") y handlePendingCommand
+// (/pendientes escrito a mano) — mismo formato de respuesta para las dos vías.
+async function sendPendingItemsMessage(chatId, messageThreadId, pendingItems) {
   if (pendingItems.length === 0) {
     await sendMessage(chatId, 'No tienes nada pendiente de ver ahora mismo.', { messageThreadId });
     return;
@@ -204,8 +199,9 @@ async function handlePendingCallback(callbackQuery) {
   const withPoster = [];
   const withoutPoster = [];
   shown.forEach((item, i) => {
-    if (posters[i]) withPoster.push({ type: 'photo', media: posters[i], caption: item.title });
-    else withoutPoster.push(item.title);
+    const caption = item.libraryName ? `${item.title} (${item.libraryName})` : item.title;
+    if (posters[i]) withPoster.push({ type: 'photo', media: posters[i], caption });
+    else withoutPoster.push(caption);
   });
 
   if (withPoster.length > 0) await sendMediaGroup(chatId, withPoster, { messageThreadId });
@@ -217,10 +213,45 @@ async function handlePendingCallback(callbackQuery) {
   }
 }
 
+async function handlePendingCallback(callbackQuery) {
+  const [, userId, libraryId] = (callbackQuery.data || '').split(':');
+  await answerCallbackQuery(callbackQuery.id);
+
+  const chatId = callbackQuery.message.chat.id;
+  const messageThreadId = callbackQuery.message.message_thread_id;
+  const { pendingItems } = await getBalance(Number(userId), Number(libraryId));
+  await sendPendingItemsMessage(chatId, messageThreadId, pendingItems);
+}
+
+const getUserIdByChatId = db.prepare('SELECT user_id FROM telegram_links WHERE chat_id = ?');
+const getEnabledLibraries = db.prepare('SELECT id, name FROM libraries WHERE enabled = 1');
+
+// Pedido de Edu (3 ago 2026): comando /pendientes — el usuario lo escribe al
+// bot y le lista lo pendiente de TODAS sus bibliotecas, sin depender de que
+// antes llegue un botón de "sin cupo" (que solo cubre una biblioteca).
+// Requiere tener el chat ya vinculado (Mi cupo → Vincular con Telegram).
+async function handlePendingCommand(chatId, messageThreadId) {
+  const link = getUserIdByChatId.get(String(chatId));
+  if (!link) {
+    await sendMessage(
+      chatId,
+      'No tengo tu cuenta vinculada todavía — entra a "Mi cupo" en el panel y pulsa "Vincular con Telegram".',
+      { messageThreadId }
+    );
+    return;
+  }
+  const allPending = [];
+  for (const lib of getEnabledLibraries.all()) {
+    const { pendingItems } = await getBalance(link.user_id, lib.id);
+    for (const item of pendingItems) allPending.push({ ...item, libraryName: lib.name });
+  }
+  await sendPendingItemsMessage(chatId, messageThreadId, allPending);
+}
+
 // Procesa un lote de updates: botones pulsados se responden al momento, mensajes
 // normales se guardan en telegram_inbox para que el panel los lea sin llamar a
 // Telegram en vivo.
-async function processUpdates(updates) {
+export async function processUpdates(updates) {
   for (const u of updates) {
     if (u.callback_query?.data?.startsWith('pending:')) {
       try {
@@ -241,6 +272,14 @@ async function processUpdates(updates) {
             : 'Ese enlace ha caducado. Vuelve al panel y pulsa "Vincular con Telegram" de nuevo.');
         } catch (err) {
           console.error('[telegram] link token failed:', err.message);
+        }
+        continue;
+      }
+      if (/^\/pendientes(?:@\w+)?/.test(m.text || '')) {
+        try {
+          await handlePendingCommand(m.chat.id, m.message_thread_id);
+        } catch (err) {
+          console.error('[telegram] /pendientes failed:', err.message);
         }
         continue;
       }
