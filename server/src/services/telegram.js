@@ -297,12 +297,32 @@ export async function processUpdates(updates) {
   pruneInbox.run();
 }
 
+// Pedido de Edu (3 ago 2026): que al escribir "/" en el chat salga la lista
+// de comandos disponibles — eso lo pinta Telegram solo si el bot registra su
+// menú vía setMyCommands. Se reintenta cada vuelta hasta que salga bien (por
+// si el primer intento coincide con Telegram caído), y solo una vez por
+// token (no tiene sentido repetirlo en cada ciclo de sondeo).
+async function setMyCommands() {
+  await api('setMyCommands', {
+    commands: [{ command: 'pendientes', description: 'Ver tus pendientes de ver' }],
+  });
+}
+
 // Long-poll continuo (no bloquea el arranque si no hay token todavía: simplemente
 // no hace nada hasta que se configure desde el panel).
 export function startTelegramPoller() {
+  let commandsRegisteredForToken = null;
   async function loop() {
     const token = getBotToken();
     if (token) {
+      if (commandsRegisteredForToken !== token) {
+        try {
+          await setMyCommands();
+          commandsRegisteredForToken = token;
+        } catch (err) {
+          console.error('[telegram] setMyCommands failed:', err.message);
+        }
+      }
       try {
         const offset = Number(getRawSetting(OFFSET_KEY) || 0);
         const updates = await api('getUpdates', { offset: offset + 1, timeout: 20 });
