@@ -116,9 +116,14 @@ const getGroupOverrideByGroup = db.prepare(
 );
 const getLibrary = db.prepare('SELECT * FROM libraries WHERE id = ?');
 const getResetAt = db.prepare('SELECT reset_at FROM quota_resets WHERE user_id = ? AND library_id = ?');
+// Pedido de Edu (3 ago 2026): lo aprobado fuera de limitARR (admin
+// autoaprobado en Seerr, o aprobado a mano en su web — decision
+// 'approved_outside_limitarr', ver scheduler.js notifyBypassedApprovals)
+// también se lista como pendiente de ver, pero sin restar cupo (computeBalance/
+// computeTvBalance lo excluyen de `outstanding` mirando esta misma `decision`).
 const getApprovedTitles = db.prepare(`
-  SELECT id, request_id, media_title, media_type, tmdb_id, season_number, poster_url, note, created_at FROM decisions_log
-  WHERE user_id = ? AND library_id = ? AND decision = 'approved' AND voided_at IS NULL AND created_at > ?
+  SELECT id, request_id, media_title, media_type, tmdb_id, season_number, poster_url, note, created_at, decision FROM decisions_log
+  WHERE user_id = ? AND library_id = ? AND decision IN ('approved', 'approved_outside_limitarr') AND voided_at IS NULL AND created_at > ?
 `);
 const updateApprovalPoster = db.prepare(`
   UPDATE decisions_log SET poster_url = ? WHERE id = ?
@@ -141,8 +146,8 @@ const deleteReset = db.prepare('DELETE FROM quota_resets WHERE user_id = ? AND l
 // 2026: 3 intentos, los 3 anulados en <1 min por el scheduler).
 const getUnvoidedApproved = db.prepare(`
   SELECT id, request_id, created_at FROM decisions_log
-  WHERE decision = 'approved' AND voided_at IS NULL AND created_at > datetime('now', '-90 days')
-    AND request_id > 0
+  WHERE decision IN ('approved', 'approved_outside_limitarr') AND voided_at IS NULL
+    AND created_at > datetime('now', '-90 days') AND request_id > 0
 `);
 const markVoided = db.prepare(`UPDATE decisions_log SET voided_at = datetime('now') WHERE id = ?`);
 const clearVoided = db.prepare(`UPDATE decisions_log SET voided_at = NULL WHERE id = ?`);
@@ -448,7 +453,10 @@ export function computeBalance(limit, approvedRows, watchedTitles, unavailableTm
   // sin estrenar o no encontrada) no restan cupo, pero sí se listan como
   // pendientes (con marca) para que se vea que la solicitud existe y aún no cuenta.
   const isUnavailable = (r) => r.tmdb_id != null && unavailableTmdbIds.has(r.tmdb_id);
-  const outstanding = pending.filter((r) => !isUnavailable(r)).length;
+  // Pedido de Edu (3 ago 2026): lo aprobado fuera de limitARR (admin
+  // autoaprobado en Seerr) se lista igual, pero no resta cupo.
+  const isBypassed = (r) => r.decision === 'approved_outside_limitarr';
+  const outstanding = pending.filter((r) => !isUnavailable(r) && !isBypassed(r)).length;
 
   const seenTitles = new Set();
   const pendingItems = [];
@@ -465,6 +473,7 @@ export function computeBalance(limit, approvedRows, watchedTitles, unavailableTm
       seasonNumber: r.season_number ?? null,
       posterUrl: r.poster_url ?? null,
       unavailable: isUnavailable(r),
+      bypassed: isBypassed(r),
       mediaStatus: r.tmdb_id != null ? availability?.get(r.tmdb_id)?.status ?? null : null,
       // Estado real de la cola de Radarr ("downloading", "queued", "paused"...),
       // no el status 2/3 de Seerr (que solo dice "solicitada"/"monitorizada") —
@@ -667,7 +676,10 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatc
     }
   }
 
-  const outstanding = pending.filter((r) => !r.unavailable).length;
+  // Pedido de Edu (3 ago 2026): lo aprobado fuera de limitARR (admin
+  // autoaprobado en Seerr) se lista igual, pero no resta cupo.
+  const isBypassed = (r) => r.decision === 'approved_outside_limitarr';
+  const outstanding = pending.filter((r) => !r.unavailable && !isBypassed(r)).length;
   const pendingItems = pending.map((r) => ({
     title: r.media_title,
     mediaType: 'tv',
@@ -675,6 +687,7 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatc
     seasonNumber: r.season_number ?? null,
     posterUrl: r.poster_url ?? null,
     unavailable: r.unavailable ?? false,
+    bypassed: isBypassed(r),
     mediaStatus: r.media_status ?? null,
     queueStatus: r.queue_status ?? null,
     sonarrLabel: r.sonarr_label ?? null,
@@ -1152,7 +1165,7 @@ export function listStaleOutstandingPairs(staleMinutes = STALE_OUTSTANDING_MINUT
 
 const getPendingApprovedRows = db.prepare(`
   SELECT id, media_title, tmdb_id, season_number, created_at, username, poster_url FROM decisions_log
-  WHERE user_id = ? AND library_id = ? AND decision = 'approved' AND voided_at IS NULL
+  WHERE user_id = ? AND library_id = ? AND decision IN ('approved', 'approved_outside_limitarr') AND voided_at IS NULL
 `);
 
 // Mismo criterio de match que dismissPendingItem: tmdb_id+temporada o, en su

@@ -75,7 +75,7 @@ test('computeBalance: aprobada y no vista resta cupo', () => {
   assert.equal(r.balance, 0);
   assert.equal(r.outstanding, 1);
   assert.deepEqual(r.pendingItems, [
-    { title: 'Matrix', mediaType: 'movie', tmdbId: 603, seasonNumber: null, posterUrl: 'https://img/x.jpg', unavailable: false, mediaStatus: null, queueStatus: null, radarrLabel: null, watchedPercent: 0, availableSince: null, expiresAt: null, requestId: null, note: null },
+    { title: 'Matrix', mediaType: 'movie', tmdbId: 603, seasonNumber: null, posterUrl: 'https://img/x.jpg', unavailable: false, bypassed: false, mediaStatus: null, queueStatus: null, radarrLabel: null, watchedPercent: 0, availableSince: null, expiresAt: null, requestId: null, note: null },
   ]);
 });
 
@@ -85,6 +85,22 @@ test('computeBalance: aprobada y vista libera cupo', () => {
   const r = computeBalance(1, approved, watched);
   assert.equal(r.balance, 1);
   assert.equal(r.outstanding, 0);
+});
+
+// Caso Edu (3 ago 2026): su cuenta admin autoaprueba en Seerr sin pasar por
+// limitARR (decision='approved_outside_limitarr', ver scheduler.js) — debe
+// listarse como pendiente igual, pero SIN restar cupo.
+test('computeBalance: aprobada fuera de limitARR se lista pero no resta cupo', () => {
+  const approved = [
+    { media_title: 'Matrix', tmdb_id: 603, decision: 'approved_outside_limitarr' },
+    { media_title: 'Heat', tmdb_id: 949, decision: 'approved' },
+  ];
+  const r = computeBalance(2, approved, new Set());
+  assert.equal(r.outstanding, 1); // solo Heat resta
+  assert.equal(r.balance, 1);
+  assert.equal(r.pendingItems.length, 2);
+  assert.equal(r.pendingItems.find((i) => i.title === 'Matrix').bypassed, true);
+  assert.equal(r.pendingItems.find((i) => i.title === 'Heat').bypassed, false);
 });
 
 test('computeBalance: match de vista tolera acentos/mayúsculas', () => {

@@ -34,9 +34,11 @@ function LibraryCard({ library, onDetail }) {
                 className="relative aspect-[2/3] w-full overflow-hidden rounded-lg bg-bg-950 text-left"
                 title={item.pendingApproval
                   ? `${item.title} — pendiente de aprobar, no cuenta`
-                  : item.unavailable
-                    ? `${item.title} — ${downloadStatusLabel(item)}, no cuenta`
-                    : item.title}
+                  : item.bypassed
+                    ? `${item.title} — aprobada fuera de limitARR, no cuenta`
+                    : item.unavailable
+                      ? `${item.title} — ${downloadStatusLabel(item)}, no cuenta`
+                      : item.title}
               >
                 {item.posterUrl ? (
                   <img
@@ -55,6 +57,11 @@ function LibraryCard({ library, onDetail }) {
                       {item.pendingApproval ? 'Pdte. de aprobar' : downloadStatusLabel(item)}
                     </span>
                   </div>
+                )}
+                {item.bypassed && !item.unavailable && !item.pendingApproval && (
+                  <span className="absolute left-1 top-1 right-1 truncate rounded bg-violet-600 px-1 py-0.5 text-[7px] leading-none font-bold uppercase tracking-wide text-white">
+                    No cuenta (aparte)
+                  </span>
                 )}
               </button>
               <p className="text-[11px] text-gray-400 mt-1 line-clamp-2">{item.title}</p>

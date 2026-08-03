@@ -159,6 +159,8 @@ function PendingPoster({ item, onDetail, onDismiss }) {
       title={
         item.pendingApproval
           ? `${item.title ?? ''} — pendiente de aprobación en Seerr`
+          : item.bypassed
+          ? `${item.title ?? ''} — aprobada fuera de limitARR, no resta cupo`
           : item.unavailable
           ? `${item.title ?? ''} — ${downloadStatusLabel(item)}, no resta cupo`
           : `${item.title ?? ''}${(item.watchedPercent ?? 0) > 0 ? ` — ${item.watchedPercent}% visto` : ''}${item.note ? ` — nota: ${item.note}` : ''}`
@@ -177,6 +179,11 @@ function PendingPoster({ item, onDetail, onDismiss }) {
       {item.pendingApproval && (
         <span className="absolute top-1 left-1 right-1 line-clamp-2 rounded bg-violet-600 px-1 py-0.5 text-[7px] leading-tight font-semibold uppercase tracking-wide text-white pointer-events-none">
           Pdte. Aprobar
+        </span>
+      )}
+      {item.bypassed && !item.unavailable && (
+        <span className="absolute top-1 left-1 right-1 line-clamp-2 rounded bg-violet-600 px-1 py-0.5 text-[7px] leading-tight font-semibold uppercase tracking-wide text-white pointer-events-none">
+          No cuenta (aparte)
         </span>
       )}
       {item.unavailable && (
