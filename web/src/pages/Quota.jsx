@@ -1176,6 +1176,9 @@ export default function Quota() {
   const [charging, setCharging] = useState({});
   const [expanded, setExpanded] = useState(new Set());
   const [activeFilter, setActiveFilter] = useState('all');
+  // Orden de la lista (pedido de Edu, 3 ago 2026): 'busiest' (por defecto, el
+  // de siempre) = peor saldo primero; 'quietest' = al revés; 'name' = A-Z.
+  const [sortBy, setSortBy] = useState('busiest');
   // Pendiente abierto en la ventana de detalle: { user, lib, item } o null.
   const [detailTarget, setDetailTarget] = useState(null);
   // Historial de cupo mensual abierto (issue #20): { user, lib } o null; lib
@@ -1268,8 +1271,12 @@ export default function Quota() {
         if (activeFilter === 'blocked7d') return (u.blocked7d ?? 0) > 0;
         return true;
       })
-      .sort((a, b) => worstLib(a.libraries).balance - worstLib(b.libraries).balance);
-  }, [mergedUsers, query, activeFilter]);
+      .sort((a, b) => {
+        if (sortBy === 'name') return a.username.localeCompare(b.username, 'es');
+        const diff = worstLib(a.libraries).balance - worstLib(b.libraries).balance;
+        return sortBy === 'quietest' ? -diff : diff;
+      });
+  }, [mergedUsers, query, activeFilter, sortBy]);
 
   // Deudores para las burbujas: los 4 con más pendientes de ver, de más a
   // menos deuda (a igualdad, peor proporción sin ver / pedido primero).
@@ -1469,14 +1476,21 @@ export default function Quota() {
         </>
       )}
 
-      <div className="relative mb-4 max-w-xs">
-        <IconSearch className="w-4 h-4 text-gray-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Buscar usuario…"
-          className="input pl-8"
-        />
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="relative max-w-xs">
+          <IconSearch className="w-4 h-4 text-gray-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Buscar usuario…"
+            className="input pl-8"
+          />
+        </div>
+        <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="input w-auto py-1.5">
+          <option value="busiest">Más ocupados primero</option>
+          <option value="quietest">Menos ocupados primero</option>
+          <option value="name">Nombre (A-Z)</option>
+        </select>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
