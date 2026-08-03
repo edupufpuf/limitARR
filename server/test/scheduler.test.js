@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { db } from '../src/db.js';
-import { notifyStillUnavailable, enforceSingleSession } from '../src/scheduler.js';
+import { notifyStillUnavailable, enforceSingleSession, notifyBypassedApprovals } from '../src/scheduler.js';
 import { setSessionGuardEnabled } from '../src/sessionGuard.js';
 
 // Pedido de Edu (2 ago 2026): si a las 12h de aprobarse sigue sin estar en
@@ -216,5 +216,131 @@ test('enforceSingleSession: no corta si el usuario lo desactivó en su panel', a
     global.fetch = originalFetch;
     db.prepare('DELETE FROM session_guard_settings WHERE user_id = 902').run();
     db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key')").run();
+  }
+});
+
+// Caso Edu (3 ago 2026): admin de Seerr se autoaprueba al instante, sin pasar
+// por la cola de pendientes — limitARR nunca lo procesa, así que ni cupo ni
+// aviso. Aviso informativo aparte, detectado por "sin ninguna fila en
+// decisions_log para este request_id".
+
+function mockBypassed({ tautulliUsers, movieRequests = [], tvRequests = [], movieDetails = {} }) {
+  return async (input, options) => {
+    const url = String(input);
+    if (url.includes('cmd=get_users')) {
+      return new Response(JSON.stringify({ response: { result: 'success', data: tautulliUsers } }), { status: 200 });
+    }
+    if (url.includes('/api/v1/request?filter=approved') && url.includes('mediaType=movie')) {
+      return new Response(JSON.stringify({ results: movieRequests }), { status: 200 });
+    }
+    if (url.includes('/api/v1/request?filter=approved') && url.includes('mediaType=tv')) {
+      return new Response(JSON.stringify({ results: tvRequests }), { status: 200 });
+    }
+    const movieMatch = url.match(/\/api\/v1\/movie\/(\d+)$/);
+    if (movieMatch) {
+      return new Response(JSON.stringify(movieDetails[movieMatch[1]] ?? { title: 'Desconocida' }), { status: 200 });
+    }
+    if (url.includes('api.telegram.org')) {
+      return new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url} ${options?.method || 'GET'}`);
+  };
+}
+
+test('notifyBypassedApprovals: avisa (una vez) de lo aprobado fuera de limitARR', async () => {
+  upsertSetting('tautulli_url', 'http://tautulli.test');
+  upsertSetting('tautulli_api_key', 'test-key');
+  upsertSetting('seerr_url', 'http://seerr.test');
+  upsertSetting('seerr_api_key', 'test-key');
+  upsertSetting('telegram_bot_token', 'test-bot-token');
+  db.prepare("INSERT INTO telegram_links (user_id, chat_id, linked_at) VALUES (950, 'chat-950', datetime('now'))").run();
+
+  const sentMessages = [];
+  const originalFetch = global.fetch;
+  const mock = mockBypassed({
+    tautulliUsers: [{ user_id: 950, username: 'edu' }],
+    movieRequests: [{
+      id: 5001,
+      status: 2,
+      type: 'movie',
+      media: { tmdbId: 601 },
+      createdAt: '2026-08-03T06:30:00.000Z',
+      requestedBy: { id: 1, email: null, plexUsername: 'edu' },
+    }],
+    movieDetails: { 601: { title: 'Constantine', posterPath: '/c.jpg' } },
+  });
+  global.fetch = async (input, options) => {
+    const url = String(input);
+    if (url.includes('api.telegram.org')) sentMessages.push(JSON.parse(options.body));
+    return mock(input, options);
+  };
+
+  try {
+    await notifyBypassedApprovals();
+    assert.equal(sentMessages.length, 1);
+    assert.equal(sentMessages[0].chat_id, 'chat-950');
+    assert.match(sentMessages[0].text, /Constantine/);
+
+    const logged = db.prepare(
+      "SELECT * FROM decisions_log WHERE request_id = 5001 AND decision = 'approved_outside_limitarr'"
+    ).get();
+    assert.ok(logged);
+    assert.equal(logged.user_id, 950);
+
+    // Segundo ciclo: ya está logueado, no se repite el aviso.
+    await notifyBypassedApprovals();
+    assert.equal(sentMessages.length, 1);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM decisions_log WHERE request_id = 5001').run();
+    db.prepare('DELETE FROM telegram_links WHERE user_id = 950').run();
+    db.prepare(
+      "DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key', 'telegram_bot_token')"
+    ).run();
+  }
+});
+
+test('notifyBypassedApprovals: no avisa de lo que limitARR ya procesó', async () => {
+  upsertSetting('tautulli_url', 'http://tautulli.test');
+  upsertSetting('tautulli_api_key', 'test-key');
+  upsertSetting('seerr_url', 'http://seerr.test');
+  upsertSetting('seerr_api_key', 'test-key');
+  upsertSetting('telegram_bot_token', 'test-bot-token');
+  db.prepare("INSERT INTO telegram_links (user_id, chat_id, linked_at) VALUES (951, 'chat-951', datetime('now'))").run();
+  // Ya tiene una fila (flujo normal, quota-gated) para este request_id.
+  db.prepare(`
+    INSERT INTO decisions_log (request_id, user_id, username, library_id, media_title, media_type, tmdb_id, decision)
+    VALUES (5002, 951, 'jesus', 1, 'Ya procesada', 'movie', 602, 'approved')
+  `).run();
+
+  const sentMessages = [];
+  const originalFetch = global.fetch;
+  const mock = mockBypassed({
+    tautulliUsers: [{ user_id: 951, username: 'jesus' }],
+    movieRequests: [{
+      id: 5002,
+      status: 2,
+      type: 'movie',
+      media: { tmdbId: 602 },
+      createdAt: '2026-08-03T06:30:00.000Z',
+      requestedBy: { id: 2, email: null, plexUsername: 'jesus' },
+    }],
+  });
+  global.fetch = async (input, options) => {
+    const url = String(input);
+    if (url.includes('api.telegram.org')) sentMessages.push(JSON.parse(options.body));
+    return mock(input, options);
+  };
+
+  try {
+    await notifyBypassedApprovals();
+    assert.equal(sentMessages.length, 0);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM decisions_log WHERE request_id = 5002').run();
+    db.prepare('DELETE FROM telegram_links WHERE user_id = 951').run();
+    db.prepare(
+      "DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key', 'telegram_bot_token')"
+    ).run();
   }
 });

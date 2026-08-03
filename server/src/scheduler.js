@@ -3,7 +3,7 @@ import path from 'node:path';
 import { db } from './db.js';
 import { config } from './config.js';
 import { getRawSetting, setRawSetting } from './settings.js';
-import { listPendingRequests, approveRequest, declineRequest, getMediaDetails, getMovieAvailability } from './services/seerr.js';
+import { listPendingRequests, approveRequest, declineRequest, getMediaDetails, getMovieAvailability, listRecentlyApprovedRequests } from './services/seerr.js';
 import { getUsers, getActiveSessions, terminateSession } from './services/tautulli.js';
 import { getBalance, getMonthlyTotalQuota, reconcileVoidedRequests, refreshQuotaCache, listStaleOutstandingPairs, normalize, getRequestHold, clearRequestHold, pruneStaleQuotaCache } from './quota.js';
 import { sendMessage, getNotifyTarget, pendingButton, renderNoQuotaMessage } from './services/telegram.js';
@@ -28,6 +28,15 @@ const getLastDecision = db.prepare(`
 `);
 const getLibraryName = db.prepare('SELECT name FROM libraries WHERE id = ?');
 const getChatId = db.prepare('SELECT chat_id FROM telegram_links WHERE user_id = ?');
+// Pedido de Edu (3 ago 2026): si un request_id no tiene NINGUNA fila en
+// decisions_log, limitARR nunca lo vio pasar por la cola de pendientes —
+// alguien lo aprobó directo en Seerr (admin autoaprobado, o aprobado a mano
+// en la web de Seerr). Aviso informativo aparte, sin cupo de por medio.
+const hasAnyDecisionForRequest = db.prepare('SELECT 1 FROM decisions_log WHERE request_id = ? LIMIT 1');
+const insertBypassedApprovalLog = db.prepare(`
+  INSERT INTO decisions_log (request_id, user_id, username, media_title, media_type, tmdb_id, season_number, decision)
+  VALUES (@requestId, @userId, @username, @mediaTitle, @mediaType, @tmdbId, @seasonNumber, 'approved_outside_limitarr')
+`);
 const getCacheRow = db.prepare('SELECT outstanding, pending_items FROM quota_cache WHERE user_id = ? AND library_id = ?');
 // Para etiquetar en el Registro quién liberó cupo: los pending_items de la
 // caché no llevan username, así que se toma el último conocido para ese
@@ -414,6 +423,55 @@ export async function enforceSingleSession() {
   }
 }
 
+// Pedido de Edu (3 ago 2026): caso admin (o cualquiera con autoaprobar) —
+// Seerr aprueba al instante, sin pasar por la cola de pendientes. Aviso
+// informativo aparte (sin cupo, no hay saldo que dar), una vez por
+// request_id — se marca en el Registro para no repetir.
+export async function notifyBypassedApprovals() {
+  const target = getNotifyTarget();
+  if (!target.notifyApproved) return;
+
+  let requests;
+  try {
+    requests = await listRecentlyApprovedRequests();
+  } catch (err) {
+    console.error('[scheduler] listRecentlyApprovedRequests failed:', err.message);
+    return;
+  }
+  const pending = requests.filter((r) => !hasAnyDecisionForRequest.get(r.id));
+  if (pending.length === 0) return;
+
+  const tautulliUsers = await getUsers();
+
+  for (const request of pending) {
+    const tautulliUser = matchByEmailOrUsername(tautulliUsers, request.requestedBy);
+    const seasons = request.mediaType === 'tv' ? request.seasons : [];
+    const details = await getMediaDetails(request.mediaType, request.tmdbId, seasons[0] ?? null);
+    const mediaTitle = seasons.length > 1
+      ? `${details.title ?? 'Serie'} - Temporadas ${seasons.join(', ')}`
+      : formatMediaTitle(request.mediaType, details.title, seasons[0] ?? null);
+
+    insertBypassedApprovalLog.run({
+      requestId: request.id,
+      userId: tautulliUser?.id ?? null,
+      username: tautulliUser?.username ?? request.requestedBy.username ?? null,
+      mediaTitle,
+      mediaType: request.mediaType,
+      tmdbId: request.tmdbId ?? null,
+      seasonNumber: seasons[0] ?? null,
+    });
+
+    if (!tautulliUser) continue;
+    const chatId = getChatId.get(tautulliUser.id)?.chat_id;
+    if (!chatId) continue;
+    try {
+      await sendMessage(chatId, `✅ Aprobada en Seerr: ${mediaTitle ?? 'tu solicitud'}.`);
+    } catch (err) {
+      console.error('[scheduler] telegram notify failed:', err.message);
+    }
+  }
+}
+
 // Mantenimiento diario, colgado del propio ciclo de sondeo (no hace falta otro
 // timer): retención del registro y backup de la DB. Se apunta el día en
 // settings para ejecutarse una sola vez aunque haya muchos ciclos.
@@ -636,6 +694,7 @@ export async function runPollCycle() {
   await refreshStaleAndNotify();
   await notifyStillUnavailable();
   await enforceSingleSession();
+  await notifyBypassedApprovals();
 }
 
 function formatMediaTitle(mediaType, title, seasonNumber = null) {

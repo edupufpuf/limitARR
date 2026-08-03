@@ -29,6 +29,7 @@ const decisionBadge = {
   expired: 'bg-bg-700/60 text-gray-400 ring-bg-600',
   unavailable_reminder: 'bg-sky-400/10 text-sky-400 ring-sky-400/25',
   penalty_applied: 'bg-orange-400/10 text-orange-400 ring-orange-400/25',
+  approved_outside_limitarr: 'bg-violet-400/10 text-violet-400 ring-violet-400/25',
 };
 
 const decisionLabel = {
@@ -56,6 +57,7 @@ const decisionLabel = {
   expired: '⌛ caducado (cupo liberado)',
   unavailable_reminder: '🕐 aviso: aún no disponible (12h)',
   penalty_applied: '⛔ penalización aplicada',
+  approved_outside_limitarr: '✅ aprobada fuera de limitARR (autoaprobado/admin)',
 };
 
 // created_at viene de SQLite en UTC ('YYYY-MM-DD HH:MM:SS'); se enseña en local.

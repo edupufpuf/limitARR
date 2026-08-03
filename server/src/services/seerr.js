@@ -93,6 +93,26 @@ export async function listPendingRequests() {
   return [...movies, ...shows].sort((a, b) => a.id - b.id);
 }
 
+// Pedido de Edu (3 ago 2026): un admin de Seerr (o cualquiera con permiso de
+// autoaprobar) pasa de "pedida" a "aprobada" al instante, sin pasar por la
+// cola de pendientes que vigila el resto de limitARR — ni cupo ni aviso.
+// Solo la primera página (sort=added, más nuevas primero): no hace falta
+// bajar todo el histórico cada ciclo, con las últimas ~50 sobra de sobra.
+async function listApprovedRequestsPage(mediaType, take = 50) {
+  const data = await call(`/request?filter=approved&mediaType=${mediaType}&take=${take}&sort=added&skip=0`);
+  return (data.results || [])
+    .filter((r) => (mediaType === 'tv' ? r.type === 'tv' || r.media?.mediaType === 'tv' : r.type === 'movie' || r.media?.mediaType === 'movie'))
+    .map(mapRequest);
+}
+
+export async function listRecentlyApprovedRequests() {
+  const [movies, shows] = await Promise.all([
+    listApprovedRequestsPage('movie'),
+    listApprovedRequestsPage('tv'),
+  ]);
+  return [...movies, ...shows];
+}
+
 export async function listPendingMovieRequests() {
   const data = await call('/request?filter=pending&take=100&sort=added&mediaType=movie');
   return (data.results || [])
