@@ -254,6 +254,10 @@ test('notifyBypassedApprovals: avisa (una vez) de lo aprobado fuera de limitARR'
   upsertSetting('seerr_api_key', 'test-key');
   upsertSetting('telegram_bot_token', 'test-bot-token');
   db.prepare("INSERT INTO telegram_links (user_id, chat_id, linked_at) VALUES (950, 'chat-950', datetime('now'))").run();
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (9900, 'Películas', 'movie', 'standard', 1, 4)
+  `).run();
 
   const sentMessages = [];
   const originalFetch = global.fetch;
@@ -286,6 +290,7 @@ test('notifyBypassedApprovals: avisa (una vez) de lo aprobado fuera de limitARR'
     ).get();
     assert.ok(logged);
     assert.equal(logged.user_id, 950);
+    assert.equal(logged.library_id, 9900); // sin esto getBalance nunca la ve (bug real, 3 ago 2026)
 
     // Segundo ciclo: ya está logueado, no se repite el aviso.
     await notifyBypassedApprovals();
@@ -294,6 +299,7 @@ test('notifyBypassedApprovals: avisa (una vez) de lo aprobado fuera de limitARR'
     global.fetch = originalFetch;
     db.prepare('DELETE FROM decisions_log WHERE request_id = 5001').run();
     db.prepare('DELETE FROM telegram_links WHERE user_id = 950').run();
+    db.prepare('DELETE FROM libraries WHERE id = 9900').run();
     db.prepare(
       "DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key', 'telegram_bot_token')"
     ).run();

@@ -34,8 +34,8 @@ const getChatId = db.prepare('SELECT chat_id FROM telegram_links WHERE user_id =
 // en la web de Seerr). Aviso informativo aparte, sin cupo de por medio.
 const hasAnyDecisionForRequest = db.prepare('SELECT 1 FROM decisions_log WHERE request_id = ? LIMIT 1');
 const insertBypassedApprovalLog = db.prepare(`
-  INSERT INTO decisions_log (request_id, user_id, username, media_title, media_type, tmdb_id, season_number, decision)
-  VALUES (@requestId, @userId, @username, @mediaTitle, @mediaType, @tmdbId, @seasonNumber, 'approved_outside_limitarr')
+  INSERT INTO decisions_log (request_id, user_id, username, library_id, media_title, media_type, tmdb_id, season_number, decision)
+  VALUES (@requestId, @userId, @username, @libraryId, @mediaTitle, @mediaType, @tmdbId, @seasonNumber, 'approved_outside_limitarr')
 `);
 const getCacheRow = db.prepare('SELECT outstanding, pending_items FROM quota_cache WHERE user_id = ? AND library_id = ?');
 // Para etiquetar en el Registro quién liberó cupo: los pending_items de la
@@ -450,11 +450,16 @@ export async function notifyBypassedApprovals() {
     const mediaTitle = seasons.length > 1
       ? `${details.title ?? 'Serie'} - Temporadas ${seasons.join(', ')}`
       : formatMediaTitle(request.mediaType, details.title, seasons[0] ?? null);
+    // Sin library_id no hay dónde colgar el pendiente (getBalance filtra por
+    // biblioteca) — mismo criterio que en el flujo normal: sectionType+kind.
+    const sectionType = request.mediaType === 'tv' ? 'show' : 'movie';
+    const library = getLibraryForRequest.get(sectionType, request.is4k ? '4k' : 'standard');
 
     insertBypassedApprovalLog.run({
       requestId: request.id,
       userId: tautulliUser?.id ?? null,
       username: tautulliUser?.username ?? request.requestedBy.username ?? null,
+      libraryId: library?.id ?? null,
       mediaTitle,
       mediaType: request.mediaType,
       tmdbId: request.tmdbId ?? null,
