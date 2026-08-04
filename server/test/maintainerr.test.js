@@ -64,7 +64,7 @@ function mockFetch() {
       return new Response(JSON.stringify(body), { status: 200 });
     }
     if (String(url).includes('api.telegram.org')) {
-      return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200 });
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 1, chat: { id: -100123 } } }), { status: 200 });
     }
     throw new Error(`fetch inesperado en test: ${url}`);
   };
@@ -119,6 +119,17 @@ test('webhook: alta en colección de borrado manda aviso Telegram con botón Sal
     payload.reply_markup.inline_keyboard[0][0].callback_data,
     'asksave:9010:1:4'
   );
+
+  // Guardado para poder editarlo luego (quitar el botón + "YA BORRADA" si
+  // Maintainerr lo borra de verdad sin que nadie pulse Salvar).
+  const stored = db.prepare(
+    "SELECT * FROM maintainerr_messages WHERE media_server_id = '9010' AND collection_id = 1"
+  ).get();
+  assert.ok(stored, 'debe guardar el mensaje mandado');
+  assert.equal(stored.chat_id, '-100123');
+  assert.equal(stored.message_id, 1);
+  assert.equal(stored.has_photo, 1);
+  assert.equal(stored.text, text);
 });
 
 // --- Salvadas para series (siempre por temporada) ---
@@ -139,7 +150,7 @@ function mockTautulliGetMetadata(cmdHandlers) {
       throw new Error(`unexpected tautulli cmd ${cmd}`);
     }
     if (u.includes('api.telegram.org')) {
-      return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200 });
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 1, chat: { id: -100123 } } }), { status: 200 });
     }
     throw new Error(`fetch inesperado en test: ${u}`);
   };
@@ -218,6 +229,11 @@ test('webhook: series usa maintainerr_delete_message_tv, no la plantilla de pel�
     assert.match(text, /📺 Serie a punto de irse: la serie «Breaking Bad» \(temporada 3\)\./);
   } finally {
     db.prepare("DELETE FROM settings WHERE key IN ('maintainerr_delete_message_tv', 'tautulli_url', 'tautulli_api_key')").run();
+    // '8501-b' no existe en COLLECTIONS.media (fixture): sin este cleanup,
+    // pollMaintainerrCollections lo vería "salir" de la colección en el
+    // siguiente test y dispararía un aviso real de "YA BORRADA".
+    db.prepare("DELETE FROM maintainerr_notified WHERE media_server_id = '8501-b'").run();
+    db.prepare("DELETE FROM maintainerr_messages WHERE media_server_id = '8501-b'").run();
   }
 });
 
@@ -232,7 +248,7 @@ test('webhook: temporada sin Tautulli configurado cae al título del mensaje, si
       return new Response(JSON.stringify(COLLECTIONS), { status: 200 });
     }
     if (u.includes('api.telegram.org')) {
-      return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200 });
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 1, chat: { id: -100123 } } }), { status: 200 });
     }
     throw new Error(`fetch inesperado en test: ${u}`);
   };
@@ -278,7 +294,7 @@ test('webhook: película sin título extraíble del mensaje se resuelve por Taut
       throw new Error(`unexpected tautulli cmd ${cmd}`);
     }
     if (u.includes('api.telegram.org')) {
-      return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200 });
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 1, chat: { id: -100123 } } }), { status: 200 });
     }
     throw new Error(`fetch inesperado en test: ${u}`);
   };
@@ -322,7 +338,7 @@ test('pollMaintainerrCollections: avisa de un ítem manual que el webhook nunca 
       return new Response(JSON.stringify(COLLECTIONS), { status: 200 });
     }
     if (u.includes('api.telegram.org')) {
-      return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200 });
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 1, chat: { id: -100123 } } }), { status: 200 });
     }
     throw new Error(`fetch inesperado en test: ${u}`);
   };
@@ -355,6 +371,44 @@ test('pollMaintainerrCollections: si el ítem sale de la colección, se limpia l
   await pollMaintainerrCollections();
   const marked = db.prepare("SELECT 1 FROM maintainerr_notified WHERE media_server_id = '9099' AND collection_id = 1").get();
   assert.equal(marked, undefined);
+});
+
+// Pedido de Edu (4 ago 2026): si el ítem sale de su colección de borrado sin
+// haber pasado por el botón Salvar, es que Maintainerr lo borró de verdad —
+// el aviso original debe perder el botón y ganar "YA BORRADA".
+test('pollMaintainerrCollections: ítem borrado de verdad (no salvado) marca el aviso original como YA BORRADA', async () => {
+  db.prepare("INSERT OR IGNORE INTO maintainerr_notified (media_server_id, collection_id) VALUES ('9098', 1)").run();
+  db.prepare(`
+    INSERT INTO maintainerr_messages (media_server_id, collection_id, chat_id, message_id, has_photo, text)
+    VALUES ('9098', 1, '-100123', 555, 1, '🎬 «Batman Begins» se borrará en 7 días.')
+  `).run();
+
+  const calls = [];
+  global.fetch = async (url, options = {}) => {
+    const u = String(url);
+    calls.push({ url: u, options });
+    if (u.endsWith('/api/collections')) {
+      return new Response(JSON.stringify(COLLECTIONS), { status: 200 }); // 9098 no está en su media[]: ya no existe
+    }
+    if (u.includes('api.telegram.org')) {
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 555, chat: { id: -100123 } } }), { status: 200 });
+    }
+    throw new Error(`fetch inesperado en test: ${u}`);
+  };
+
+  await pollMaintainerrCollections();
+
+  const editCall = calls.find((c) => c.url.includes('/editMessageCaption'));
+  assert.ok(editCall, 'debe editar el mensaje original (tenía foto: caption, no text)');
+  const payload = JSON.parse(editCall.options.body);
+  assert.equal(payload.chat_id, '-100123');
+  assert.equal(payload.message_id, 555);
+  assert.match(payload.caption, /🎬 «Batman Begins» se borrará en 7 días\./);
+  assert.match(payload.caption, /YA BORRADA/);
+  assert.deepEqual(payload.reply_markup, { inline_keyboard: [] });
+
+  const messageRow = db.prepare("SELECT 1 FROM maintainerr_messages WHERE media_server_id = '9098' AND collection_id = 1").get();
+  assert.equal(messageRow, undefined, 'la fila se borra tras marcarlo');
 });
 
 test('webhook: alta en la propia colección de salvados se ignora (sin bucle)', async () => {

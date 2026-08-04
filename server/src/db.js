@@ -145,6 +145,25 @@ db.exec(`
     notified_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (media_server_id, collection_id)
   );
+
+  -- Pedido de Edu (4 ago 2026): guarda el mensaje de Telegram del aviso de
+  -- borrado (chat/message id + texto/caption tal cual se mandó) para poder
+  -- editarlo luego. Si el ítem sale de su colección de borrado SIN haber
+  -- pasado por el botón Salvar (ver handleSaveCallback, que borra su propia
+  -- fila), es que Maintainerr lo borró de verdad: el sondeo de respaldo
+  -- (pollMaintainerrCollections) quita el botón y añade "YA BORRADA" al
+  -- mensaje. text guardado aparte porque la API de bots no deja leer el
+  -- texto/caption actual de un mensaje ajeno para poder anexarle algo.
+  CREATE TABLE IF NOT EXISTS maintainerr_messages (
+    media_server_id TEXT NOT NULL,
+    collection_id INTEGER NOT NULL,
+    chat_id TEXT NOT NULL,
+    message_id INTEGER NOT NULL,
+    has_photo INTEGER NOT NULL DEFAULT 0,
+    text TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (media_server_id, collection_id)
+  );
 `);
 
 // Migraciones para bases de datos ya desplegadas antes de que existiera la columna.

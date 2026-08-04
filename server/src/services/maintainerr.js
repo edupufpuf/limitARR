@@ -180,6 +180,21 @@ const deleteNotified = db.prepare(
   'DELETE FROM maintainerr_notified WHERE media_server_id = ? AND collection_id = ?'
 );
 
+// Ver tabla maintainerr_messages en db.js.
+const upsertMessageRow = db.prepare(`
+  INSERT INTO maintainerr_messages (media_server_id, collection_id, chat_id, message_id, has_photo, text)
+  VALUES (@mediaServerId, @collectionId, @chatId, @messageId, @hasPhoto, @text)
+  ON CONFLICT(media_server_id, collection_id) DO UPDATE SET
+    chat_id = excluded.chat_id, message_id = excluded.message_id,
+    has_photo = excluded.has_photo, text = excluded.text, created_at = datetime('now')
+`);
+const getMessageRow = db.prepare(
+  'SELECT * FROM maintainerr_messages WHERE media_server_id = ? AND collection_id = ?'
+);
+const deleteMessageRow = db.prepare(
+  'DELETE FROM maintainerr_messages WHERE media_server_id = ? AND collection_id = ?'
+);
+
 // Título/póster + envío del aviso de Telegram para UN ítem candidato a
 // borrarse. La usan tanto el webhook (altas por regla) como el sondeo de
 // respaldo pollMaintainerrCollections más abajo (altas manuales, que
@@ -258,13 +273,47 @@ async function notifyDeletionCandidate(source, target, item, { fallbackTitle = n
       posterUrl: sourceMedia?.image_path ?? null,
       libraryId: source.libraryId != null ? Number(source.libraryId) : null,
     });
-    if (sourceMedia?.image_path) {
-      await sendPhotoToGroup(sourceMedia.image_path, text, replyMarkup);
-    } else {
-      await sendToGroup(text, replyMarkup);
+    const hasPhoto = Boolean(sourceMedia?.image_path);
+    const sent = hasPhoto
+      ? await sendPhotoToGroup(sourceMedia.image_path, text, replyMarkup)
+      : await sendToGroup(text, replyMarkup);
+    // Sin botón (sin colección de salvados configurada) no hace falta guardar
+    // el mensaje: nunca habrá que tocarlo al pulsar Salvar, y "ya borrada" se
+    // marca igual la próxima vez que se avise de este mismo ítem si reaparece.
+    if (target && sent?.message_id != null && sent?.chat?.id != null) {
+      upsertMessageRow.run({
+        mediaServerId: String(item.mediaServerId),
+        collectionId: source.id,
+        chatId: String(sent.chat.id),
+        messageId: sent.message_id,
+        hasPhoto: hasPhoto ? 1 : 0,
+        text,
+      });
     }
   } catch (err) {
     console.error('[maintainerr] error mandando mensaje Telegram:', err.message);
+  }
+}
+
+// Pedido de Edu (4 ago 2026): si un ítem sale de su colección de borrado SIN
+// pasar por el botón Salvar (esa vía borra su propia fila de
+// maintainerr_messages, ver handleSaveCallback), es que Maintainerr lo borró
+// de verdad — quita el botón del aviso original y añade "YA BORRADA".
+async function markMessageDeleted(mediaServerId, collectionId) {
+  const row = getMessageRow.get(mediaServerId, collectionId);
+  if (!row) return;
+  deleteMessageRow.run(mediaServerId, collectionId);
+  try {
+    const method = row.has_photo ? 'editMessageCaption' : 'editMessageText';
+    const textField = row.has_photo ? 'caption' : 'text';
+    await botApi(method, {
+      chat_id: row.chat_id,
+      message_id: row.message_id,
+      [textField]: `${row.text}\n\n🗑️ YA BORRADA`,
+      reply_markup: { inline_keyboard: [] },
+    });
+  } catch (err) {
+    console.error('[maintainerr] error marcando mensaje como borrado:', err.message);
   }
 }
 
@@ -337,7 +386,10 @@ export async function pollMaintainerrCollections() {
     const notifiedIds = getNotifiedIds.all(source.id).map((r) => r.media_server_id);
 
     for (const id of notifiedIds) {
-      if (!currentIds.has(id)) deleteNotified.run(id, source.id);
+      if (!currentIds.has(id)) {
+        deleteNotified.run(id, source.id);
+        await markMessageDeleted(id, source.id);
+      }
     }
 
     for (const item of media) {
@@ -432,6 +484,10 @@ async function handleSaveCallback(query) {
 
     await removeFromCollection(Number(sourceId), mediaServerId);
     await addToCollection(Number(targetId), mediaServerId);
+    // Se editará el mensaje aquí mismo abajo (con la nota de "Salvada por...");
+    // sin borrar esta fila, el sondeo de respaldo lo vería salir de la colección
+    // origen en el próximo ciclo y lo marcaría (mal) como "YA BORRADA" encima.
+    deleteMessageRow.run(String(mediaServerId), Number(sourceId));
 
     // Días reales de la colección de salvados en el momento de pulsar (no se
     // fija en el callback_data para que un cambio de config no deje mensajes mintiendo).
