@@ -294,6 +294,21 @@ db.exec(`
     enabled INTEGER NOT NULL,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- Pedido de Edu (4 ago 2026): con sequential_seasons, una solicitud de varias
+  -- temporadas de golpe (ej. Ted Lasso 2+3+4) ya no se rechaza entera — se
+  -- aprueba solo la más baja en Seerr y el resto se guarda aquí. processSeasonQueue
+  -- (scheduler.js) crea la solicitud de la siguiente temporada en Seerr en cuanto
+  -- la actual sale de pendientes (vista). Una fila por temporada en espera.
+  CREATE TABLE IF NOT EXISTS season_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tmdb_id INTEGER NOT NULL,
+    season_number INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,         -- Tautulli user_id, para comprobar pendingItems
+    seerr_user_id INTEGER,            -- para crear la solicitud siguiente como este usuario en Seerr
+    library_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
 
 // Roles por defecto pedidos por Edu: se siembran una sola vez si la tabla está

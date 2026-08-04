@@ -3,7 +3,7 @@ import path from 'node:path';
 import { db } from './db.js';
 import { config } from './config.js';
 import { getRawSetting, setRawSetting } from './settings.js';
-import { listPendingRequests, approveRequest, declineRequest, getMediaDetails, getMovieAvailability, listRecentlyApprovedRequests } from './services/seerr.js';
+import { listPendingRequests, approveRequest, declineRequest, getMediaDetails, getMovieAvailability, listRecentlyApprovedRequests, createSeasonRequest } from './services/seerr.js';
 import { getUsers, getActiveSessions, terminateSession } from './services/tautulli.js';
 import { getBalance, getMonthlyTotalQuota, reconcileVoidedRequests, refreshQuotaCache, listStaleOutstandingPairs, normalize, getRequestHold, clearRequestHold, pruneStaleQuotaCache } from './quota.js';
 import { sendMessage, getNotifyTarget, pendingButton, renderNoQuotaMessage } from './services/telegram.js';
@@ -71,6 +71,16 @@ const insertUnavailableReminder = db.prepare(`
   VALUES
     (@requestId, @userId, @username, @libraryId, @mediaTitle, @mediaType, @tmdbId, @seasonNumber, 'unavailable_reminder', datetime('now'))
 `);
+
+// Issue #13 (fase 3): cola secuencial de temporadas en espera (ver season_queue en db.js).
+const insertSeasonQueue = db.prepare(`
+  INSERT INTO season_queue (tmdb_id, season_number, user_id, seerr_user_id, library_id)
+  VALUES (@tmdbId, @seasonNumber, @userId, @seerrUserId, @libraryId)
+`);
+const getSeasonQueueRows = db.prepare(`
+  SELECT * FROM season_queue ORDER BY tmdb_id, user_id, season_number ASC
+`);
+const deleteSeasonQueueRow = db.prepare('DELETE FROM season_queue WHERE id = ?');
 
 // Avoids re-logging (and re-notifying) the same still-pending request every poll
 // cycle when nothing about its situation has changed since the last time.
@@ -172,6 +182,32 @@ async function notifyMultiSeasonDeclined(base, seasonsCount) {
   const text =
     `🚫 Solicitud rechazada: ${base.mediaTitle ?? 'una serie'} (${libraryName}) pedía ${seasonsCount} temporadas de golpe.\n` +
     `${base.username}: pide las temporadas de una en una.`;
+
+  const target = getNotifyTarget();
+  try {
+    if (target.mode === 'group') {
+      if (!target.groupChatId) return;
+      await sendMessage(target.groupChatId, text, { messageThreadId: target.groupTopicId });
+    } else {
+      const chatId = getChatId.get(base.userId)?.chat_id;
+      if (!chatId) return;
+      await sendMessage(chatId, text);
+    }
+  } catch (err) {
+    console.error('[scheduler] telegram notify failed:', err.message);
+  }
+}
+
+// Issue #13 (fase 3): aviso al dividir una solicitud multi-temporada — la más
+// baja se manda a Seerr y sigue el flujo normal (cupo), el resto queda en cola.
+async function notifySequentialSplit(base, firstSeason, restSeasons) {
+  const libraryName = getLibraryName.get(base.libraryId)?.name ?? `biblioteca #${base.libraryId}`;
+  const restText = restSeasons.length === 1
+    ? `la temporada ${restSeasons[0]}`
+    : `las temporadas ${restSeasons.join(', ')}`;
+  const text =
+    `📺 ${base.mediaTitle ?? 'Tu solicitud'} (${libraryName}): se pide primero la temporada ${firstSeason}.\n` +
+    `${base.username}: ${restText} se pedirán solas al terminar de ver la ${firstSeason}.`;
 
   const target = getNotifyTarget();
   try {
@@ -533,6 +569,48 @@ async function runDailyMaintenance() {
   }
 }
 
+// Issue #13 (fase 3): en cuanto la temporada en curso de una serie sale de
+// pendientes (vista), pide en Seerr la siguiente temporada en cola — una fila
+// por tmdb_id+usuario (solo se procesa la más baja de cada grupo; el resto
+// espera su turno). La solicitud nueva entra en el flujo normal (cupo,
+// aprobación) del próximo ciclo, igual que cualquier otra.
+export async function processSeasonQueue() {
+  const rows = getSeasonQueueRows.all();
+  if (rows.length === 0) return;
+
+  // Fetch propio (no el `pending` ya leído al principio del ciclo): la
+  // temporada en curso puede haberse creado en Seerr en ESTE mismo ciclo (justo
+  // antes, al dividir la solicitud multi-temporada) y aún no estar aprobada —
+  // sin este fetch fresco, pendingItems saldría vacío (nada logueado como
+  // 'approved' todavía) y se adelantaría la cola antes de tiempo.
+  const pending = await listPendingRequests();
+  const seenShows = new Set();
+  for (const row of rows) {
+    const showKey = `${row.tmdb_id}:${row.user_id}`;
+    if (seenShows.has(showKey)) continue; // solo la más baja de cada serie+usuario
+    seenShows.add(showKey);
+
+    const { pendingItems } = await getBalance(row.user_id, row.library_id);
+    const sameShowUnwatched = pendingItems.some((item) => item.tmdbId === row.tmdb_id);
+    const lowerSeasonPending = pending.some(
+      (other) =>
+        other.mediaType === 'tv' &&
+        other.tmdbId === row.tmdb_id &&
+        other.requestedBy?.id === row.seerr_user_id &&
+        other.seasons.length > 0 &&
+        Math.min(...other.seasons) < row.season_number
+    );
+    if (sameShowUnwatched || lowerSeasonPending) continue; // aún viendo/esperando la anterior
+
+    try {
+      await createSeasonRequest(row.tmdb_id, row.season_number, row.seerr_user_id);
+      deleteSeasonQueueRow.run(row.id);
+    } catch (err) {
+      console.error('[scheduler] season_queue: no se pudo pedir la siguiente temporada:', err.message);
+    }
+  }
+}
+
 export async function runPollCycle() {
   await runDailyMaintenance();
   await reconcileVoidedRequests();
@@ -587,14 +665,42 @@ export async function runPollCycle() {
       clearRequestHold(request.id); // plazo cumplido: se limpia y sigue el flujo normal
     }
 
-    // Issue #13: temporada a temporada. Con el toggle activo en la biblioteca
-    // (la cola secuencial lo implica: no se puede aprobar media solicitud),
-    // una solicitud con varias temporadas se rechaza entera y con aviso.
-    if ((library.one_season_per_request || library.sequential_seasons) && request.mediaType === 'tv' && requestedSeasons.length > 1) {
+    // Issue #13: temporada a temporada. Con sequential_seasons activo, una
+    // solicitud con varias temporadas de golpe ya no se rechaza entera (fase 3,
+    // pedido de Edu tras el caso Ted Lasso 2+3+4): se rechaza en Seerr pero se
+    // vuelve a pedir solo la más baja, y el resto queda en season_queue para
+    // pedirse solo cuando le toque (ver processSeasonQueue). Con
+    // one_season_per_request SIN cola secuencial se mantiene el rechazo entero
+    // de siempre (el usuario debe volver a pedir él mismo, de una en una).
+    if (request.mediaType === 'tv' && requestedSeasons.length > 1 && (library.one_season_per_request || library.sequential_seasons)) {
       const details = await getMediaDetails(request.mediaType, request.tmdbId, requestedSeasons[0]);
       base.mediaTitle = details.title;
       base.posterUrl = details.posterUrl;
       base.seasonNumber = null; // la decisión aplica a la solicitud entera
+
+      if (library.sequential_seasons && request.tmdbId != null) {
+        const [firstSeason, ...restSeasons] = [...requestedSeasons].sort((a, b) => a - b);
+        await declineRequest(request.id);
+        try {
+          await createSeasonRequest(request.tmdbId, firstSeason, request.requestedBy?.id);
+          for (const seasonNumber of restSeasons) {
+            insertSeasonQueue.run({
+              tmdbId: request.tmdbId,
+              seasonNumber,
+              userId: tautulliUser.id,
+              seerrUserId: request.requestedBy?.id ?? null,
+              libraryId: library.id,
+            });
+          }
+          if (logIfChanged(base, 'split_sequential')) {
+            await notifySequentialSplit(base, firstSeason, restSeasons);
+          }
+        } catch (err) {
+          console.error('[scheduler] no se pudo dividir la solicitud multi-temporada:', err.message);
+        }
+        continue;
+      }
+
       await declineRequest(request.id);
       if (logIfChanged(base, 'declined_multi_season')) {
         await notifyMultiSeasonDeclined(base, requestedSeasons.length);
@@ -697,6 +803,7 @@ export async function runPollCycle() {
   // los pares recién refrescados arriba quedan excluidos por su computed_at.
   // Además avisa por Telegram del cupo liberado (si está activado).
   await refreshStaleAndNotify();
+  await processSeasonQueue();
   await notifyStillUnavailable();
   await enforceSingleSession();
   await notifyBypassedApprovals();

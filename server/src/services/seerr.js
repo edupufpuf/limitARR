@@ -149,6 +149,19 @@ export async function approveRequest(requestId) {
   await call(`/request/${requestId}/approve`, { method: 'POST' });
 }
 
+// Issue #13 (fase 3): cola secuencial de temporadas. En vez de rechazar entera
+// una solicitud con varias temporadas, se crea en Seerr una solicitud nueva con
+// solo la temporada indicada, a nombre del mismo usuario (Seerr permite
+// userId al crear si la api key es de admin) — así Seerr refleja lo que
+// realmente hay pedido, y esta solicitud nueva sigue el flujo normal
+// (cupo/aprobación) del próximo ciclo, sin tocar nada más.
+export async function createSeasonRequest(tmdbId, seasonNumber, seerrUserId) {
+  const body = { mediaType: 'tv', mediaId: tmdbId, seasons: [seasonNumber] };
+  if (seerrUserId != null) body.userId = seerrUserId;
+  const result = await call('/request', { method: 'POST', body: JSON.stringify(body) });
+  return result?.id ?? null;
+}
+
 // Issue #11: rechazar una solicitud en Seerr desde el panel.
 export async function declineRequest(requestId) {
   await call(`/request/${requestId}/decline`, { method: 'POST' });

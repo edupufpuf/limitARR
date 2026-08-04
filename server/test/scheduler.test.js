@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { db } from '../src/db.js';
-import { notifyStillUnavailable, enforceSingleSession, notifyBypassedApprovals } from '../src/scheduler.js';
+import { notifyStillUnavailable, enforceSingleSession, notifyBypassedApprovals, runPollCycle, processSeasonQueue } from '../src/scheduler.js';
 import { setSessionGuardEnabled } from '../src/sessionGuard.js';
 
 // Pedido de Edu (2 ago 2026): si a las 12h de aprobarse sigue sin estar en
@@ -348,5 +348,158 @@ test('notifyBypassedApprovals: no avisa de lo que limitARR ya procesó', async (
     db.prepare(
       "DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key', 'telegram_bot_token')"
     ).run();
+  }
+});
+
+// Issue #13 (fase 3), caso Ted Lasso (4 ago 2026): con sequential_seasons, una
+// solicitud multi-temporada de golpe ya no se rechaza entera — se pide de
+// nuevo solo la más baja en Seerr y el resto queda en season_queue hasta que
+// le toque (ver processSeasonQueue). Mock de Seerr con estado mutable (no solo
+// respuestas fijas) para comprobar que, en el MISMO ciclo, la cola no se
+// adelanta antes de tiempo: la temporada 3 debe ver que la 2 sigue pendiente.
+function mockSequentialSplit({ tautulliUsers, tvPending }) {
+  const createdRequests = [];
+  const declinedIds = [];
+  let nextRequestId = 9920;
+
+  const fetchImpl = async (input, options) => {
+    const url = String(input);
+    const method = options?.method || 'GET';
+
+    if (url.includes('cmd=get_users')) {
+      return new Response(JSON.stringify({ response: { result: 'success', data: tautulliUsers } }), { status: 200 });
+    }
+    if (url.includes('cmd=get_history')) {
+      return new Response(JSON.stringify({ response: { result: 'success', data: { data: [] } } }), { status: 200 });
+    }
+    if (url.includes('/api/v1/request?filter=pending') && url.includes('mediaType=movie')) {
+      return new Response(JSON.stringify({ results: [], pageInfo: { results: 0 } }), { status: 200 });
+    }
+    if (url.includes('/api/v1/request?filter=pending') && url.includes('mediaType=tv')) {
+      return new Response(JSON.stringify({ results: tvPending, pageInfo: { results: tvPending.length } }), { status: 200 });
+    }
+    if (/\/api\/v1\/tv\/66260$/.test(url)) {
+      return new Response(JSON.stringify({ title: 'Ted Lasso', posterPath: '/tedlasso.jpg', seasons: [], mediaInfo: null }), { status: 200 });
+    }
+    const declineMatch = url.match(/\/api\/v1\/request\/(\d+)\/decline$/);
+    if (method === 'POST' && declineMatch) {
+      const id = Number(declineMatch[1]);
+      declinedIds.push(id);
+      tvPending.splice(0, tvPending.length, ...tvPending.filter((r) => r.id !== id));
+      return new Response(null, { status: 204 });
+    }
+    if (method === 'POST' && url.endsWith('/api/v1/request')) {
+      const body = JSON.parse(options.body);
+      createdRequests.push(body);
+      const id = nextRequestId++;
+      tvPending.push({
+        id,
+        status: 1,
+        type: 'tv',
+        media: { tmdbId: body.mediaId },
+        seasons: body.seasons.map((s) => ({ seasonNumber: s })),
+        createdAt: new Date().toISOString(),
+        requestedBy: { id: body.userId, email: 'edu@test.com', plexUsername: 'edu' },
+      });
+      return new Response(JSON.stringify({ id }), { status: 201 });
+    }
+    throw new Error(`unexpected fetch ${method} ${url}`);
+  };
+
+  return { fetchImpl, createdRequests, declinedIds };
+}
+
+test('runPollCycle: Ted Lasso 2+3+4 con sequential_seasons se divide (pide t2, encola t3/t4) sin adelantar la cola en el mismo ciclo', async () => {
+  upsertSetting('tautulli_url', 'http://tautulli.test');
+  upsertSetting('tautulli_api_key', 'test-key');
+  upsertSetting('seerr_url', 'http://seerr.test');
+  upsertSetting('seerr_api_key', 'test-key');
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit, sequential_seasons, one_season_per_request)
+    VALUES (9750, 'Series', 'show', 'standard', 1, 4, 1, 1)
+  `).run();
+
+  const tvPending = [{
+    id: 9910,
+    status: 2,
+    type: 'tv',
+    media: { tmdbId: 66260 },
+    seasons: [{ seasonNumber: 2 }, { seasonNumber: 3 }, { seasonNumber: 4 }],
+    createdAt: '2026-08-04T10:00:00.000Z',
+    requestedBy: { id: 501, email: 'edu@test.com', plexUsername: 'edu' },
+  }];
+  const { fetchImpl, createdRequests, declinedIds } = mockSequentialSplit({
+    tautulliUsers: [{ user_id: 6001, username: 'edu', email: 'edu@test.com', friendly_name: 'Edu', is_admin: '0' }],
+    tvPending,
+  });
+
+  const originalFetch = global.fetch;
+  global.fetch = fetchImpl;
+
+  try {
+    await runPollCycle();
+
+    assert.deepEqual(declinedIds, [9910], 'la solicitud original de 3 temporadas se rechaza en Seerr');
+    assert.equal(createdRequests.length, 1, 'solo se crea la solicitud de la temporada más baja en este ciclo');
+    assert.deepEqual(createdRequests[0], { mediaType: 'tv', mediaId: 66260, seasons: [2], userId: 501 });
+
+    const logged = db.prepare(
+      "SELECT * FROM decisions_log WHERE request_id = 9910 AND decision = 'split_sequential'"
+    ).get();
+    assert.ok(logged, 'debe quedar logueado en Registro');
+    assert.equal(logged.season_number, null);
+
+    const queued = db.prepare(
+      'SELECT season_number FROM season_queue WHERE tmdb_id = 66260 ORDER BY season_number'
+    ).all();
+    assert.deepEqual(
+      queued.map((r) => r.season_number),
+      [3, 4],
+      'temporadas 3 y 4 esperan en cola; ninguna se pide todavía porque la 2 sigue pendiente de aprobar/ver'
+    );
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM decisions_log WHERE request_id = 9910').run();
+    db.prepare('DELETE FROM season_queue WHERE tmdb_id = 66260').run();
+    db.prepare('DELETE FROM libraries WHERE id = 9750').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
+  }
+});
+
+test('processSeasonQueue: pide la siguiente temporada en cuanto la anterior deja de estar pendiente', async () => {
+  upsertSetting('tautulli_url', 'http://tautulli.test');
+  upsertSetting('tautulli_api_key', 'test-key');
+  upsertSetting('seerr_url', 'http://seerr.test');
+  upsertSetting('seerr_api_key', 'test-key');
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit, sequential_seasons)
+    VALUES (9751, 'Series', 'show', 'standard', 1, 4, 1)
+  `).run();
+  db.prepare(`
+    INSERT INTO season_queue (id, tmdb_id, season_number, user_id, seerr_user_id, library_id)
+    VALUES (77001, 66261, 3, 6002, 502, 9751)
+  `).run();
+
+  const { fetchImpl, createdRequests } = mockSequentialSplit({
+    tautulliUsers: [{ user_id: 6002, username: 'edu2', email: 'edu2@test.com', friendly_name: 'Edu2', is_admin: '0' }],
+    tvPending: [], // nada pendiente en Seerr para esta serie: la temporada 2 ya se vio/liberó
+  });
+
+  const originalFetch = global.fetch;
+  global.fetch = fetchImpl;
+
+  try {
+    await processSeasonQueue();
+
+    assert.equal(createdRequests.length, 1);
+    assert.deepEqual(createdRequests[0], { mediaType: 'tv', mediaId: 66261, seasons: [3], userId: 502 });
+
+    const remaining = db.prepare('SELECT 1 FROM season_queue WHERE id = 77001').get();
+    assert.equal(remaining, undefined, 'la fila se borra al pedir la temporada en Seerr');
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM season_queue WHERE tmdb_id = 66261').run();
+    db.prepare('DELETE FROM libraries WHERE id = 9751').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
   }
 });
