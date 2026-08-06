@@ -262,7 +262,7 @@ test('notifyBypassedApprovals: avisa (una vez) de lo aprobado fuera de limitARR'
   const sentMessages = [];
   const originalFetch = global.fetch;
   const mock = mockBypassed({
-    tautulliUsers: [{ user_id: 950, username: 'edu' }],
+    tautulliUsers: [{ user_id: 950, username: 'edu', is_admin: 1 }],
     movieRequests: [{
       id: 5001,
       status: 2,
@@ -300,6 +300,58 @@ test('notifyBypassedApprovals: avisa (una vez) de lo aprobado fuera de limitARR'
     db.prepare('DELETE FROM decisions_log WHERE request_id = 5001').run();
     db.prepare('DELETE FROM telegram_links WHERE user_id = 950').run();
     db.prepare('DELETE FROM libraries WHERE id = 9900').run();
+    db.prepare(
+      "DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key', 'telegram_bot_token')"
+    ).run();
+  }
+});
+
+test('notifyBypassedApprovals: en nombre de otro usuario (no admin) sí resta cupo', async () => {
+  upsertSetting('tautulli_url', 'http://tautulli.test');
+  upsertSetting('tautulli_api_key', 'test-key');
+  upsertSetting('seerr_url', 'http://seerr.test');
+  upsertSetting('seerr_api_key', 'test-key');
+  upsertSetting('telegram_bot_token', 'test-bot-token');
+  db.prepare("INSERT INTO telegram_links (user_id, chat_id, linked_at) VALUES (952, 'chat-952', datetime('now'))").run();
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (9901, 'Películas', 'movie', 'standard', 1, 4)
+  `).run();
+
+  const sentMessages = [];
+  const originalFetch = global.fetch;
+  const mock = mockBypassed({
+    // Edu (admin) pide en nombre de Rocío: la que hace match es la cuenta
+    // de Rocío, no admin, aunque quien lo pidió/autoaprobó en Seerr fue Edu.
+    tautulliUsers: [{ user_id: 952, username: 'rocio', is_admin: 0 }],
+    movieRequests: [{
+      id: 5003,
+      status: 2,
+      type: 'movie',
+      media: { tmdbId: 603 },
+      createdAt: '2026-08-06T06:30:00.000Z',
+      requestedBy: { id: 3, email: null, plexUsername: 'rocio' },
+    }],
+    movieDetails: { 603: { title: 'Sentido y Sensibilidad', posterPath: '/s.jpg' } },
+  });
+  global.fetch = async (input, options) => {
+    const url = String(input);
+    if (url.includes('api.telegram.org')) sentMessages.push(JSON.parse(options.body));
+    return mock(input, options);
+  };
+
+  try {
+    await notifyBypassedApprovals();
+    const logged = db.prepare("SELECT * FROM decisions_log WHERE request_id = 5003").get();
+    assert.ok(logged);
+    assert.equal(logged.decision, 'approved');
+    assert.equal(logged.user_id, 952);
+    assert.equal(logged.library_id, 9901);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM decisions_log WHERE request_id = 5003').run();
+    db.prepare('DELETE FROM telegram_links WHERE user_id = 952').run();
+    db.prepare('DELETE FROM libraries WHERE id = 9901').run();
     db.prepare(
       "DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key', 'telegram_bot_token')"
     ).run();

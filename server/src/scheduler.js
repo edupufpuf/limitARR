@@ -491,7 +491,7 @@ export async function notifyBypassedApprovals() {
     const sectionType = request.mediaType === 'tv' ? 'show' : 'movie';
     const library = getLibraryForRequest.get(sectionType, request.is4k ? '4k' : 'standard');
 
-    insertBypassedApprovalLog.run({
+    const base = {
       requestId: request.id,
       userId: tautulliUser?.id ?? null,
       username: tautulliUser?.username ?? request.requestedBy.username ?? null,
@@ -500,7 +500,20 @@ export async function notifyBypassedApprovals() {
       mediaType: request.mediaType,
       tmdbId: request.tmdbId ?? null,
       seasonNumber: seasons[0] ?? null,
-    });
+    };
+
+    // Pedido de Edu (6 ago 2026): un bypass en nombre de OTRO usuario (no
+    // admin) -Edu pide algo para otra persona en Seerr y se autoaprueba al
+    // instante por ser él admin- sí tiene que restar cupo de esa persona,
+    // como una aprobación normal; antes solo quedaba como informativo (por
+    // eso Edu tenía que meterlo a mano con cargo manual). Solo se queda
+    // informativo cuando el bypass es del propio admin pidiendo para sí
+    // mismo, o de alguien sin match en Tautulli.
+    if (tautulliUser && !tautulliUser.isAdmin) {
+      insertLog.run({ ...base, posterUrl: null, balanceBefore: null, limitApplied: null, decision: 'approved' });
+    } else {
+      insertBypassedApprovalLog.run(base);
+    }
 
     if (!tautulliUser) continue;
     const chatId = getChatId.get(tautulliUser.id)?.chat_id;
