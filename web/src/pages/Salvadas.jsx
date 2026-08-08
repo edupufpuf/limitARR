@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { IconSearch, IconUsers, IconSave } from '../icons.jsx';
-import { SalvadosGrid, salvadoDaysLeft } from '../components/Salvados.jsx';
+import { SalvadosGrid, salvadoDaysLeft, SalvadosHistoryList } from '../components/Salvados.jsx';
 
 const REFRESH_MS = 60_000;
 
@@ -54,12 +54,14 @@ function GroupCard({ group, expanded, onToggle }) {
 
 export default function Salvadas() {
   const [salvados, setSalvados] = useState([]);
+  const [history, setHistory] = useState([]);
   const [users, setUsers] = useState([]);
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState(new Set());
 
   function load() {
     api.salvados().then(setSalvados).catch(() => {});
+    api.salvadosHistory(30).then(setHistory).catch(() => {});
   }
 
   useEffect(() => {
@@ -141,6 +143,12 @@ export default function Salvadas() {
       {salvados.length > 0 && visibleGroups.length === 0 && (
         <p className="text-gray-500 text-sm py-6 text-center">Ningún usuario coincide con "{query}".</p>
       )}
+
+      <h2 className="page-title mt-8 mb-1">Últimos 30 días</h2>
+      <p className="text-sm text-gray-500 mb-4">
+        Todo lo salvado en el último mes, se haya borrado ya o no, con si cada uno la ha visto.
+      </p>
+      <SalvadosHistoryList items={history} />
     </div>
   );
 }

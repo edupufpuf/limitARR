@@ -229,6 +229,12 @@ addColumnIfMissing('ALTER TABLE quota_cache ADD COLUMN monthly_used INTEGER');
 // maintainerr.js). NULL mientras no se detecte, o para siempre en salvados de
 // serie (no soportado en v1, ver comentario en esa función).
 addColumnIfMissing('ALTER TABLE salvados ADD COLUMN watched_at TEXT');
+// Cuándo se resolvió este salvado (se borró de verdad, o dejó de estar
+// salvado por otra vía) — NULL mientras sigue activo. processSalvados marca
+// esto en vez de borrar la fila: el Registro y el historial de la pestaña
+// Salvadas necesitan conservarla (antes del 8 ago 2026 la fila nunca se
+// borraba sola; una regresión de esa fecha la borraba de golpe al resolverse).
+addColumnIfMissing('ALTER TABLE salvados ADD COLUMN resolved_at TEXT');
 
 // v2: roles — igual que los grupos, un usuario tiene como mucho un rol
 // (user_roles.user_id es PK), y el rol da valores por defecto de límite,

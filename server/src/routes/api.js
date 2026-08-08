@@ -52,6 +52,7 @@ import {
   listCollections as listMaintainerrCollections,
   getSalvadosByUser,
   getAllSalvados,
+  getSalvadosHistory,
 } from '../services/maintainerr.js';
 
 export const router = Router();
@@ -1516,6 +1517,13 @@ router.post('/maintainerr/test', ah(async (req, res) => {
 router.get('/salvados', ah(async (req, res) => {
   res.json(await getAllSalvados());
 }));
+
+// Historial 30 días (o los que pida ?days=) para la pestaña Salvadas: activas
+// y ya resueltas, con watched_at por fila para pintar "vista"/"pendiente".
+router.get('/salvados/history', (req, res) => {
+  const days = Number(req.query.days);
+  res.json(getSalvadosHistory(Number.isFinite(days) && days > 0 ? days : 30));
+});
 
 router.get('/notifications/settings', (req, res) => {
   res.json({ ...getBotTokenForDisplay(), ...getNotifyTarget() });

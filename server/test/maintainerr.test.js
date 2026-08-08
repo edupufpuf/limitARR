@@ -4,7 +4,7 @@ import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { db } from '../src/db.js';
 import { getWebhookSecret } from '../src/auth.js';
-import { getSalvadosByUser, getAllSalvados, pollMaintainerrCollections, processSalvados } from '../src/services/maintainerr.js';
+import { getSalvadosByUser, getAllSalvados, getSalvadosHistory, pollMaintainerrCollections, processSalvados } from '../src/services/maintainerr.js';
 
 // Tests del módulo Maintainerr con la DB en memoria y global.fetch mockeado
 // (estilo eliminarr.test.js: nada de red real, ni Maintainerr ni Telegram).
@@ -521,7 +521,10 @@ test('processSalvados: todos la han visto → borra 24h después del último, v�
   assert.ok(handleCall, 'debería haber llamado a media/handle');
   assert.deepEqual(JSON.parse(handleCall.options.body), { collectionId: 4, mediaId: 'ps-1' });
 
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM salvados WHERE media_server_id = 'ps-1'").get().n, 0);
+  // La fila no se borra (el historial de la pestaña Salvadas la necesita
+  // viva) — se marca resuelta.
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM salvados WHERE media_server_id = 'ps-1' AND resolved_at IS NULL").get().n, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM salvados WHERE media_server_id = 'ps-1'").get().n, 2);
   assert.equal(db.prepare("SELECT 1 FROM maintainerr_candidates WHERE media_server_id = 'ps-1'").get(), undefined);
   assert.equal(db.prepare("SELECT 1 FROM salvado_messages WHERE media_server_id = 'ps-1'").get(), undefined);
 
@@ -596,7 +599,7 @@ test('processSalvados: detecta el visionado vía Tautulli (después del salvado)
 
   const handleCall = calls.find((c) => c.url.includes('/media/handle'));
   assert.ok(handleCall, 'watched_at detectado debería disparar el borrado (24h ya pasadas)');
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM salvados WHERE media_server_id = 'ps-3'").get().n, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM salvados WHERE media_server_id = 'ps-3' AND resolved_at IS NULL").get().n, 0);
 });
 
 test('processSalvados: cierra la ventana de salvar una sola vez, sin borrar todavía', async () => {
@@ -621,4 +624,25 @@ test('processSalvados: cierra la ventana de salvar una sola vez, sin borrar toda
   calls.length = 0;
   await processSalvados();
   assert.equal(calls.some((c) => c.url.includes('editMessage') && JSON.parse(c.options.body).text?.includes('Plazo para salvarla cerrado')), false);
+});
+
+test('getSalvadosHistory: incluye resueltas y activas de los últimos 30 días, con watched_at/resolved_at', async () => {
+  db.exec("DELETE FROM salvados;");
+  db.prepare(`
+    INSERT INTO salvados (media_server_id, tmdb_id, title, telegram_user_id, telegram_name, user_id, library_id, saved_at, expires_at, watched_at, resolved_at)
+    VALUES
+      ('ps-5', NULL, 'Vista y borrada', '1', 'David', NULL, NULL, datetime('now', '-10 days'), datetime('now', '-1 days'), datetime('now', '-5 days'), datetime('now', '-4 days')),
+      ('ps-6', NULL, 'Aún pendiente', '2', 'Ana', NULL, NULL, datetime('now', '-1 days'), datetime('now', '+5 days'), NULL, NULL),
+      ('ps-7', NULL, 'Demasiado vieja', '3', 'Bea', NULL, NULL, datetime('now', '-40 days'), datetime('now', '-30 days'), NULL, datetime('now', '-35 days'))
+  `).run();
+
+  const history = getSalvadosHistory(30);
+  const ids = history.map((r) => r.media_server_id);
+  assert.ok(ids.includes('ps-5'), 'resuelta pero dentro de 30 días debe salir');
+  assert.ok(ids.includes('ps-6'), 'activa debe salir');
+  assert.ok(!ids.includes('ps-7'), 'fuera de los 30 días no debe salir');
+
+  const vista = history.find((r) => r.media_server_id === 'ps-5');
+  assert.ok(vista.watched_at, 'debe conservar watched_at');
+  assert.ok(vista.resolved_at, 'debe conservar resolved_at');
 });

@@ -465,8 +465,13 @@ const getSalvadoForItemAndUser = db.prepare(
 );
 const updateSalvadoWatchedAt = db.prepare('UPDATE salvados SET watched_at = ? WHERE id = ?');
 const updateSalvadosExpiresAt = db.prepare('UPDATE salvados SET expires_at = ? WHERE media_server_id = ?');
-const deleteSalvadosForItem = db.prepare('DELETE FROM salvados WHERE media_server_id = ?');
-const distinctSalvadoMediaIds = db.prepare('SELECT DISTINCT media_server_id FROM salvados');
+// No se borra la fila (el Registro y el historial de la pestaña Salvadas la
+// necesitan viva) — se marca resuelta, mismo espíritu que decisions_log
+// (nunca se reescribe una fila 'approved' vieja, solo se añaden eventos).
+const resolveSalvadosForItem = db.prepare(
+  "UPDATE salvados SET resolved_at = datetime('now') WHERE media_server_id = ? AND resolved_at IS NULL"
+);
+const distinctSalvadoMediaIds = db.prepare('SELECT DISTINCT media_server_id FROM salvados WHERE resolved_at IS NULL');
 const getLibrarySectionType = db.prepare('SELECT section_type FROM libraries WHERE id = ?');
 
 // Mensaje de Telegram de un salvado (ver tabla salvado_messages en db.js):
@@ -790,7 +795,7 @@ async function filterStillInCollection(rows) {
 export async function getSalvadosByUser(userId) {
   const rows = db
     .prepare(
-      `SELECT * FROM salvados WHERE user_id = ? AND expires_at > datetime('now') ORDER BY saved_at DESC`
+      `SELECT * FROM salvados WHERE user_id = ? AND resolved_at IS NULL AND expires_at > datetime('now') ORDER BY saved_at DESC`
     )
     .all(userId);
   return filterStillInCollection(rows);
@@ -798,9 +803,22 @@ export async function getSalvadosByUser(userId) {
 
 export async function getAllSalvados() {
   const rows = db
-    .prepare(`SELECT * FROM salvados WHERE expires_at > datetime('now') ORDER BY saved_at DESC`)
+    .prepare(`SELECT * FROM salvados WHERE resolved_at IS NULL AND expires_at > datetime('now') ORDER BY saved_at DESC`)
     .all();
   return filterStillInCollection(rows);
+}
+
+// Pedido de Edu (8 ago 2026): historial de salvadas de los últimos N días,
+// activas o ya resueltas (borradas), con si cada salvador la ha visto o no —
+// para la pestaña Salvadas del panel. A diferencia de getAllSalvados, no
+// filtra por resolved_at/expires_at ni comprueba en vivo contra Maintainerr:
+// es una foto del registro local, no del estado actual de "sigue salvada".
+export function getSalvadosHistory(days = 30) {
+  return db
+    .prepare(
+      `SELECT * FROM salvados WHERE saved_at >= datetime('now', '-' || ? || ' days') ORDER BY saved_at DESC`
+    )
+    .all(days);
 }
 
 // --- Borrado ligado a visionado (pedido de Edu, 8 ago 2026) ---
@@ -908,7 +926,7 @@ async function finalizeSalvadoDeletion(mediaServerId) {
     // Ya no está en ninguna colección de salvados vigilada (lo quitaron a
     // mano en Maintainerr, o se borró de otra forma) — se limpia el rastro
     // sin llamar a media/handle, que fallaría (el ítem ya no está ahí).
-    deleteSalvadosForItem.run(mediaServerId);
+    resolveSalvadosForItem.run(mediaServerId);
     deleteCandidate.run(mediaServerId);
     await closeSalvadoMessage(mediaServerId, '🗑️ Ya no está salvada.');
     return;
@@ -920,7 +938,7 @@ async function finalizeSalvadoDeletion(mediaServerId) {
     console.error('[maintainerr] error borrando salvado:', err.message);
     return;
   }
-  deleteSalvadosForItem.run(mediaServerId);
+  resolveSalvadosForItem.run(mediaServerId);
   deleteCandidate.run(mediaServerId);
   await closeSalvadoMessage(mediaServerId, '🗑️ Borrada.');
 }

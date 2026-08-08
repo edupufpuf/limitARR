@@ -144,6 +144,7 @@ export const api = {
 
   mySalvados: () => request('/me/salvados'),
   salvados: () => request('/salvados'),
+  salvadosHistory: (days = 30) => request(`/salvados/history?days=${days}`),
   maintainerrSettings: () => request('/maintainerr/settings'),
   updateMaintainerrSettings: (body) =>
     request('/maintainerr/settings', { method: 'PUT', body: JSON.stringify(body) }),
