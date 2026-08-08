@@ -24,10 +24,16 @@ const DELETE_MESSAGE_KEY = 'maintainerr_delete_message';
 // tipo ("la serie «X» (temporada N)" vs "«Película»"), pero el admin puede
 // querer un mensaje enteramente distinto (emoji, tono) para series.
 const DELETE_MESSAGE_TV_KEY = 'maintainerr_delete_message_tv';
+// Pedido de Edu (8 ago 2026): plazo de gracia de una salvada — si no la ha
+// visto todo el mundo, se borra a los X días DESDE QUE SE SALVÓ (el primer
+// salvado, si hay varios), sin sumar la ventana de salvar por medio. X
+// configurable en el panel, no fijo en código.
+const SALVADO_GRACE_DAYS_KEY = 'maintainerr_salvado_grace_days';
 
 const DEFAULT_SAVED_MESSAGE = '✅ Salvada por {usuario}{dias}.';
 const DEFAULT_DELETE_MESSAGE = '🎬 {titulo} se borrará{dias}.\nSi quieres salvarla, pulsa 💾 Salvar y estará {diasSalvado} días más.';
 const DEFAULT_DELETE_MESSAGE_TV = '📺 {titulo} se borrará{dias}.\nSi quieres salvarla, pulsa 💾 Salvar y estará {diasSalvado} días más.';
+const DEFAULT_SALVADO_GRACE_DAYS = 5;
 
 function parsePairs(raw) {
   if (!raw) return [];
@@ -52,7 +58,13 @@ export function getMaintainerrSettings() {
     savedMessage: getRawSetting(SAVED_MESSAGE_KEY) || DEFAULT_SAVED_MESSAGE,
     deleteMessage: getRawSetting(DELETE_MESSAGE_KEY) || DEFAULT_DELETE_MESSAGE,
     deleteMessageTv: getRawSetting(DELETE_MESSAGE_TV_KEY) || DEFAULT_DELETE_MESSAGE_TV,
+    salvadoGraceDays: getSalvadoGraceDays(),
   };
+}
+
+function getSalvadoGraceDays() {
+  const raw = Number(getRawSetting(SALVADO_GRACE_DAYS_KEY));
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_SALVADO_GRACE_DAYS;
 }
 
 export function getMaintainerrSettingsForDisplay() {
@@ -68,11 +80,12 @@ export function getMaintainerrSettingsForDisplay() {
     savedMessage: s.savedMessage,
     deleteMessage: s.deleteMessage,
     deleteMessageTv: s.deleteMessageTv,
+    salvadoGraceDays: s.salvadoGraceDays,
     enabled: isEnabled(),
   };
 }
 
-export function updateMaintainerrSettings({ url, botToken, chatId, topicId, pairs, silent, savedMessage, deleteMessage, deleteMessageTv }) {
+export function updateMaintainerrSettings({ url, botToken, chatId, topicId, pairs, silent, savedMessage, deleteMessage, deleteMessageTv, salvadoGraceDays }) {
   if (typeof url === 'string' && url.trim()) setRawSetting(URL_KEY, url.trim().replace(/\/$/, ''));
   if (typeof botToken === 'string' && botToken.trim()) setRawSetting(BOT_TOKEN_KEY, botToken.trim());
   if (chatId !== undefined) setRawSetting(CHAT_KEY, String(chatId).trim());
@@ -81,6 +94,10 @@ export function updateMaintainerrSettings({ url, botToken, chatId, topicId, pair
   if (typeof savedMessage === 'string') setRawSetting(SAVED_MESSAGE_KEY, savedMessage.trim() || DEFAULT_SAVED_MESSAGE);
   if (typeof deleteMessage === 'string') setRawSetting(DELETE_MESSAGE_KEY, deleteMessage.trim() || DEFAULT_DELETE_MESSAGE);
   if (typeof deleteMessageTv === 'string') setRawSetting(DELETE_MESSAGE_TV_KEY, deleteMessageTv.trim() || DEFAULT_DELETE_MESSAGE_TV);
+  if (salvadoGraceDays !== undefined) {
+    const n = Number(salvadoGraceDays);
+    setRawSetting(SALVADO_GRACE_DAYS_KEY, Number.isFinite(n) && n > 0 ? String(Math.round(n)) : String(DEFAULT_SALVADO_GRACE_DAYS));
+  }
   if (Array.isArray(pairs)) {
     const clean = pairs
       .filter((p) => p && typeof p.source === 'string' && typeof p.target === 'string' && p.target)
@@ -459,9 +476,12 @@ const insertSalvado = db.prepare(`
   INSERT INTO salvados (media_server_id, tmdb_id, title, poster_url, telegram_user_id, telegram_name, user_id, library_id, saved_at, expires_at)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
 `);
-const getSalvadosForItem = db.prepare('SELECT * FROM salvados WHERE media_server_id = ? ORDER BY saved_at ASC');
+// Solo filas activas (resolved_at IS NULL): todo lo que llama a esto quiere
+// el estado "sigue salvada" — el histórico completo (incluye resueltas) vive
+// aparte en getSalvadosHistory, para el panel.
+const getSalvadosForItem = db.prepare('SELECT * FROM salvados WHERE media_server_id = ? AND resolved_at IS NULL ORDER BY saved_at ASC');
 const getSalvadoForItemAndUser = db.prepare(
-  'SELECT 1 FROM salvados WHERE media_server_id = ? AND telegram_user_id = ?'
+  'SELECT 1 FROM salvados WHERE media_server_id = ? AND telegram_user_id = ? AND resolved_at IS NULL'
 );
 const updateSalvadoWatchedAt = db.prepare('UPDATE salvados SET watched_at = ? WHERE id = ?');
 const updateSalvadosExpiresAt = db.prepare('UPDATE salvados SET expires_at = ? WHERE media_server_id = ?');
@@ -501,22 +521,16 @@ function isTvLibrary(libraryId) {
   return getLibrarySectionType.get(libraryId)?.section_type === 'show';
 }
 
-// Peor caso conocido de fecha de borrado para un ítem salvado: el cierre de
-// la ventana de salvar (los días que tardaría en borrarse sola, guardados en
-// maintainerr_candidates al avisar) + 7 días de margen para que se vea. Sin
-// dato de ventana (deleteAfterDays no configurado en su momento en la
-// colección origen), cae a 7 días desde el PRIMER salvado — ancla estable,
-// no "7 días desde ahora" en cada ciclo, que nunca llegaría.
-const FALLBACK_WATCH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+// Peor caso conocido de fecha de borrado para un ítem salvado: el día del
+// PRIMER salvado (si hay varios salvadores) + los días de gracia configurados
+// (salvadoGraceDays, 5 por defecto) — no se suma la ventana de salvar por
+// medio (pedido de Edu, 8 ago 2026: "no se deben sumar, se añaden los días
+// extra al día de hoy [de salvarse]"). Ancla estable en saved_at, no "hoy" en
+// cada ciclo, que nunca llegaría a cumplirse.
 function getFallbackDeadlineMs(mediaServerId) {
-  const candidate = getCandidate.get(mediaServerId);
-  if (candidate) {
-    const closesAtMs = sqliteTextToMs(candidate.notified_at) + candidate.delete_after_days * 86_400_000;
-    return closesAtMs + FALLBACK_WATCH_WINDOW_MS;
-  }
   const rows = getSalvadosForItem.all(mediaServerId);
   const firstSavedMs = rows.length > 0 ? Math.min(...rows.map((r) => sqliteTextToMs(r.saved_at))) : Date.now();
-  return firstSavedMs + FALLBACK_WATCH_WINDOW_MS;
+  return firstSavedMs + getSalvadoGraceDays() * 86_400_000;
 }
 
 function displayName(from) {

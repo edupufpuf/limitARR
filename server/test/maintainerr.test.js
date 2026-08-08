@@ -604,11 +604,14 @@ test('processSalvados: detecta el visionado vía Tautulli (después del salvado)
 
 test('processSalvados: cierra la ventana de salvar una sola vez, sin borrar todavía', async () => {
   db.exec("DELETE FROM salvados; DELETE FROM maintainerr_candidates; DELETE FROM salvado_messages;");
-  // Ventana (7 días) cerrada hace 3 días: notified_at hace 10 días.
+  // Ventana (7 días) cerrada hace 3 días: notified_at hace 10 días. El plazo
+  // de gracia (5 días por defecto) cuenta desde el salvado, NO desde el
+  // cierre de ventana — guardado hace 1 día, así que ese plazo (día 4) queda
+  // lejos y este test aísla solo el cierre de ventana, sin que dispare borrado.
   insertCandidateRow.run('ps-4', new Date(Date.now() - 10 * 86_400_000).toISOString().slice(0, 19).replace('T', ' '), 7, 0);
   db.prepare(`
     INSERT INTO salvados (media_server_id, tmdb_id, title, telegram_user_id, telegram_name, user_id, library_id, saved_at, expires_at, watched_at)
-    VALUES ('ps-4', NULL, 'Test', '111', 'David', NULL, NULL, datetime('now', '-10 days'), datetime('now', '+1 day'), NULL)
+    VALUES ('ps-4', NULL, 'Test', '111', 'David', NULL, NULL, datetime('now', '-1 days'), datetime('now', '+1 day'), NULL)
   `).run();
   insertSalvadoMessageRow.run('ps-4', '✅ Salvada por David.');
 
@@ -619,6 +622,8 @@ test('processSalvados: cierra la ventana de salvar una sola vez, sin borrar toda
   const closedEdits = calls.filter((c) => c.url.includes('editMessage') && JSON.parse(c.options.body).text?.includes('Plazo para salvarla cerrado'));
   assert.equal(closedEdits.length, 1);
   assert.equal(db.prepare("SELECT window_closed_notified FROM maintainerr_candidates WHERE media_server_id = 'ps-4'").get().window_closed_notified, 1);
+  assert.equal(calls.some((c) => c.url.includes('/media/handle')), false, 'aún dentro del plazo de gracia, no debería borrar');
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM salvados WHERE media_server_id = 'ps-4' AND resolved_at IS NULL").get().n, 1);
 
   // Segunda pasada: no debe repetir el aviso de "plazo cerrado".
   calls.length = 0;
@@ -645,4 +650,26 @@ test('getSalvadosHistory: incluye resueltas y activas de los últimos 30 días, 
   const vista = history.find((r) => r.media_server_id === 'ps-5');
   assert.ok(vista.watched_at, 'debe conservar watched_at');
   assert.ok(vista.resolved_at, 'debe conservar resolved_at');
+});
+
+test('processSalvados: el plazo de gracia es configurable y cuenta desde el PRIMER salvado, no desde la ventana', async () => {
+  db.exec("DELETE FROM salvados; DELETE FROM maintainerr_candidates; DELETE FROM salvado_messages;");
+  upsertSetting.run('maintainerr_salvado_grace_days', '2');
+  // Ventana larga (20 días, ni cerca de cerrarse) para probar que el plazo NO
+  // depende de ella: el salvado es de hace 3 días, plazo de gracia 2 días →
+  // ya tocaría borrar, aunque la ventana de salvar siga abierta 17 días más.
+  insertCandidateRow.run('ps-8', new Date().toISOString().slice(0, 19).replace('T', ' '), 20, 0);
+  db.prepare(`
+    INSERT INTO salvados (media_server_id, tmdb_id, title, telegram_user_id, telegram_name, user_id, library_id, saved_at, expires_at, watched_at)
+    VALUES ('ps-8', NULL, 'Test', '111', 'David', NULL, NULL, datetime('now', '-3 days'), datetime('now', '+1 day'), NULL)
+  `).run();
+
+  try {
+    const { fetchImpl, calls } = targetCollectionsFetch('ps-8');
+    global.fetch = fetchImpl;
+    await processSalvados();
+    assert.ok(calls.some((c) => c.url.includes('/media/handle')), 'plazo de gracia (2 días) ya cumplido pese a ventana larga sin cerrar');
+  } finally {
+    db.prepare("DELETE FROM settings WHERE key = 'maintainerr_salvado_grace_days'").run();
+  }
 });

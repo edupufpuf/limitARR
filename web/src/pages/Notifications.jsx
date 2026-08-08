@@ -88,6 +88,7 @@ export default function Notifications() {
   const [mntSavedMessage, setMntSavedMessage] = useState('');
   const [mntDeleteMessage, setMntDeleteMessage] = useState('');
   const [mntDeleteMessageTv, setMntDeleteMessageTv] = useState('');
+  const [mntGraceDays, setMntGraceDays] = useState(5);
   const [mntResult, setMntResult] = useState(null);
   const [mntLiveCollections, setMntLiveCollections] = useState(null);
   const [mntPairsMap, setMntPairsMap] = useState({}); // { tituloOrigen: tituloDestino }
@@ -124,6 +125,7 @@ export default function Notifications() {
         mntSavedMessage !== (mnt.savedMessage ?? '') ||
         mntDeleteMessage !== (mnt.deleteMessage ?? '') ||
         mntDeleteMessageTv !== (mnt.deleteMessageTv ?? '') ||
+        mntGraceDays !== (mnt.salvadoGraceDays ?? 5) ||
         normalizePairs(mntPairsMap) !== normalizePairs(Object.fromEntries((mnt.pairs ?? []).map((p) => [p.source, p.target]))))
   );
   useDirty('notifications-maintainerr', mntDirty);
@@ -154,6 +156,7 @@ export default function Notifications() {
       setMntSavedMessage(m.savedMessage ?? '');
       setMntDeleteMessage(m.deleteMessage ?? '');
       setMntDeleteMessageTv(m.deleteMessageTv ?? '');
+      setMntGraceDays(m.salvadoGraceDays ?? 5);
       const map = {};
       (m.pairs ?? []).forEach((p) => { map[p.source] = p.target; });
       setMntPairsMap(map);
@@ -175,11 +178,13 @@ export default function Notifications() {
         savedMessage: mntSavedMessage,
         deleteMessage: mntDeleteMessage,
         deleteMessageTv: mntDeleteMessageTv,
+        salvadoGraceDays: mntGraceDays,
       });
       setMnt((prev) => ({ ...prev, ...m }));
       setMntSavedMessage(m.savedMessage ?? mntSavedMessage);
       setMntDeleteMessage(m.deleteMessage ?? mntDeleteMessage);
       setMntDeleteMessageTv(m.deleteMessageTv ?? mntDeleteMessageTv);
+      setMntGraceDays(m.salvadoGraceDays ?? mntGraceDays);
       setMntToken('');
       setMntResult('Guardado.');
     } catch {
@@ -534,12 +539,27 @@ export default function Notifications() {
                   <span className="text-gray-300">{'{fecha}'}</span> (nueva fecha de borrado tras salvar, p.ej. "22 de julio").
                 </p>
               </div>
+              <div>
+                <label className="label">Plazo de gracia al salvar (días)</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={mntGraceDays}
+                  onChange={(e) => setMntGraceDays(Number(e.target.value))}
+                  className="input max-w-[8rem]"
+                />
+                <p className="text-xs text-gray-500 mt-2">
+                  Si no la ve todo el que la salvó, se borra a estos días contados desde el PRIMER salvado
+                  (no desde hoy, no se suma con nada más). Si la ven todos antes, se borra 24h después del
+                  último en verla — este plazo es solo el límite máximo si nadie la ve.
+                </p>
+              </div>
             </MiniSection>
 
             <MiniSection title="Colecciones: qué va a dónde al salvar">
               <ol className="text-xs text-gray-500 mt-1 mb-3 list-decimal list-inside space-y-1">
                 <li>En Maintainerr crea la colección de borrado (regla Radarr/Sonarr) como siempre.</li>
-                <li>Crea otra colección en la <strong>misma biblioteca y tipo</strong> para "salvados", con los días extra en "delete after days". El nombre es libre — Maintainerr no deja mezclar bibliotecas ni tipos al mover media entre colecciones, por eso solo aparecen como opción las compatibles.</li>
+                <li>Crea otra colección en la <strong>misma biblioteca y tipo</strong> para "salvados" (el nombre es libre; los días de "delete after days" de ESTA ya no importan — limitARR decide cuándo borrarla de verdad, ver "Plazo de gracia" abajo). Maintainerr no deja mezclar bibliotecas ni tipos al mover media entre colecciones, por eso solo aparecen como opción las compatibles.</li>
                 <li>Pulsa "Cargar colecciones de Maintainerr" y, para cada colección de borrado, elige a mano a cuál de salvados se mueve la película. Nada se adivina por nombre — si no eliges destino, esa colección se queda sin botón "Salvar".</li>
                 <li>En Maintainerr añade el webhook de abajo como agente (Settings → Notifications → Webhook Agent), payload <code>{'{}'}</code>, evento "Media Added To Collection".</li>
               </ol>
