@@ -4,7 +4,7 @@ import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { db } from '../src/db.js';
 import { getWebhookSecret } from '../src/auth.js';
-import { getSalvadosByUser, getAllSalvados, pollMaintainerrCollections } from '../src/services/maintainerr.js';
+import { getSalvadosByUser, getAllSalvados, pollMaintainerrCollections, processSalvados } from '../src/services/maintainerr.js';
 
 // Tests del módulo Maintainerr con la DB en memoria y global.fetch mockeado
 // (estilo eliminarr.test.js: nada de red real, ni Maintainerr ni Telegram).
@@ -473,4 +473,152 @@ test('endpoints admin: /salvados y settings del módulo responden', async () => 
   assert.equal(settings.body.enabled, true);
   assert.match(settings.body.webhookUrl, /\/api\/webhook\/maintainerr\//);
   assert.equal(settings.body.bot_token_set, true);
+});
+
+// --- processSalvados: borrado ligado a visionado (8 ago 2026) ---
+
+const insertCandidateRow = db.prepare(`
+  INSERT INTO maintainerr_candidates (media_server_id, notified_at, delete_after_days, window_closed_notified)
+  VALUES (?, ?, ?, ?)
+`);
+const insertSalvadoMessageRow = db.prepare(`
+  INSERT INTO salvado_messages (media_server_id, chat_id, message_id, has_photo, text) VALUES (?, '-100123', 777, 0, ?)
+`);
+
+function targetCollectionsFetch(mediaServerId, extra = {}) {
+  const collections = [
+    { id: 4, title: 'Peliculas Salvadas por 15 días', type: 'movie', libraryId: '5', deleteAfterDays: 15, media: [{ mediaServerId }] },
+  ];
+  const calls = [];
+  const fetchImpl = async (url, options = {}) => {
+    const u = String(url);
+    calls.push({ url: u, options });
+    if (u.endsWith('/api/collections')) return new Response(JSON.stringify(collections), { status: 200 });
+    if (u.includes('/media/handle')) return new Response(JSON.stringify({}), { status: 200 });
+    if (u.includes('api.telegram.org')) return new Response(JSON.stringify({ ok: true, result: { message_id: 777, chat: { id: -100123 } } }), { status: 200 });
+    if (extra.tautulli && u.startsWith('http://tautulli.test')) return extra.tautulli(u, options);
+    throw new Error(`fetch inesperado en test: ${u}`);
+  };
+  return { fetchImpl, calls };
+}
+
+test('processSalvados: todos la han visto → borra 24h después del último, vía media/handle', async () => {
+  db.exec("DELETE FROM salvados; DELETE FROM maintainerr_candidates; DELETE FROM salvado_messages;");
+  insertCandidateRow.run('ps-1', new Date(Date.now() - 10 * 86_400_000).toISOString().slice(0, 19).replace('T', ' '), 7, 1);
+  db.prepare(`
+    INSERT INTO salvados (media_server_id, tmdb_id, title, telegram_user_id, telegram_name, user_id, library_id, saved_at, expires_at, watched_at)
+    VALUES ('ps-1', NULL, 'Test', '111', 'David', NULL, NULL, datetime('now', '-5 days'), datetime('now', '+1 day'), datetime('now', '-2 days')),
+           ('ps-1', NULL, 'Test', '222', 'Ana', NULL, NULL, datetime('now', '-4 days'), datetime('now', '+1 day'), datetime('now', '-1 days'))
+  `).run();
+  insertSalvadoMessageRow.run('ps-1', '✅ Salvada por David.\n\n✅ Salvada también por Ana.');
+
+  const { fetchImpl, calls } = targetCollectionsFetch('ps-1');
+  global.fetch = fetchImpl;
+
+  await processSalvados();
+
+  const handleCall = calls.find((c) => c.url.includes('/media/handle'));
+  assert.ok(handleCall, 'debería haber llamado a media/handle');
+  assert.deepEqual(JSON.parse(handleCall.options.body), { collectionId: 4, mediaId: 'ps-1' });
+
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM salvados WHERE media_server_id = 'ps-1'").get().n, 0);
+  assert.equal(db.prepare("SELECT 1 FROM maintainerr_candidates WHERE media_server_id = 'ps-1'").get(), undefined);
+  assert.equal(db.prepare("SELECT 1 FROM salvado_messages WHERE media_server_id = 'ps-1'").get(), undefined);
+
+  const telegramEdit = calls.find((c) => c.url.includes('editMessage'));
+  const body = JSON.parse(telegramEdit.options.body);
+  assert.match(body.text, /Borrada\./);
+  assert.deepEqual(body.reply_markup, { inline_keyboard: [] });
+});
+
+test('processSalvados: falta gente por ver → no borra, expires_at queda en el peor caso conocido', async () => {
+  db.exec("DELETE FROM salvados; DELETE FROM maintainerr_candidates; DELETE FROM salvado_messages;");
+  upsertSetting.run('tautulli_url', 'http://tautulli.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
+  insertCandidateRow.run('ps-2', new Date().toISOString().slice(0, 19).replace('T', ' '), 7, 0);
+  db.prepare(`
+    INSERT INTO salvados (media_server_id, tmdb_id, title, telegram_user_id, telegram_name, user_id, library_id, saved_at, expires_at, watched_at)
+    VALUES ('ps-2', NULL, 'Test', '111', 'David', 501, NULL, datetime('now'), datetime('now', '+1 day'), NULL)
+  `).run();
+
+  const { fetchImpl, calls } = targetCollectionsFetch('ps-2', {
+    tautulli: async (u) => {
+      const cmd = new URL(u).searchParams.get('cmd');
+      if (cmd === 'get_history') return new Response(JSON.stringify({ response: { result: 'success', data: { data: [] } } }), { status: 200 });
+      throw new Error(`unexpected tautulli cmd ${cmd}`);
+    },
+  });
+  global.fetch = fetchImpl;
+
+  try {
+    await processSalvados();
+  } finally {
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key')").run();
+  }
+
+  assert.equal(calls.some((c) => c.url.includes('/media/handle')), false);
+  const row = db.prepare("SELECT * FROM salvados WHERE media_server_id = 'ps-2'").get();
+  assert.ok(row, 'la fila sigue viva');
+  // Peor caso = ventana (7 días desde notified_at ~ ahora) + 7 días de margen: bien lejos, no caducada.
+  assert.ok(new Date(`${row.expires_at.replace(' ', 'T')}Z`).getTime() > Date.now());
+});
+
+test('processSalvados: detecta el visionado vía Tautulli (después del salvado) y borra 24h más tarde', async () => {
+  db.exec("DELETE FROM salvados; DELETE FROM maintainerr_candidates; DELETE FROM salvado_messages;");
+  upsertSetting.run('tautulli_url', 'http://tautulli.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
+  insertCandidateRow.run('ps-3', new Date(Date.now() - 20 * 86_400_000).toISOString().slice(0, 19).replace('T', ' '), 7, 1);
+  db.prepare(`
+    INSERT INTO salvados (media_server_id, tmdb_id, title, telegram_user_id, telegram_name, user_id, library_id, saved_at, expires_at, watched_at)
+    VALUES ('ps-3', NULL, 'Test', '111', 'David', 501, NULL, datetime('now', '-2 days'), datetime('now', '+1 day'), NULL)
+  `).run();
+
+  const watchedAtSec = Math.floor((Date.now() - 2 * 86_400_000) / 1000); // visto justo tras salvar, hace 2 días
+  const { fetchImpl, calls } = targetCollectionsFetch('ps-3', {
+    tautulli: async (u) => {
+      const cmd = new URL(u).searchParams.get('cmd');
+      if (cmd === 'get_history') {
+        return new Response(
+          JSON.stringify({ response: { result: 'success', data: { data: [{ user_id: 501, date: watchedAtSec, percent_complete: 95 }] } } }),
+          { status: 200 }
+        );
+      }
+      throw new Error(`unexpected tautulli cmd ${cmd}`);
+    },
+  });
+  global.fetch = fetchImpl;
+
+  try {
+    await processSalvados();
+  } finally {
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key')").run();
+  }
+
+  const handleCall = calls.find((c) => c.url.includes('/media/handle'));
+  assert.ok(handleCall, 'watched_at detectado debería disparar el borrado (24h ya pasadas)');
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM salvados WHERE media_server_id = 'ps-3'").get().n, 0);
+});
+
+test('processSalvados: cierra la ventana de salvar una sola vez, sin borrar todavía', async () => {
+  db.exec("DELETE FROM salvados; DELETE FROM maintainerr_candidates; DELETE FROM salvado_messages;");
+  // Ventana (7 días) cerrada hace 3 días: notified_at hace 10 días.
+  insertCandidateRow.run('ps-4', new Date(Date.now() - 10 * 86_400_000).toISOString().slice(0, 19).replace('T', ' '), 7, 0);
+  db.prepare(`
+    INSERT INTO salvados (media_server_id, tmdb_id, title, telegram_user_id, telegram_name, user_id, library_id, saved_at, expires_at, watched_at)
+    VALUES ('ps-4', NULL, 'Test', '111', 'David', NULL, NULL, datetime('now', '-10 days'), datetime('now', '+1 day'), NULL)
+  `).run();
+  insertSalvadoMessageRow.run('ps-4', '✅ Salvada por David.');
+
+  const { fetchImpl, calls } = targetCollectionsFetch('ps-4');
+  global.fetch = fetchImpl;
+
+  await processSalvados();
+  const closedEdits = calls.filter((c) => c.url.includes('editMessage') && JSON.parse(c.options.body).text?.includes('Plazo para salvarla cerrado'));
+  assert.equal(closedEdits.length, 1);
+  assert.equal(db.prepare("SELECT window_closed_notified FROM maintainerr_candidates WHERE media_server_id = 'ps-4'").get().window_closed_notified, 1);
+
+  // Segunda pasada: no debe repetir el aviso de "plazo cerrado".
+  calls.length = 0;
+  await processSalvados();
+  assert.equal(calls.some((c) => c.url.includes('editMessage') && JSON.parse(c.options.body).text?.includes('Plazo para salvarla cerrado')), false);
 });

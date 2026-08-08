@@ -1,6 +1,6 @@
 import { db } from '../db.js';
 import { getRawSetting, setRawSetting, mask } from '../settings.js';
-import { getSeasonInfo, getMediaTitle } from './tautulli.js';
+import { getSeasonInfo, getMediaTitle, getItemWatchHistory } from './tautulli.js';
 
 // Módulo Maintainerr: cuando Maintainerr mete una película en una colección de
 // borrado, avisa por Telegram con un botón "Salvar" que la mueve a la colección
@@ -105,7 +105,9 @@ async function maintainerrRequest(path, options) {
     ...options,
   });
   if (!res.ok) {
-    throw new Error(`Maintainerr ${options?.method ?? 'GET'} ${path} falló: ${res.status} ${await res.text()}`);
+    const err = new Error(`Maintainerr ${options?.method ?? 'GET'} ${path} falló: ${res.status} ${await res.text()}`);
+    err.status = res.status;
+    throw err;
   }
   const text = await res.text();
   return text ? JSON.parse(text) : undefined;
@@ -113,6 +115,19 @@ async function maintainerrRequest(path, options) {
 
 export function listCollections() {
   return maintainerrRequest('');
+}
+
+// Ejecuta AHORA MISMO la acción de borrado configurada en la colección
+// (Radarr/Sonarr, o borrado directo en el servidor de medios si no hay *arr
+// vinculado — la MISMA que usaría al cumplirse deleteAfterDays) sobre un ítem
+// concreto, sin esperar al contador de días. Puede devolver 409 si hay una
+// ejecución de colección/regla en curso en Maintainerr — el llamante debe
+// tratarlo como "reintentar en el siguiente ciclo" (ver err.status arriba).
+function handleCollectionMedia(collectionId, mediaId) {
+  return maintainerrRequest('/media/handle', {
+    method: 'POST',
+    body: JSON.stringify({ collectionId, mediaId }),
+  });
 }
 
 function removeFromCollection(collectionId, mediaServerId) {
@@ -178,6 +193,23 @@ const insertNotified = db.prepare(`
 `);
 const deleteNotified = db.prepare(
   'DELETE FROM maintainerr_notified WHERE media_server_id = ? AND collection_id = ?'
+);
+
+// Ventana de "días para salvar" (ver tabla maintainerr_candidates en db.js):
+// se guarda aparte de maintainerr_notified porque esa se borra en cuanto el
+// ítem sale de la colección origen — justo lo que pasa al salvarlo — y aquí
+// hace falta conservar el dato mientras dure el salvado. ON CONFLICT DO
+// NOTHING: si ya había una fila (reaviso del mismo ítem sin haberse resuelto
+// la anterior) se conserva la ventana original, no se reinicia el plazo.
+const insertCandidate = db.prepare(`
+  INSERT INTO maintainerr_candidates (media_server_id, delete_after_days)
+  VALUES (?, ?)
+  ON CONFLICT(media_server_id) DO NOTHING
+`);
+const getCandidate = db.prepare('SELECT * FROM maintainerr_candidates WHERE media_server_id = ?');
+const deleteCandidate = db.prepare('DELETE FROM maintainerr_candidates WHERE media_server_id = ?');
+const markWindowClosedNotified = db.prepare(
+  'UPDATE maintainerr_candidates SET window_closed_notified = 1 WHERE media_server_id = ?'
 );
 
 // Ver tabla maintainerr_messages en db.js.
@@ -293,6 +325,10 @@ async function notifyDeletionCandidate(source, target, item, { fallbackTitle = n
   } catch (err) {
     console.error('[maintainerr] error mandando mensaje Telegram:', err.message);
   }
+  // Se devuelve para que el llamante guarde la "ventana de salvar" en
+  // maintainerr_candidates (ver processSalvados) — hace falta aunque el envío
+  // a Telegram falle.
+  return deleteDays;
 }
 
 // Pedido de Edu (4 ago 2026): si un ítem sale de su colección de borrado SIN
@@ -347,9 +383,10 @@ export async function handleMaintainerrWebhook(body) {
   const fallbackTitle = /'(.+)' has been added to '/.exec(body.message ?? '')?.[1];
 
   for (const item of mediaItems) {
-    await notifyDeletionCandidate(source, target, item, { fallbackTitle, deleteDaysOverride: body.dayAmount });
+    const deleteDays = await notifyDeletionCandidate(source, target, item, { fallbackTitle, deleteDaysOverride: body.dayAmount });
     // Marca "ya avisado" para que el sondeo de respaldo no lo repita.
     insertNotified.run(String(item.mediaServerId), source.id);
+    if (deleteDays) insertCandidate.run(String(item.mediaServerId), deleteDays);
   }
 }
 
@@ -389,14 +426,20 @@ export async function pollMaintainerrCollections() {
       if (!currentIds.has(id)) {
         deleteNotified.run(id, source.id);
         await markMessageDeleted(id, source.id);
+        // Si salió de la colección origen SIN haberse salvado (no hay filas
+        // en salvados para este id), es un borrado/quitado genuino — limpia
+        // la ventana huérfana. Si SÍ está salvado, se deja intacta: la
+        // necesita processSalvados hasta que se resuelva de verdad.
+        if (getSalvadosForItem.all(id).length === 0) deleteCandidate.run(id);
       }
     }
 
     for (const item of media) {
       const id = String(item.mediaServerId);
       if (notifiedIds.includes(id)) continue;
-      await notifyDeletionCandidate(source, target, item);
+      const deleteDays = await notifyDeletionCandidate(source, target, item);
       insertNotified.run(id, source.id);
+      if (deleteDays) insertCandidate.run(id, deleteDays);
     }
   }
 }
@@ -408,10 +451,68 @@ const pendingTitles = new Map();
 
 // --- Registro de salvados + resolución de quién pulsó ---
 
+// expires_at ya no es "días fijos de la colección salvados": es la fecha
+// PROYECTADA de borrado (recalculada cada ciclo por processSalvados, ver más
+// abajo), un texto literal en vez del viejo "+N days" — el que se pasa al
+// insertar es el peor caso conocido en ese momento (ver getFallbackDeadlineMs).
 const insertSalvado = db.prepare(`
   INSERT INTO salvados (media_server_id, tmdb_id, title, poster_url, telegram_user_id, telegram_name, user_id, library_id, saved_at, expires_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now', '+' || ? || ' days'))
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
 `);
+const getSalvadosForItem = db.prepare('SELECT * FROM salvados WHERE media_server_id = ? ORDER BY saved_at ASC');
+const getSalvadoForItemAndUser = db.prepare(
+  'SELECT 1 FROM salvados WHERE media_server_id = ? AND telegram_user_id = ?'
+);
+const updateSalvadoWatchedAt = db.prepare('UPDATE salvados SET watched_at = ? WHERE id = ?');
+const updateSalvadosExpiresAt = db.prepare('UPDATE salvados SET expires_at = ? WHERE media_server_id = ?');
+const deleteSalvadosForItem = db.prepare('DELETE FROM salvados WHERE media_server_id = ?');
+const distinctSalvadoMediaIds = db.prepare('SELECT DISTINCT media_server_id FROM salvados');
+const getLibrarySectionType = db.prepare('SELECT section_type FROM libraries WHERE id = ?');
+
+// Mensaje de Telegram de un salvado (ver tabla salvado_messages en db.js):
+// text guarda SIEMPRE el contenido completo tal cual está en Telegram ahora
+// mismo (se reescribe en cada edición, ver appendSavedNote) — la API de bots
+// no deja leer el texto/caption actual de un mensaje ajeno, así que sin esto
+// no habría forma de anexarle una línea más al sumarse un segundo salvador.
+const upsertSalvadoMessage = db.prepare(`
+  INSERT INTO salvado_messages (media_server_id, chat_id, message_id, has_photo, text)
+  VALUES (@mediaServerId, @chatId, @messageId, @hasPhoto, @text)
+  ON CONFLICT(media_server_id) DO UPDATE SET
+    chat_id = excluded.chat_id, message_id = excluded.message_id, has_photo = excluded.has_photo, text = excluded.text
+`);
+const getSalvadoMessage = db.prepare('SELECT * FROM salvado_messages WHERE media_server_id = ?');
+const deleteSalvadoMessage = db.prepare('DELETE FROM salvado_messages WHERE media_server_id = ?');
+
+function toSqliteText(ms) {
+  return new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function sqliteTextToMs(text) {
+  return new Date(`${text.replace(' ', 'T')}Z`).getTime();
+}
+
+function isTvLibrary(libraryId) {
+  if (libraryId == null) return false;
+  return getLibrarySectionType.get(libraryId)?.section_type === 'show';
+}
+
+// Peor caso conocido de fecha de borrado para un ítem salvado: el cierre de
+// la ventana de salvar (los días que tardaría en borrarse sola, guardados en
+// maintainerr_candidates al avisar) + 7 días de margen para que se vea. Sin
+// dato de ventana (deleteAfterDays no configurado en su momento en la
+// colección origen), cae a 7 días desde el PRIMER salvado — ancla estable,
+// no "7 días desde ahora" en cada ciclo, que nunca llegaría.
+const FALLBACK_WATCH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+function getFallbackDeadlineMs(mediaServerId) {
+  const candidate = getCandidate.get(mediaServerId);
+  if (candidate) {
+    const closesAtMs = sqliteTextToMs(candidate.notified_at) + candidate.delete_after_days * 86_400_000;
+    return closesAtMs + FALLBACK_WATCH_WINDOW_MS;
+  }
+  const rows = getSalvadosForItem.all(mediaServerId);
+  const firstSavedMs = rows.length > 0 ? Math.min(...rows.map((r) => sqliteTextToMs(r.saved_at))) : Date.now();
+  return firstSavedMs + FALLBACK_WATCH_WINDOW_MS;
+}
 
 function displayName(from) {
   const name = [from.first_name, from.last_name].filter(Boolean).join(' ');
@@ -424,6 +525,51 @@ function resolveTautulliUser(telegramUserId) {
   return db
     .prepare('SELECT user_id FROM telegram_links WHERE chat_id = ?')
     .get(String(telegramUserId))?.user_id ?? null;
+}
+
+const ADD_SAVE_CALLBACK_PREFIX = 'addsave:';
+function addSaveMarkup(mediaServerId) {
+  return { inline_keyboard: [[{ text: '➕ Salvar también', callback_data: `${ADD_SAVE_CALLBACK_PREFIX}${mediaServerId}` }]] };
+}
+
+// Texto de "salvada" para UN salvador — reutilizado tanto al primer salvado
+// como al sumarse más gente (handleAddSaveCallback), cada vez con su propia
+// línea. {dias}/{fecha} ya no son los días fijos de la colección salvados:
+// son el peor caso real (getFallbackDeadlineMs) — si se ve antes, se borra
+// antes; esto es solo el límite que NUNCA se pasa.
+function buildSavedNote(mediaServerId, from) {
+  const { savedMessage } = getMaintainerrSettings();
+  const fallbackMs = getFallbackDeadlineMs(mediaServerId);
+  const daysLeft = Math.max(1, Math.round((fallbackMs - Date.now()) / 86_400_000));
+  const diasPhrase = ` — como muy tarde tienes hasta ${daysLeft} día${daysLeft === 1 ? '' : 's'} para verla`;
+  const fechaTexto = new Date(fallbackMs).toLocaleDateString('es-ES', { day: 'numeric', month: 'long' });
+  return savedMessage
+    .replace(/{usuario}/g, displayName(from))
+    .replace(/{dias}/g, diasPhrase)
+    .replace(/{fecha}/g, fechaTexto);
+}
+
+// Anexa una línea de "salvada por X" al mensaje y guarda el texto resultante
+// en salvado_messages, para poder seguir anexando al sumarse más gente sin
+// depender de poder leer el mensaje actual desde la API de Telegram.
+async function appendSavedNote(mediaServerId, target, from, keepButton) {
+  const note = buildSavedNote(mediaServerId, from);
+  const newText = `${target.baseText}\n\n${note}`;
+  const replyMarkup = keepButton ? addSaveMarkup(mediaServerId) : { inline_keyboard: [] };
+  const method = target.hasPhoto ? 'editMessageCaption' : 'editMessageText';
+  await botApi(method, {
+    chat_id: target.chatId,
+    message_id: target.messageId,
+    [target.hasPhoto ? 'caption' : 'text']: newText,
+    reply_markup: replyMarkup,
+  });
+  upsertSalvadoMessage.run({
+    mediaServerId,
+    chatId: String(target.chatId),
+    messageId: target.messageId,
+    hasPhoto: target.hasPhoto ? 1 : 0,
+    text: newText,
+  });
 }
 
 // Primer clic en "💾 Salvar": no mueve nada todavía, solo cambia el teclado
@@ -470,6 +616,10 @@ async function handleCancelSaveCallback(query) {
   }
 }
 
+// Primer salvado de un ítem: mueve de la colección de borrado a la de
+// salvados en Maintainerr y abre el registro. Salvadores siguientes
+// (handleAddSaveCallback) NO vuelven a tocar Maintainerr — el ítem ya está a
+// salvo aquí, solo se suma su fila.
 async function handleSaveCallback(query) {
   const [, mediaServerId, sourceId, targetId] = query.data.split(':');
   try {
@@ -488,11 +638,6 @@ async function handleSaveCallback(query) {
     // sin borrar esta fila, el sondeo de respaldo lo vería salir de la colección
     // origen en el próximo ciclo y lo marcaría (mal) como "YA BORRADA" encima.
     deleteMessageRow.run(String(mediaServerId), Number(sourceId));
-
-    // Días reales de la colección de salvados en el momento de pulsar (no se
-    // fija en el callback_data para que un cambio de config no deje mensajes mintiendo).
-    const target = (await listCollections().catch(() => [])).find((c) => c.id === Number(targetId));
-    const days = target?.deleteAfterDays;
 
     const cached = pendingTitles.get(String(mediaServerId)) ?? {};
     pendingTitles.delete(String(mediaServerId));
@@ -524,41 +669,75 @@ async function handleSaveCallback(query) {
       displayName(query.from),
       resolveTautulliUser(query.from.id),
       meta.libraryId,
-      days ?? 15
+      toSqliteText(getFallbackDeadlineMs(String(mediaServerId)))
     );
 
-    const { savedMessage } = getMaintainerrSettings();
-    const diasPhrase = days ? ` — hay ${days} días más para verla` : '';
-    // {fecha}: nueva fecha de borrado tras salvar (hoy + días de la colección
-    // de salvados), igual que {fecha} en el aviso original pero contando
-    // desde el momento del salvado, no de la alta en Maintainerr.
-    const fechaTexto = days
-      ? new Date(Date.now() + days * 86_400_000).toLocaleDateString('es-ES', { day: 'numeric', month: 'long' })
-      : '';
-    const note = savedMessage
-      .replace(/{usuario}/g, displayName(query.from))
-      .replace(/{dias}/g, diasPhrase)
-      .replace(/{fecha}/g, fechaTexto);
-    await botApi('answerCallbackQuery', {
-      callback_query_id: query.id,
-      text: days ? `Salvada: ${days} días más` : 'Salvada',
-    });
-    // Editar el mensaje quita el teclado inline: sin botón no hay doble salvado.
-    if (query.message.photo) {
-      await botApi('editMessageCaption', {
-        chat_id: query.message.chat.id,
-        message_id: query.message.message_id,
-        caption: `${query.message.caption}\n\n${note}`,
-      });
-    } else {
-      await botApi('editMessageText', {
-        chat_id: query.message.chat.id,
-        message_id: query.message.message_id,
-        text: `${query.message.text}\n\n${note}`,
-      });
-    }
+    await botApi('answerCallbackQuery', { callback_query_id: query.id, text: 'Salvada' });
+    const baseText = query.message.photo ? query.message.caption : query.message.text;
+    await appendSavedNote(
+      String(mediaServerId),
+      { chatId: query.message.chat.id, messageId: query.message.message_id, hasPhoto: Boolean(query.message.photo), baseText },
+      query.from,
+      true
+    );
   } catch (err) {
     console.error('[maintainerr] error salvando media:', err.message);
+    await botApi('answerCallbackQuery', {
+      callback_query_id: query.id,
+      text: 'Error al salvar, mira los logs',
+    }).catch(() => {});
+  }
+}
+
+// Segundo salvador (y siguientes) del MISMO ítem: no toca Maintainerr (ya
+// está a salvo desde el primer clic), solo suma su fila si no la había ya y
+// sigue dentro de la ventana de salvar (los días que tardaría en borrarse
+// sola, ver maintainerr_candidates).
+async function handleAddSaveCallback(query) {
+  const mediaServerId = query.data.slice(ADD_SAVE_CALLBACK_PREFIX.length);
+  try {
+    const candidate = getCandidate.get(mediaServerId);
+    if (candidate) {
+      const closesAtMs = sqliteTextToMs(candidate.notified_at) + candidate.delete_after_days * 86_400_000;
+      if (Date.now() >= closesAtMs) {
+        await botApi('answerCallbackQuery', { callback_query_id: query.id, text: 'El plazo para salvarla ya pasó' });
+        return;
+      }
+    }
+    if (getSalvadoForItemAndUser.get(mediaServerId, String(query.from.id))) {
+      await botApi('answerCallbackQuery', { callback_query_id: query.id, text: 'Ya la salvaste' });
+      return;
+    }
+    const existing = getSalvadosForItem.all(mediaServerId);
+    const msgRow = getSalvadoMessage.get(mediaServerId);
+    if (existing.length === 0 || !msgRow) {
+      // No hay de dónde sacar título/tmdb/mensaje (se resolvió ya, o el bot
+      // perdió el rastro) — no debería pasar con el botón vivo, pero por si acaso.
+      await botApi('answerCallbackQuery', { callback_query_id: query.id, text: 'Ya no se puede salvar' });
+      return;
+    }
+    const ref = existing[0];
+    insertSalvado.run(
+      mediaServerId,
+      ref.tmdb_id,
+      ref.title,
+      ref.poster_url,
+      String(query.from.id),
+      displayName(query.from),
+      resolveTautulliUser(query.from.id),
+      ref.library_id,
+      toSqliteText(getFallbackDeadlineMs(mediaServerId))
+    );
+
+    await botApi('answerCallbackQuery', { callback_query_id: query.id, text: 'Salvada también' });
+    await appendSavedNote(
+      mediaServerId,
+      { chatId: msgRow.chat_id, messageId: msgRow.message_id, hasPhoto: Boolean(msgRow.has_photo), baseText: msgRow.text },
+      query.from,
+      true
+    );
+  } catch (err) {
+    console.error('[maintainerr] error sumando salvador:', err.message);
     await botApi('answerCallbackQuery', {
       callback_query_id: query.id,
       text: 'Error al salvar, mira los logs',
@@ -624,6 +803,153 @@ export async function getAllSalvados() {
   return filterStillInCollection(rows);
 }
 
+// --- Borrado ligado a visionado (pedido de Edu, 8 ago 2026) ---
+//
+// Reglas: (1) sin salvar, sigue el deleteAfterDays normal de la colección
+// origen — Maintainerr lo hace solo, nada que tocar aquí. (2) salvada y vista
+// por TODOS los que la salvaron → se borra 24h después de la última en
+// verla. (3) si a los 7 días de CERRARSE la ventana de salvar (o desde el
+// primer salvado, si no hay dato de ventana) sigue sin verla todo el mundo,
+// se borra igual. Todo esto vive en processSalvados, en el mismo ciclo de
+// sondeo que pollMaintainerrCollections.
+
+const WATCH_THRESHOLD_PERCENT = 85; // mismo criterio que el resto del proyecto (ver DEFAULT_SEASON_WATCHED_PERCENT en quota.js)
+const POST_WATCH_GRACE_MS = 24 * 60 * 60 * 1000;
+
+// Marca watched_at en las filas de un ítem cuyo salvador (vinculado a un
+// usuario de Tautulli) lo haya visto DESPUÉS de salvarlo. Solo películas en
+// v1: para series salvadas por temporada haría falta saber el total de
+// episodios de la temporada para confirmarla "vista entera" (no solo un
+// episodio suelto) — sin implementar todavía, esas filas se quedan sin
+// watched_at para siempre y resuelven solo por el fallback de 7 días.
+async function markWatchedRows(mediaServerId, rows) {
+  const unresolved = rows.filter((r) => r.user_id != null && r.watched_at == null);
+  if (unresolved.length === 0) return;
+  if (isTvLibrary(rows[0].library_id)) return;
+
+  let history;
+  try {
+    history = await getItemWatchHistory(mediaServerId, false);
+  } catch (err) {
+    console.error('[maintainerr] error consultando historial de visionado:', err.message);
+    return;
+  }
+  for (const row of unresolved) {
+    const savedAtMs = sqliteTextToMs(row.saved_at);
+    const qualifying = history
+      .filter((h) => h.userId === row.user_id && h.percent >= WATCH_THRESHOLD_PERCENT && h.watchedAt != null && h.watchedAt >= savedAtMs)
+      .sort((a, b) => a.watchedAt - b.watchedAt);
+    if (qualifying.length > 0) {
+      updateSalvadoWatchedAt.run(toSqliteText(qualifying[0].watchedAt), row.id);
+      row.watched_at = toSqliteText(qualifying[0].watchedAt);
+    }
+  }
+}
+
+// Qué colección de salvados tiene AHORA MISMO este ítem (para pedirle a
+// Maintainerr que lo borre ya, ver media/handle) — se resuelve en vivo en vez
+// de guardarla al salvar porque los pairs pueden cambiar entretanto.
+async function findCurrentTargetCollection(mediaServerId) {
+  const { pairs } = getMaintainerrSettings();
+  if (pairs.length === 0) return null;
+  const collections = await listCollections().catch(() => []);
+  const targetTitles = new Set(pairs.map((p) => p.target));
+  return (
+    collections.find(
+      (c) => targetTitles.has(c.title) && c.media?.some((m) => String(m.mediaServerId) === String(mediaServerId))
+    ) ?? null
+  );
+}
+
+// Anexa una línea al mensaje de salvado y, a diferencia de appendSavedNote,
+// no vuelve a guardar la fila (se usa justo antes de borrarla).
+async function closeSalvadoMessage(mediaServerId, suffix) {
+  const row = getSalvadoMessage.get(mediaServerId);
+  deleteSalvadoMessage.run(mediaServerId);
+  if (!row) return;
+  try {
+    const method = row.has_photo ? 'editMessageCaption' : 'editMessageText';
+    await botApi(method, {
+      chat_id: row.chat_id,
+      message_id: row.message_id,
+      [row.has_photo ? 'caption' : 'text']: `${row.text}\n\n${suffix}`,
+      reply_markup: { inline_keyboard: [] },
+    });
+  } catch (err) {
+    console.error('[maintainerr] error cerrando mensaje de salvado:', err.message);
+  }
+}
+
+// Cierra la ventana de salvar: quita el botón "➕ Salvar también" y deja
+// constancia en el propio mensaje, sin tocar las filas (el ítem sigue
+// salvado, solo que ya no admite más gente).
+async function noteWindowClosed(mediaServerId) {
+  markWindowClosedNotified.run(mediaServerId);
+  const row = getSalvadoMessage.get(mediaServerId);
+  if (!row) return;
+  const newText = `${row.text}\n\n⏰ Plazo para salvarla cerrado.`;
+  try {
+    const method = row.has_photo ? 'editMessageCaption' : 'editMessageText';
+    await botApi(method, {
+      chat_id: row.chat_id,
+      message_id: row.message_id,
+      [row.has_photo ? 'caption' : 'text']: newText,
+      reply_markup: { inline_keyboard: [] },
+    });
+    upsertSalvadoMessage.run({ mediaServerId, chatId: row.chat_id, messageId: row.message_id, hasPhoto: row.has_photo, text: newText });
+  } catch (err) {
+    console.error('[maintainerr] error cerrando ventana de salvar:', err.message);
+  }
+}
+
+async function finalizeSalvadoDeletion(mediaServerId) {
+  const target = await findCurrentTargetCollection(mediaServerId);
+  if (!target) {
+    // Ya no está en ninguna colección de salvados vigilada (lo quitaron a
+    // mano en Maintainerr, o se borró de otra forma) — se limpia el rastro
+    // sin llamar a media/handle, que fallaría (el ítem ya no está ahí).
+    deleteSalvadosForItem.run(mediaServerId);
+    deleteCandidate.run(mediaServerId);
+    await closeSalvadoMessage(mediaServerId, '🗑️ Ya no está salvada.');
+    return;
+  }
+  try {
+    await handleCollectionMedia(target.id, mediaServerId);
+  } catch (err) {
+    if (err.status === 409) return; // colección/regla en ejecución — se reintenta en el siguiente ciclo
+    console.error('[maintainerr] error borrando salvado:', err.message);
+    return;
+  }
+  deleteSalvadosForItem.run(mediaServerId);
+  deleteCandidate.run(mediaServerId);
+  await closeSalvadoMessage(mediaServerId, '🗑️ Borrada.');
+}
+
+export async function processSalvados() {
+  if (!isEnabled()) return;
+  const ids = distinctSalvadoMediaIds.all().map((r) => r.media_server_id);
+  for (const mediaServerId of ids) {
+    const rows = getSalvadosForItem.all(mediaServerId);
+    if (rows.length === 0) continue;
+
+    await markWatchedRows(mediaServerId, rows);
+
+    const allWatched = rows.every((r) => r.watched_at != null);
+    const dueMs = allWatched
+      ? Math.max(...rows.map((r) => sqliteTextToMs(r.watched_at))) + POST_WATCH_GRACE_MS
+      : getFallbackDeadlineMs(mediaServerId);
+    updateSalvadosExpiresAt.run(toSqliteText(dueMs), mediaServerId);
+
+    const candidate = getCandidate.get(mediaServerId);
+    if (candidate && !candidate.window_closed_notified) {
+      const closesAtMs = sqliteTextToMs(candidate.notified_at) + candidate.delete_after_days * 86_400_000;
+      if (Date.now() >= closesAtMs) await noteWindowClosed(mediaServerId);
+    }
+
+    if (Date.now() >= dueMs) await finalizeSalvadoDeletion(mediaServerId);
+  }
+}
+
 // --- Poller del bot dedicado (long-poll, igual que telegram.js) ---
 
 export function startMaintainerrPoller() {
@@ -641,6 +967,8 @@ export function startMaintainerrPoller() {
               await handleAskSaveCallback(u.callback_query);
             } else if (data?.startsWith('cancelsave:')) {
               await handleCancelSaveCallback(u.callback_query);
+            } else if (data?.startsWith(ADD_SAVE_CALLBACK_PREFIX)) {
+              await handleAddSaveCallback(u.callback_query);
             } else if (data?.startsWith('save:')) {
               await handleSaveCallback(u.callback_query);
             }
@@ -660,8 +988,10 @@ export function startMaintainerrPoller() {
   // cada despliegue/reinicio había que esperar el intervalo entero para el
   // primer aviso). No compite con el long-poll de arriba, que es solo para
   // los clics del botón Salvar.
-  const pollCollections = () =>
+  const pollCollections = () => {
     pollMaintainerrCollections().catch((err) => console.error('[maintainerr] sondeo de colecciones falló:', err.message));
+    processSalvados().catch((err) => console.error('[maintainerr] sondeo de salvados falló:', err.message));
+  };
   pollCollections();
   setInterval(pollCollections, 60 * 1000);
 }

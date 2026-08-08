@@ -224,6 +224,12 @@ addColumnIfMissing('ALTER TABLE quota_cache ADD COLUMN monthly_enabled INTEGER N
 addColumnIfMissing('ALTER TABLE quota_cache ADD COLUMN monthly_limit INTEGER');
 addColumnIfMissing('ALTER TABLE quota_cache ADD COLUMN monthly_used INTEGER');
 
+// 8 ago 2026: fecha en que ese salvado concreto (una fila = un salvador) se
+// confirmó visto por Tautulli, tras guardarse (ver checkSalvadosWatched en
+// maintainerr.js). NULL mientras no se detecte, o para siempre en salvados de
+// serie (no soportado en v1, ver comentario en esa función).
+addColumnIfMissing('ALTER TABLE salvados ADD COLUMN watched_at TEXT');
+
 // v2: roles — igual que los grupos, un usuario tiene como mucho un rol
 // (user_roles.user_id es PK), y el rol da valores por defecto de límite,
 // caducidad y cupo mensual por biblioteca. Precedencia: override individual >
@@ -328,6 +334,34 @@ db.exec(`
     library_id INTEGER NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- Pedido de Edu (8 ago 2026): borrado de salvados ligado a visionado, no a
+  -- días fijos. "Ventana de salvar" = los mismos días que tardaría en
+  -- borrarse sola (delete_after_days de la colección origen en el momento del
+  -- aviso), guardada aparte de maintainerr_notified porque ESA se borra en
+  -- cuanto el ítem sale de la colección origen (justo lo que pasa al
+  -- salvarlo) y aquí hace falta conservar el dato mientras dure el salvado.
+  -- window_closed_notified evita repetir la edición de "ya no se puede
+  -- salvar más" en cada ciclo una vez pasada la ventana.
+  CREATE TABLE IF NOT EXISTS maintainerr_candidates (
+    media_server_id TEXT PRIMARY KEY,
+    notified_at TEXT NOT NULL DEFAULT (datetime('now')),
+    delete_after_days INTEGER NOT NULL,
+    window_closed_notified INTEGER NOT NULL DEFAULT 0
+  );
+
+  -- Mensaje de Telegram de un salvado, aparte de maintainerr_messages (esa
+  -- vive mientras el ítem está en la colección de BORRADO y se borra justo al
+  -- salvarlo, ver handleSaveCallback). Este vive mientras el ítem sigue
+  -- salvado, para poder seguir editando el MISMO mensaje al sumarse más
+  -- salvadores, al cerrarse la ventana de salvar, o al borrarse de verdad.
+  CREATE TABLE IF NOT EXISTS salvado_messages (
+    media_server_id TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL,
+    message_id INTEGER NOT NULL,
+    has_photo INTEGER NOT NULL DEFAULT 0,
+    text TEXT NOT NULL DEFAULT ''
+  );
 `);
 
 // Roles por defecto pedidos por Edu: se siembran una sola vez si la tabla está
@@ -349,3 +383,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_decisions_created ON decisions_log (created_at);
   CREATE INDEX IF NOT EXISTS idx_decisions_request ON decisions_log (request_id);
 `);
+
+// Migración de salvado_messages (tabla creada en el segundo bloque db.exec de
+// arriba): tiene que ir después de ambos, si no "no such table" en DBs que
+// aún no la tienen.
+addColumnIfMissing("ALTER TABLE salvado_messages ADD COLUMN text TEXT NOT NULL DEFAULT ''");
