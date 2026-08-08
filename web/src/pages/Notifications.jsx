@@ -549,9 +549,10 @@ export default function Notifications() {
                   className="input max-w-[8rem]"
                 />
                 <p className="text-xs text-gray-500 mt-2">
-                  Si no la ve todo el que la salvó, se borra a estos días contados desde el PRIMER salvado
-                  (no desde hoy, no se suma con nada más). Si la ven todos antes, se borra 24h después del
-                  último en verla — este plazo es solo el límite máximo si nadie la ve.
+                  Si no la ve todo el que la salvó, se borra a estos días contados desde el ÚLTIMO salvado
+                  (si se suma más gente, todos tienen su plazo entero — no se suma con nada más). Si la ven
+                  todos antes, se borra 24h después del último en verla — este plazo es solo el límite
+                  máximo si nadie la ve.
                 </p>
               </div>
             </MiniSection>

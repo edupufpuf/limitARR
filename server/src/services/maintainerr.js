@@ -522,15 +522,15 @@ function isTvLibrary(libraryId) {
 }
 
 // Peor caso conocido de fecha de borrado para un ítem salvado: el día del
-// PRIMER salvado (si hay varios salvadores) + los días de gracia configurados
+// ÚLTIMO salvado (si hay varios salvadores, para que el último en sumarse
+// tenga también su plazo entero) + los días de gracia configurados
 // (salvadoGraceDays, 5 por defecto) — no se suma la ventana de salvar por
-// medio (pedido de Edu, 8 ago 2026: "no se deben sumar, se añaden los días
-// extra al día de hoy [de salvarse]"). Ancla estable en saved_at, no "hoy" en
-// cada ciclo, que nunca llegaría a cumplirse.
+// medio. Ancla estable en saved_at, no "hoy" en cada ciclo, que nunca
+// llegaría a cumplirse.
 function getFallbackDeadlineMs(mediaServerId) {
   const rows = getSalvadosForItem.all(mediaServerId);
-  const firstSavedMs = rows.length > 0 ? Math.min(...rows.map((r) => sqliteTextToMs(r.saved_at))) : Date.now();
-  return firstSavedMs + getSalvadoGraceDays() * 86_400_000;
+  const lastSavedMs = rows.length > 0 ? Math.max(...rows.map((r) => sqliteTextToMs(r.saved_at))) : Date.now();
+  return lastSavedMs + getSalvadoGraceDays() * 86_400_000;
 }
 
 function displayName(from) {

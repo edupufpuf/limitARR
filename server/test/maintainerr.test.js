@@ -652,7 +652,7 @@ test('getSalvadosHistory: incluye resueltas y activas de los últimos 30 días, 
   assert.ok(vista.resolved_at, 'debe conservar resolved_at');
 });
 
-test('processSalvados: el plazo de gracia es configurable y cuenta desde el PRIMER salvado, no desde la ventana', async () => {
+test('processSalvados: el plazo de gracia es configurable y cuenta desde el salvado, no desde la ventana', async () => {
   db.exec("DELETE FROM salvados; DELETE FROM maintainerr_candidates; DELETE FROM salvado_messages;");
   upsertSetting.run('maintainerr_salvado_grace_days', '2');
   // Ventana larga (20 días, ni cerca de cerrarse) para probar que el plazo NO
@@ -669,6 +669,31 @@ test('processSalvados: el plazo de gracia es configurable y cuenta desde el PRIM
     global.fetch = fetchImpl;
     await processSalvados();
     assert.ok(calls.some((c) => c.url.includes('/media/handle')), 'plazo de gracia (2 días) ya cumplido pese a ventana larga sin cerrar');
+  } finally {
+    db.prepare("DELETE FROM settings WHERE key = 'maintainerr_salvado_grace_days'").run();
+  }
+});
+
+test('processSalvados: con varios salvadores, el plazo cuenta desde el ÚLTIMO en sumarse, no desde el primero', async () => {
+  db.exec("DELETE FROM salvados; DELETE FROM maintainerr_candidates; DELETE FROM salvado_messages;");
+  upsertSetting.run('maintainerr_salvado_grace_days', '5');
+  insertCandidateRow.run('ps-9', new Date().toISOString().slice(0, 19).replace('T', ' '), 30, 0);
+  db.prepare(`
+    INSERT INTO salvados (media_server_id, tmdb_id, title, telegram_user_id, telegram_name, user_id, library_id, saved_at, expires_at, watched_at)
+    VALUES
+      ('ps-9', NULL, 'Test', '111', 'David', NULL, NULL, datetime('now', '-6 days'), datetime('now', '+1 day'), NULL),
+      ('ps-9', NULL, 'Test', '222', 'Ana', NULL, NULL, datetime('now', '-1 days'), datetime('now', '+1 day'), NULL)
+  `).run();
+
+  try {
+    const { fetchImpl, calls } = targetCollectionsFetch('ps-9');
+    global.fetch = fetchImpl;
+    await processSalvados();
+    // David (hace 6 días) + 5 días de gracia ya habría vencido; Ana (hace 1
+    // día) + 5 días de gracia todavía no. Debe ganar el plazo de Ana.
+    assert.equal(calls.some((c) => c.url.includes('/media/handle')), false, 'no debe borrar aún: el plazo real es el de Ana (el último salvado)');
+    const row = db.prepare("SELECT expires_at FROM salvados WHERE media_server_id = 'ps-9' LIMIT 1").get();
+    assert.ok(new Date(`${row.expires_at.replace(' ', 'T')}Z`).getTime() > Date.now());
   } finally {
     db.prepare("DELETE FROM settings WHERE key = 'maintainerr_salvado_grace_days'").run();
   }
