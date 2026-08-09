@@ -306,7 +306,11 @@ async function notifyDeletionCandidate(source, target, item, { fallbackTitle = n
         .replace(/{titulo}/g, tituloTexto)
         .replace(/{dias}/g, diasTexto)
         .replace(/{fecha}/g, fechaTexto)
-        .replace(/{diasSalvado}/g, String(target.deleteAfterDays ?? ''))
+        // OJO: no usar target.deleteAfterDays (config de la colección Salvados EN
+        // Maintainerr) — desde el borrado ligado a visionado (8 ago 2026) esa cifra
+        // ya no manda nada, el plazo real es getSalvadoGraceDays (global o el
+        // override de la biblioteca, ver getFallbackDeadlineMs) y hay que mostrar esa.
+        .replace(/{diasSalvado}/g, String(getSalvadoGraceDays(source.libraryId != null ? Number(source.libraryId) : null)))
     : `🎬 ${tituloTexto} se borrará${diasTexto}.\n\n⚠️ Sin colección de salvados configurada para "${source.title}" — no se puede salvar.`;
   // "Salvar" pide confirmación antes de mover nada (asksave: cambia el
   // teclado a Sí/Cancelar; el save: real solo llega tras confirmar — ver

@@ -114,7 +114,10 @@ test('webhook: alta en colección de borrado manda aviso Telegram con botón Sal
   const payload = JSON.parse(telegram.options.body);
   const text = payload.caption ?? payload.text;
   assert.match(text, /«The Batman» se borrará en 7 días/);
-  assert.match(text, /estará 15 días más/);
+  // {diasSalvado} es el plazo de gracia real de limitARR (5 por defecto), NO el
+  // deleteAfterDays de la colección "Salvados" en Maintainerr (15 en este fixture)
+  // — esa cifra ya no manda nada desde el borrado ligado a visionado (8 ago 2026).
+  assert.match(text, /estará 5 días más/);
   assert.equal(
     payload.reply_markup.inline_keyboard[0][0].callback_data,
     'asksave:9010:1:4'
@@ -130,6 +133,41 @@ test('webhook: alta en colección de borrado manda aviso Telegram con botón Sal
   assert.equal(stored.message_id, 1);
   assert.equal(stored.has_photo, 1);
   assert.equal(stored.text, text);
+});
+
+test('webhook: {diasSalvado} en el aviso refleja el plazo de gracia configurado, no el deleteAfterDays de Maintainerr', async () => {
+  mockFetch();
+  upsertSetting.run('maintainerr_salvado_grace_days', '7');
+
+  try {
+    await request(app)
+      .post(`/api/webhook/maintainerr/${getWebhookSecret()}`)
+      .send({
+        collectionName: 'Peliculas eliminadas en 7 días',
+        message: "'The Batman' has been added to 'Peliculas eliminadas en 7 días'. The item will be handled in 7 days.",
+        dayAmount: 7,
+        mediaItems: JSON.stringify([{ mediaServerId: '9099' }]),
+      })
+      .expect(200);
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const telegram = fetchCalls.find((c) => c.url.includes('api.telegram.org'));
+    const payload = JSON.parse(telegram.options.body);
+    const text = payload.caption ?? payload.text;
+    // La colección "Peliculas Salvadas por 15 días" (fixture, deleteAfterDays: 15) no
+    // debe filtrarse al texto — el 7 configurado en limitARR es el que manda.
+    assert.match(text, /estará 7 días más/);
+    assert.doesNotMatch(text, /estará 15 días más/);
+  } finally {
+    db.prepare("DELETE FROM settings WHERE key = 'maintainerr_salvado_grace_days'").run();
+    // '9099' no existe en COLLECTIONS.media (fixture): sin este cleanup,
+    // pollMaintainerrCollections lo vería "salir" de la colección en el
+    // siguiente test y dispararía un aviso real de "YA BORRADA" (mismo caso que '8501-b' arriba).
+    db.prepare("DELETE FROM maintainerr_notified WHERE media_server_id = '9099'").run();
+    db.prepare("DELETE FROM maintainerr_messages WHERE media_server_id = '9099'").run();
+    db.prepare("DELETE FROM maintainerr_candidates WHERE media_server_id = '9099'").run();
+  }
 });
 
 // --- Salvadas para series (siempre por temporada) ---
