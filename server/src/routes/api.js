@@ -531,7 +531,7 @@ router.put('/libraries/:id', ah(async (req, res) => {
   if (!current) return res.status(404).json({ error: 'not_found' });
   const {
     kind, enabled, defaultLimit, expiryDays, oneSeasonPerRequest, sequentialSeasons,
-    monthlyQuotaEnabled, monthlyLimit,
+    monthlyQuotaEnabled, monthlyLimit, salvadoGraceDays,
   } = req.body || {};
   const next = {
     kind: kind ?? current.kind,
@@ -542,16 +542,18 @@ router.put('/libraries/:id', ah(async (req, res) => {
     sequentialSeasons: sequentialSeasons !== undefined ? (sequentialSeasons ? 1 : 0) : current.sequential_seasons,
     monthlyQuotaEnabled: monthlyQuotaEnabled !== undefined ? (monthlyQuotaEnabled ? 1 : 0) : current.monthly_quota_enabled,
     monthlyLimit: monthlyLimit ?? current.monthly_limit,
+    // NULL = usar el global de la pestaña Salvadas (ver getSalvadoGraceDays en maintainerr.js).
+    salvadoGraceDays: salvadoGraceDays !== undefined ? salvadoGraceDays : current.salvado_grace_days,
   };
   const result = db
     .prepare(`
       UPDATE libraries SET kind = ?, enabled = ?, default_limit = ?, expiry_days = ?, one_season_per_request = ?,
-        sequential_seasons = ?, monthly_quota_enabled = ?, monthly_limit = ?
+        sequential_seasons = ?, monthly_quota_enabled = ?, monthly_limit = ?, salvado_grace_days = ?
       WHERE id = ?
     `)
     .run(
       next.kind, next.enabled, next.defaultLimit, next.expiryDays, next.oneSeasonPerRequest,
-      next.sequentialSeasons, next.monthlyQuotaEnabled, next.monthlyLimit, req.params.id
+      next.sequentialSeasons, next.monthlyQuotaEnabled, next.monthlyLimit, next.salvadoGraceDays, req.params.id
     );
   if (result.changes === 0) return res.status(404).json({ error: 'not_found' });
 
@@ -1491,8 +1493,8 @@ router.get('/maintainerr/settings', (req, res) => {
 });
 
 router.put('/maintainerr/settings', (req, res) => {
-  const { url, botToken, chatId, topicId, pairs, silent, savedMessage, deleteMessage, deleteMessageTv } = req.body || {};
-  updateMaintainerrSettings({ url, botToken, chatId, topicId, pairs, silent, savedMessage, deleteMessage, deleteMessageTv });
+  const { url, botToken, chatId, topicId, pairs, silent, savedMessage, deleteMessage, deleteMessageTv, salvadoGraceDays } = req.body || {};
+  updateMaintainerrSettings({ url, botToken, chatId, topicId, pairs, silent, savedMessage, deleteMessage, deleteMessageTv, salvadoGraceDays });
   res.json(getMaintainerrSettingsForDisplay());
 });
 

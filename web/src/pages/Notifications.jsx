@@ -10,26 +10,6 @@ function Chevron({ open }) {
   );
 }
 
-// Sub-desplegable más compacto, para trocear una AccordionSection larga (el
-// módulo Maintainerr tiene conexión + mensajes de dos tipos + colecciones +
-// webhook — todo en un bloque se veía como una pared de campos).
-function MiniSection({ title, defaultOpen = false, children }) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="rounded-xl border border-bg-700 overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-bg-700/25 transition-colors"
-      >
-        <span className="font-bold text-sm text-gray-200">{title}</span>
-        <Chevron open={open} />
-      </button>
-      {open && <div className="border-t border-bg-700 px-4 py-4 bg-bg-900/20 space-y-4">{children}</div>}
-    </div>
-  );
-}
-
 function AccordionSection({ id, title, description, status, tone = 'neutral', open, onToggle, children }) {
   const statusClass = tone === 'active'
     ? 'bg-green-500/10 text-green-300 ring-green-500/25'
@@ -78,22 +58,6 @@ export default function Notifications() {
   const [sendingPendingSummary, setSendingPendingSummary] = useState(false);
   const [openSection, setOpenSection] = useState('agent');
 
-  // Módulo Maintainerr (botón 💾 Salvar): config propia con bot dedicado.
-  const [mnt, setMnt] = useState(null);
-  const [mntUrl, setMntUrl] = useState('');
-  const [mntToken, setMntToken] = useState('');
-  const [mntChatId, setMntChatId] = useState('');
-  const [mntTopicId, setMntTopicId] = useState('');
-  const [mntSilent, setMntSilent] = useState(false);
-  const [mntSavedMessage, setMntSavedMessage] = useState('');
-  const [mntDeleteMessage, setMntDeleteMessage] = useState('');
-  const [mntDeleteMessageTv, setMntDeleteMessageTv] = useState('');
-  const [mntGraceDays, setMntGraceDays] = useState(5);
-  const [mntResult, setMntResult] = useState(null);
-  const [mntLiveCollections, setMntLiveCollections] = useState(null);
-  const [mntPairsMap, setMntPairsMap] = useState({}); // { tituloOrigen: tituloDestino }
-  const [savingMnt, setSavingMnt] = useState(false);
-
   const [links, setLinks] = useState([]);
   const [users, setUsers] = useState([]);
   const [discovered, setDiscovered] = useState([]);
@@ -113,22 +77,6 @@ export default function Notifications() {
         notifyFreed !== (botSettings.notifyFreed ?? true))
   );
   useDirty('notifications-agent', agentDirty);
-
-  const normalizePairs = (map) => JSON.stringify(Object.entries(map).sort());
-  const mntDirty = Boolean(
-    mnt &&
-      (mntToken !== '' ||
-        mntUrl !== (mnt.url ?? '') ||
-        mntChatId !== (mnt.chatId ?? '') ||
-        mntTopicId !== (mnt.topicId ?? '') ||
-        mntSilent !== Boolean(mnt.silent) ||
-        mntSavedMessage !== (mnt.savedMessage ?? '') ||
-        mntDeleteMessage !== (mnt.deleteMessage ?? '') ||
-        mntDeleteMessageTv !== (mnt.deleteMessageTv ?? '') ||
-        mntGraceDays !== (mnt.salvadoGraceDays ?? 5) ||
-        normalizePairs(mntPairsMap) !== normalizePairs(Object.fromEntries((mnt.pairs ?? []).map((p) => [p.source, p.target]))))
-  );
-  useDirty('notifications-maintainerr', mntDirty);
 
   function loadLinks() {
     api.notificationLinks().then(setLinks);

@@ -62,7 +62,13 @@ export function getMaintainerrSettings() {
   };
 }
 
-function getSalvadoGraceDays() {
+// Con libraryId, mira primero el override por biblioteca (libraries.salvado_grace_days,
+// editable en la pestaña Salvadas); sin override ahí, o sin libraryId, cae al global.
+function getSalvadoGraceDays(libraryId) {
+  if (libraryId != null) {
+    const override = getLibrarySalvadoGraceDays.get(libraryId)?.salvado_grace_days;
+    if (override != null) return override;
+  }
   const raw = Number(getRawSetting(SALVADO_GRACE_DAYS_KEY));
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_SALVADO_GRACE_DAYS;
 }
@@ -493,6 +499,7 @@ const resolveSalvadosForItem = db.prepare(
 );
 const distinctSalvadoMediaIds = db.prepare('SELECT DISTINCT media_server_id FROM salvados WHERE resolved_at IS NULL');
 const getLibrarySectionType = db.prepare('SELECT section_type FROM libraries WHERE id = ?');
+const getLibrarySalvadoGraceDays = db.prepare('SELECT salvado_grace_days FROM libraries WHERE id = ?');
 
 // Mensaje de Telegram de un salvado (ver tabla salvado_messages en db.js):
 // text guarda SIEMPRE el contenido completo tal cual está en Telegram ahora
@@ -523,14 +530,18 @@ function isTvLibrary(libraryId) {
 
 // Peor caso conocido de fecha de borrado para un ítem salvado: el día del
 // ÚLTIMO salvado (si hay varios salvadores, para que el último en sumarse
-// tenga también su plazo entero) + los días de gracia configurados
-// (salvadoGraceDays, 5 por defecto) — no se suma la ventana de salvar por
-// medio. Ancla estable en saved_at, no "hoy" en cada ciclo, que nunca
-// llegaría a cumplirse.
-function getFallbackDeadlineMs(mediaServerId) {
+// tenga también su plazo entero) + los días de gracia configurados, con
+// override por biblioteca si lo hay (getSalvadoGraceDays) — no se suma la
+// ventana de salvar por medio. Ancla estable en saved_at, no "hoy" en cada
+// ciclo, que nunca llegaría a cumplirse.
+// libraryIdHint solo hace falta para el PRIMER salvado de un ítem (aún no
+// hay fila en salvados de la que sacar library_id); en los demás casos se
+// ignora y se usa el de la fila ya guardada.
+function getFallbackDeadlineMs(mediaServerId, libraryIdHint) {
   const rows = getSalvadosForItem.all(mediaServerId);
   const lastSavedMs = rows.length > 0 ? Math.max(...rows.map((r) => sqliteTextToMs(r.saved_at))) : Date.now();
-  return lastSavedMs + getSalvadoGraceDays() * 86_400_000;
+  const libraryId = rows[0]?.library_id ?? libraryIdHint ?? null;
+  return lastSavedMs + getSalvadoGraceDays(libraryId) * 86_400_000;
 }
 
 function displayName(from) {
@@ -688,7 +699,7 @@ async function handleSaveCallback(query) {
       displayName(query.from),
       resolveTautulliUser(query.from.id),
       meta.libraryId,
-      toSqliteText(getFallbackDeadlineMs(String(mediaServerId)))
+      toSqliteText(getFallbackDeadlineMs(String(mediaServerId), meta.libraryId))
     );
 
     await botApi('answerCallbackQuery', { callback_query_id: query.id, text: 'Salvada' });

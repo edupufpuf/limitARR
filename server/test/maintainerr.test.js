@@ -475,6 +475,29 @@ test('endpoints admin: /salvados y settings del módulo responden', async () => 
   assert.equal(settings.body.bot_token_set, true);
 });
 
+test('PUT /libraries/:id: guarda y limpia el override de plazo de gracia de salvados', async () => {
+  db.exec("DELETE FROM libraries WHERE id = 79;");
+  // enabled=0: la ruta se salta refreshQuotaCache (llama a Tautulli/Seerr reales) y solo borra caché.
+  db.prepare("INSERT INTO libraries (id, name, section_type, enabled) VALUES (79, 'Test lib PUT', 'movie', 0)").run();
+
+  const graceDays = () => db.prepare('SELECT salvado_grace_days FROM libraries WHERE id = 79').get().salvado_grace_days;
+
+  try {
+    await agent.put('/api/libraries/79').send({ salvadoGraceDays: 3 }).expect(200);
+    assert.equal(graceDays(), 3);
+
+    // Un PUT que no toca el campo no debe borrar el valor guardado (merge, no overwrite).
+    await agent.put('/api/libraries/79').send({ defaultLimit: 4 }).expect(200);
+    assert.equal(graceDays(), 3);
+
+    // Volver al global se hace mandando null explícito.
+    await agent.put('/api/libraries/79').send({ salvadoGraceDays: null }).expect(200);
+    assert.equal(graceDays(), null);
+  } finally {
+    db.prepare('DELETE FROM libraries WHERE id = 79').run();
+  }
+});
+
 // --- processSalvados: borrado ligado a visionado (8 ago 2026) ---
 
 const insertCandidateRow = db.prepare(`
@@ -696,5 +719,54 @@ test('processSalvados: con varios salvadores, el plazo cuenta desde el ÚLTIMO e
     assert.ok(new Date(`${row.expires_at.replace(' ', 'T')}Z`).getTime() > Date.now());
   } finally {
     db.prepare("DELETE FROM settings WHERE key = 'maintainerr_salvado_grace_days'").run();
+  }
+});
+
+test('processSalvados: override de plazo de gracia por biblioteca gana al global', async () => {
+  db.exec("DELETE FROM salvados; DELETE FROM maintainerr_candidates; DELETE FROM salvado_messages; DELETE FROM libraries WHERE id = 77;");
+  upsertSetting.run('maintainerr_salvado_grace_days', '10');
+  db.prepare("INSERT INTO libraries (id, name, section_type, enabled, salvado_grace_days) VALUES (77, 'Test lib', 'movie', 1, 1)").run();
+  insertCandidateRow.run('ps-10', new Date().toISOString().slice(0, 19).replace('T', ' '), 30, 0);
+  db.prepare(`
+    INSERT INTO salvados (media_server_id, tmdb_id, title, telegram_user_id, telegram_name, user_id, library_id, saved_at, expires_at, watched_at)
+    VALUES ('ps-10', NULL, 'Test', '111', 'David', NULL, 77, datetime('now', '-3 days'), datetime('now', '+1 day'), NULL)
+  `).run();
+
+  try {
+    const { fetchImpl, calls } = targetCollectionsFetch('ps-10');
+    global.fetch = fetchImpl;
+    await processSalvados();
+    assert.ok(
+      calls.some((c) => c.url.includes('/media/handle')),
+      'override de 1 día ya vencido (guardado hace 3) pese al global de 10, que aún no lo estaría'
+    );
+  } finally {
+    db.prepare("DELETE FROM settings WHERE key = 'maintainerr_salvado_grace_days'").run();
+    db.prepare("DELETE FROM libraries WHERE id = 77").run();
+  }
+});
+
+test('processSalvados: sin override, biblioteca cae al plazo global', async () => {
+  db.exec("DELETE FROM salvados; DELETE FROM maintainerr_candidates; DELETE FROM salvado_messages; DELETE FROM libraries WHERE id = 78;");
+  upsertSetting.run('maintainerr_salvado_grace_days', '10');
+  db.prepare("INSERT INTO libraries (id, name, section_type, enabled, salvado_grace_days) VALUES (78, 'Test lib sin override', 'movie', 1, NULL)").run();
+  insertCandidateRow.run('ps-11', new Date().toISOString().slice(0, 19).replace('T', ' '), 30, 0);
+  db.prepare(`
+    INSERT INTO salvados (media_server_id, tmdb_id, title, telegram_user_id, telegram_name, user_id, library_id, saved_at, expires_at, watched_at)
+    VALUES ('ps-11', NULL, 'Test', '111', 'David', NULL, 78, datetime('now', '-3 days'), datetime('now', '+1 day'), NULL)
+  `).run();
+
+  try {
+    const { fetchImpl, calls } = targetCollectionsFetch('ps-11');
+    global.fetch = fetchImpl;
+    await processSalvados();
+    assert.equal(
+      calls.some((c) => c.url.includes('/media/handle')),
+      false,
+      'sin override, el global de 10 días aún no ha vencido a los 3 días'
+    );
+  } finally {
+    db.prepare("DELETE FROM settings WHERE key = 'maintainerr_salvado_grace_days'").run();
+    db.prepare("DELETE FROM libraries WHERE id = 78").run();
   }
 });

@@ -394,3 +394,8 @@ db.exec(`
 // arriba): tiene que ir después de ambos, si no "no such table" en DBs que
 // aún no la tienen.
 addColumnIfMissing("ALTER TABLE salvado_messages ADD COLUMN text TEXT NOT NULL DEFAULT ''");
+
+// Pedido de Edu (9 ago 2026): plazo de gracia de salvados por biblioteca —
+// NULL = usar el valor global de la pestaña Salvadas (ver salvadoGraceDays
+// en maintainerr.js).
+addColumnIfMissing('ALTER TABLE libraries ADD COLUMN salvado_grace_days INTEGER');
