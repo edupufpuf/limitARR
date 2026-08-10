@@ -55,6 +55,7 @@ import {
   getAllSalvados,
   getSalvadosHistory,
 } from '../services/maintainerr.js';
+import { getBroadcastSettings, setBroadcastSettings, seenCountFor } from '../services/broadcast.js';
 
 export const router = Router();
 
@@ -1551,6 +1552,23 @@ router.get('/salvados/history', (req, res) => {
 
 router.get('/notifications/settings', (req, res) => {
   res.json({ ...getBotTokenForDisplay(), ...getNotifyTarget() });
+});
+
+// Aviso general en pantalla (terminate_session con mensaje, ver
+// enforceBroadcast en scheduler.js): pensado para empujar a quien todavía no
+// ha vinculado Telegram a que entre en el panel y lo haga. seenCount es
+// informativo, para que el admin vea si ya está calando sin tener que mirar
+// la tabla a mano.
+router.get('/notifications/broadcast', (req, res) => {
+  const settings = getBroadcastSettings();
+  res.json({ ...settings, seenCount: seenCountFor(settings.message) });
+});
+
+router.put('/notifications/broadcast', (req, res) => {
+  const { enabled, message } = req.body || {};
+  setBroadcastSettings({ enabled, message });
+  const settings = getBroadcastSettings();
+  res.json({ ...settings, seenCount: seenCountFor(settings.message) });
 });
 
 router.put('/notifications/settings', (req, res) => {

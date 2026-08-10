@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { db } from '../src/db.js';
-import { notifyStillUnavailable, enforceSingleSession, notifyBypassedApprovals, runPollCycle, processSeasonQueue } from '../src/scheduler.js';
+import { notifyStillUnavailable, enforceSingleSession, enforceBroadcast, notifyBypassedApprovals, runPollCycle, processSeasonQueue } from '../src/scheduler.js';
 import { setSessionGuardEnabled } from '../src/sessionGuard.js';
+import { setBroadcastSettings } from '../src/services/broadcast.js';
 
 // Pedido de Edu (2 ago 2026): si a las 12h de aprobarse sigue sin estar en
 // Plex, avisar una vez de que aún no está disponible. Idempotente: no debe
@@ -216,6 +217,152 @@ test('enforceSingleSession: no corta si el usuario lo desactivó en su panel', a
     global.fetch = originalFetch;
     db.prepare('DELETE FROM session_guard_settings WHERE user_id = 902').run();
     db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key')").run();
+  }
+});
+
+// Pedido de Edu (10 ago 2026): empujar a vincular Telegram con un pop-up en
+// Plex (terminate_session con mensaje) — solo a quien no está vinculado, solo
+// una vez, nunca al admin.
+
+test('enforceBroadcast: corta a quien no tiene Telegram vinculado, con el mensaje configurado', async () => {
+  upsertSetting('tautulli_url', 'http://tautulli.test');
+  upsertSetting('tautulli_api_key', 'test-key');
+  setBroadcastSettings({ enabled: true, message: 'Vincula tu Telegram en cupo.eduflix.win' });
+
+  const calls = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes('cmd=terminate_session')) {
+      calls.push({ sessionKey: new URL(url).searchParams.get('session_key'), message: new URL(url).searchParams.get('message') });
+    }
+    const mock = mockActivity({
+      tautulliUsers: [{ user_id: 910, username: 'sin_vincular', is_admin: '0' }],
+      sessions: [{ session_key: 'sess-910', user_id: 910, username: 'sin_vincular', full_title: 'A', started: '1000' }],
+    });
+    return mock(input);
+  };
+
+  try {
+    await enforceBroadcast();
+    assert.deepEqual(calls, [{ sessionKey: 'sess-910', message: 'Vincula tu Telegram en cupo.eduflix.win' }]);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM broadcast_seen WHERE user_id = 910').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'broadcast_enabled', 'broadcast_message')").run();
+  }
+});
+
+test('enforceBroadcast: no corta a quien ya tiene Telegram vinculado', async () => {
+  upsertSetting('tautulli_url', 'http://tautulli.test');
+  upsertSetting('tautulli_api_key', 'test-key');
+  setBroadcastSettings({ enabled: true, message: 'Vincula tu Telegram' });
+  db.prepare("INSERT INTO telegram_links (user_id, chat_id, linked_at) VALUES (911, 'chat-911', datetime('now'))").run();
+
+  const calls = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes('cmd=terminate_session')) calls.push(new URL(url).searchParams.get('session_key'));
+    const mock = mockActivity({
+      tautulliUsers: [{ user_id: 911, username: 'ya_vinculado', is_admin: '0' }],
+      sessions: [{ session_key: 'sess-911', user_id: 911, username: 'ya_vinculado', full_title: 'A', started: '1000' }],
+    });
+    return mock(input);
+  };
+
+  try {
+    await enforceBroadcast();
+    assert.deepEqual(calls, []);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM telegram_links WHERE user_id = 911').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'broadcast_enabled', 'broadcast_message')").run();
+  }
+});
+
+test('enforceBroadcast: a un admin nunca se le corta nada', async () => {
+  upsertSetting('tautulli_url', 'http://tautulli.test');
+  upsertSetting('tautulli_api_key', 'test-key');
+  setBroadcastSettings({ enabled: true, message: 'Vincula tu Telegram' });
+
+  const calls = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes('cmd=terminate_session')) calls.push(new URL(url).searchParams.get('session_key'));
+    const mock = mockActivity({
+      tautulliUsers: [{ user_id: 912, username: 'edu', is_admin: '1' }],
+      sessions: [{ session_key: 'sess-912', user_id: 912, username: 'edu', full_title: 'A', started: '1000' }],
+    });
+    return mock(input);
+  };
+
+  try {
+    await enforceBroadcast();
+    assert.deepEqual(calls, []);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'broadcast_enabled', 'broadcast_message')").run();
+  }
+});
+
+test('enforceBroadcast: solo corta una vez por usuario mientras el mensaje no cambie', async () => {
+  upsertSetting('tautulli_url', 'http://tautulli.test');
+  upsertSetting('tautulli_api_key', 'test-key');
+  setBroadcastSettings({ enabled: true, message: 'Vincula tu Telegram' });
+
+  const calls = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes('cmd=terminate_session')) calls.push(new URL(url).searchParams.get('session_key'));
+    const mock = mockActivity({
+      tautulliUsers: [{ user_id: 913, username: 'sin_vincular', is_admin: '0' }],
+      sessions: [{ session_key: 'sess-913', user_id: 913, username: 'sin_vincular', full_title: 'A', started: '1000' }],
+    });
+    return mock(input);
+  };
+
+  try {
+    await enforceBroadcast();
+    await enforceBroadcast();
+    assert.deepEqual(calls, ['sess-913']);
+
+    // Cambiar el texto lo cuenta como aviso nuevo: vuelve a cortarle.
+    setBroadcastSettings({ enabled: true, message: 'Nuevo texto' });
+    await enforceBroadcast();
+    assert.deepEqual(calls, ['sess-913', 'sess-913']);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM broadcast_seen WHERE user_id = 913').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'broadcast_enabled', 'broadcast_message')").run();
+  }
+});
+
+test('enforceBroadcast: desactivado no corta a nadie', async () => {
+  upsertSetting('tautulli_url', 'http://tautulli.test');
+  upsertSetting('tautulli_api_key', 'test-key');
+  setBroadcastSettings({ enabled: false, message: 'Vincula tu Telegram' });
+
+  const calls = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes('cmd=terminate_session')) calls.push(new URL(url).searchParams.get('session_key'));
+    const mock = mockActivity({
+      tautulliUsers: [{ user_id: 914, username: 'sin_vincular', is_admin: '0' }],
+      sessions: [{ session_key: 'sess-914', user_id: 914, username: 'sin_vincular', full_title: 'A', started: '1000' }],
+    });
+    return mock(input);
+  };
+
+  try {
+    await enforceBroadcast();
+    assert.deepEqual(calls, []);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'broadcast_enabled', 'broadcast_message')").run();
   }
 });
 

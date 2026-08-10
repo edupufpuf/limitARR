@@ -66,6 +66,18 @@ db.exec(`
     linked_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  -- Aviso general en pantalla (pedido de Edu, 10 ago 2026): la única forma que
+  -- expone la API de Plex/Tautulli de mostrar un pop-up real en el cliente es
+  -- terminate_session con un mensaje (corta la reproducción a la vez que lo
+  -- enseña). Se guarda el TEXTO visto, no un booleano: si el admin cambia el
+  -- mensaje, deja de coincidir y cuenta como aviso nuevo para todos — no hace
+  -- falta un id de versión aparte.
+  CREATE TABLE IF NOT EXISTS broadcast_seen (
+    user_id INTEGER PRIMARY KEY,      -- Tautulli user_id
+    message TEXT NOT NULL,
+    seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   -- Marca de "reset manual" por usuario+biblioteca: solo cuentan como pendientes
   -- las aprobaciones posteriores a esta fecha (botón "Resetear" en la pestaña Cupo).
   CREATE TABLE IF NOT EXISTS quota_resets (

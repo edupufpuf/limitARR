@@ -198,6 +198,20 @@ se descarta silenciosamente (con log), nunca cae a un grupo ni a otro usuario.
    Telegram vinculado, aviso descartado`) — no llegará a nadie, es el
    comportamiento esperado, no un fallo.
 
+### Vincular Telegram (pop-up en Plex)
+
+Pestaña **Notificaciones** → "Vincular Telegram (pop-up en Plex)": la única
+forma de pop-up real en pantalla que da la API de Plex/Tautulli es
+`terminate_session` con un mensaje (corta la reproducción a la vez que lo
+enseña — mismo mecanismo que usa el corte de sesiones duplicadas). Sirve para
+empujar a los usuarios a que entren en el panel (`http://cupo.eduflix.win`),
+inicien sesión con su cuenta de Plex y pulsen "Vincular con Telegram".
+
+Se activa/desactiva y el texto es editable. Solo corta a quien **todavía no
+tiene Telegram vinculado**, nunca al admin, y como mucho **una vez por
+usuario** mientras el texto no cambie — si lo editas, cuenta como aviso nuevo
+y se vuelve a enseñar a quien aún no haya vinculado.
+
 ## Pendiente / no incluido en esta primera versión
 
 - El chequeo de "aún no disponible" solo cubre películas por ahora.

@@ -9,6 +9,7 @@ import { getBalance, getMonthlyTotalQuota, reconcileVoidedRequests, refreshQuota
 import { sendMessage, getNotifyTarget, pendingButton, renderNoQuotaMessage } from './services/telegram.js';
 import { matchByEmailOrUsername } from './userMatch.js';
 import { isSessionGuardEnabled } from './sessionGuard.js';
+import { getBroadcastSettings, hasSeenBroadcast, markBroadcastSeen } from './services/broadcast.js';
 
 const insertLog = db.prepare(`
   INSERT INTO decisions_log
@@ -459,6 +460,43 @@ export async function enforceSingleSession() {
   }
 }
 
+// Pedido de Edu (10 ago 2026): empujar a vincular Telegram (para avisos de
+// cupo y borrados automáticos de Maintainerr) a quien todavía no lo ha hecho.
+// terminate_session con mensaje es la única forma de pop-up real que expone
+// la API de Plex/Tautulli — corta la reproducción a la vez que lo enseña, así
+// que solo se dispara UNA vez por usuario (broadcast_seen) mientras el aviso
+// siga activo con el mismo texto, y NUNCA a quien ya tiene Telegram vinculado
+// (getChatId, misma tabla que usa el resto de avisos).
+export async function enforceBroadcast() {
+  const { enabled, message } = getBroadcastSettings();
+  if (!enabled || !message) return;
+
+  let sessions;
+  try {
+    sessions = await getActiveSessions();
+  } catch (err) {
+    console.error('[scheduler] get_activity failed (broadcast):', err.message);
+    return;
+  }
+  if (sessions.length === 0) return;
+
+  const users = await getUsers();
+  const adminIds = new Set(users.filter((u) => u.isAdmin).map((u) => u.id));
+
+  for (const session of sessions) {
+    if (adminIds.has(session.userId)) continue; // el propietario ya conoce el panel
+    if (getChatId.get(session.userId)) continue; // ya vinculado, no hace falta insistir
+    if (hasSeenBroadcast(session.userId, message)) continue;
+    try {
+      await terminateSession(session.sessionKey, message);
+    } catch (err) {
+      console.error('[scheduler] terminate_session failed (broadcast):', err.message);
+      continue;
+    }
+    markBroadcastSeen(session.userId, message);
+  }
+}
+
 // Pedido de Edu (3 ago 2026): caso admin (o cualquiera con autoaprobar) —
 // Seerr aprueba al instante, sin pasar por la cola de pendientes. Aviso
 // informativo aparte (sin cupo, no hay saldo que dar), una vez por
@@ -819,6 +857,7 @@ export async function runPollCycle() {
   await processSeasonQueue();
   await notifyStillUnavailable();
   await enforceSingleSession();
+  await enforceBroadcast();
   await notifyBypassedApprovals();
 }
 

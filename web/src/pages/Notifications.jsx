@@ -58,6 +58,13 @@ export default function Notifications() {
   const [sendingPendingSummary, setSendingPendingSummary] = useState(false);
   const [openSection, setOpenSection] = useState('agent');
 
+  const [broadcastSettings, setBroadcastSettingsState] = useState(null);
+  const [broadcastEnabled, setBroadcastEnabled] = useState(false);
+  const [broadcastMessage, setBroadcastMessage] = useState('');
+  const [broadcastSeenCount, setBroadcastSeenCount] = useState(0);
+  const [savingBroadcast, setSavingBroadcast] = useState(false);
+  const [broadcastResult, setBroadcastResult] = useState(null);
+
   const [links, setLinks] = useState([]);
   const [users, setUsers] = useState([]);
   const [discovered, setDiscovered] = useState([]);
@@ -78,6 +85,13 @@ export default function Notifications() {
   );
   useDirty('notifications-agent', agentDirty);
 
+  const broadcastDirty = Boolean(
+    broadcastSettings &&
+      (broadcastEnabled !== (broadcastSettings.enabled ?? false) ||
+        broadcastMessage !== (broadcastSettings.message ?? ''))
+  );
+  useDirty('notifications-broadcast', broadcastDirty);
+
   function loadLinks() {
     api.notificationLinks().then(setLinks);
   }
@@ -95,6 +109,12 @@ export default function Notifications() {
     });
     api.users().then(setUsers);
     loadLinks();
+    api.broadcastSettings().then((b) => {
+      setBroadcastSettingsState(b);
+      setBroadcastEnabled(b.enabled ?? false);
+      setBroadcastMessage(b.message ?? '');
+      setBroadcastSeenCount(b.seenCount ?? 0);
+    });
     api.maintainerrSettings().then((m) => {
       setMnt(m);
       setMntUrl(m.url ?? '');
@@ -110,6 +130,23 @@ export default function Notifications() {
       setMntPairsMap(map);
     }).catch(() => {});
   }, []);
+
+  async function saveBroadcast() {
+    setSavingBroadcast(true);
+    setBroadcastResult(null);
+    try {
+      const b = await api.updateBroadcastSettings({ enabled: broadcastEnabled, message: broadcastMessage });
+      setBroadcastSettingsState(b);
+      setBroadcastEnabled(b.enabled ?? false);
+      setBroadcastMessage(b.message ?? '');
+      setBroadcastSeenCount(b.seenCount ?? 0);
+      setBroadcastResult('Guardado.');
+    } catch {
+      setBroadcastResult('No se pudo guardar.');
+    } finally {
+      setSavingBroadcast(false);
+    }
+  }
 
   async function saveMaintainerr() {
     setSavingMnt(true);
@@ -369,6 +406,44 @@ export default function Notifications() {
             </span>
             <input type="checkbox" checked={notifyFreed} onChange={(e) => setNotifyFreed(e.target.checked)} className="w-5 h-5 accent-red-500" />
           </label>
+        </AccordionSection>
+
+        <AccordionSection
+          id="broadcast"
+          title="Vincular Telegram (pop-up en Plex)"
+          description="Corta la reproducción con un aviso en pantalla, una vez, a quien todavía no ha vinculado Telegram."
+          status={broadcastEnabled ? 'Activo' : 'Desactivado'}
+          tone={broadcastEnabled ? 'active' : 'neutral'}
+          open={openSection === 'broadcast'}
+          onToggle={toggleSection}
+        >
+          <p className="text-xs text-gray-500 mb-4">
+            Es la única forma de pop-up real que da la API de Plex/Tautulli: se
+            corta la reproducción en curso mostrando este texto (como ya hace el
+            corte de sesiones duplicadas). Solo a quien NO tenga Telegram
+            vinculado, nunca al admin, y como mucho una vez por usuario mientras
+            el texto no cambie — si lo editas, se vuelve a enseñar a todos los
+            que aún no han vinculado.
+          </p>
+          <label className="flex items-center justify-between gap-4 rounded-xl border border-bg-600 bg-bg-950/30 p-4 cursor-pointer mb-5">
+            <span>
+              <span className="block font-bold">Activar</span>
+              <span className="block text-xs text-gray-500 mt-1">
+                {broadcastSeenCount > 0
+                  ? `Ya se ha mostrado a ${broadcastSeenCount} usuario${broadcastSeenCount === 1 ? '' : 's'} con este texto.`
+                  : 'Todavía no se ha mostrado a nadie con este texto.'}
+              </span>
+            </span>
+            <input type="checkbox" checked={broadcastEnabled} onChange={(e) => setBroadcastEnabled(e.target.checked)} className="w-5 h-5 accent-red-500" />
+          </label>
+          <label className="label">Texto del aviso</label>
+          <textarea value={broadcastMessage} onChange={(e) => setBroadcastMessage(e.target.value)} rows={4} className="input min-h-24 resize-y" />
+          <div className="flex flex-wrap items-center gap-3 mt-4">
+            <button type="button" onClick={saveBroadcast} disabled={savingBroadcast} className="btn btn-primary">
+              {savingBroadcast ? 'Guardando…' : 'Guardar'}
+            </button>
+            {broadcastResult && <span className="text-xs text-gray-500">{broadcastResult}</span>}
+          </div>
         </AccordionSection>
 
         <AccordionSection
