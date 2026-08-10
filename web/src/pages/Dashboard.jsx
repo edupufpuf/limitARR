@@ -32,8 +32,16 @@ export default function Dashboard({ onLoggedOut }) {
   );
 }
 
+// La pestaña activa se guarda en el hash de la URL (#registro, #cupo...) para
+// que un refresco de página (F5) se quede en la misma pestaña en vez de
+// volver siempre a "Cupo".
+function tabFromHash() {
+  const key = window.location.hash.slice(1);
+  return TABS[key] ? key : 'quota';
+}
+
 function DashboardInner({ onLoggedOut }) {
-  const [tab, setTab] = useState('quota');
+  const [tab, setTab] = useState(tabFromHash);
   const [version, setVersion] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const { Component, label } = TABS[tab];
@@ -46,6 +54,9 @@ function DashboardInner({ onLoggedOut }) {
   function goTab(key) {
     if (key !== tab && anyDirty() && !window.confirm(UNSAVED_WARNING)) return;
     setTab(key);
+    // replaceState (no pushState): cambiar de pestaña no debe crear una
+    // entrada de historial — el botón "atrás" del navegador no es para esto.
+    window.history.replaceState(null, '', `#${key}`);
     setMenuOpen(false);
   }
 
