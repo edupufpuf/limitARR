@@ -135,6 +135,7 @@ export const api = {
   broadcastSettings: () => request('/notifications/broadcast'),
   updateBroadcastSettings: (body) =>
     request('/notifications/broadcast', { method: 'PUT', body: JSON.stringify(body) }),
+  testBroadcast: () => request('/notifications/broadcast/test', { method: 'POST' }),
   notificationLinks: () => request('/notifications/links'),
   setNotificationLink: (userId, body) =>
     request(`/notifications/links/${userId}`, { method: 'PUT', body: JSON.stringify(body) }),

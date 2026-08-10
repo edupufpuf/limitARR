@@ -64,6 +64,8 @@ export default function Notifications() {
   const [broadcastSeenCount, setBroadcastSeenCount] = useState(0);
   const [savingBroadcast, setSavingBroadcast] = useState(false);
   const [broadcastResult, setBroadcastResult] = useState(null);
+  const [testingBroadcast, setTestingBroadcast] = useState(false);
+  const [broadcastTestResult, setBroadcastTestResult] = useState(null);
 
   const [links, setLinks] = useState([]);
   const [users, setUsers] = useState([]);
@@ -131,6 +133,26 @@ export default function Notifications() {
       setBroadcastResult('No se pudo guardar.');
     } finally {
       setSavingBroadcast(false);
+    }
+  }
+
+  // Corta SOLO tu propia sesión de Plex activa (identificada como admin en
+  // Tautulli) con el mensaje ya guardado, para verlo en pantalla sin esperar
+  // a un usuario sin vincular. Necesita estar reproduciendo algo YA.
+  async function testBroadcast() {
+    setTestingBroadcast(true);
+    setBroadcastTestResult(null);
+    try {
+      await api.testBroadcast();
+      setBroadcastTestResult('Cortada tu sesión con el mensaje — mira Plex.');
+    } catch (err) {
+      setBroadcastTestResult(
+        err.message.endsWith('404')
+          ? 'No tienes ninguna reproducción activa ahora mismo — empieza a ver algo en Plex y vuelve a pulsar.'
+          : `Error: ${err.message}`
+      );
+    } finally {
+      setTestingBroadcast(false);
     }
   }
 
@@ -376,8 +398,12 @@ export default function Notifications() {
             <button type="button" onClick={saveBroadcast} disabled={savingBroadcast} className="btn btn-primary">
               {savingBroadcast ? 'Guardando…' : 'Guardar'}
             </button>
+            <button type="button" onClick={testBroadcast} disabled={testingBroadcast} className="btn btn-ghost">
+              {testingBroadcast ? 'Probando…' : 'Probar en mi sesión activa'}
+            </button>
             {broadcastResult && <span className="text-xs text-gray-500">{broadcastResult}</span>}
           </div>
+          {broadcastTestResult && <p aria-live="polite" className="text-xs text-gray-500 mt-2">{broadcastTestResult}</p>}
         </AccordionSection>
 
         <AccordionSection

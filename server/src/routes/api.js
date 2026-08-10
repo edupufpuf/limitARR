@@ -7,7 +7,7 @@ import { config } from '../config.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { needsSetup, setPassword, checkPassword, getWebhookSecret } from '../auth.js';
-import { getUsers, getLibraries, searchMedia } from '../services/tautulli.js';
+import { getUsers, getLibraries, searchMedia, getActiveSessions, terminateSession } from '../services/tautulli.js';
 import {
   listPendingRequests,
   getSeerrUsers,
@@ -1570,6 +1570,23 @@ router.put('/notifications/broadcast', (req, res) => {
   const settings = getBroadcastSettings();
   res.json({ ...settings, seenCount: seenCountFor(settings.message) });
 });
+
+// Prueba manual: corta SOLO la sesión activa del propio admin (buscada por el
+// flag is_admin de Tautulli, nunca por lo que escriba el body) con el mensaje
+// ya guardado — para ver cómo queda el pop-up en Plex sin esperar a que
+// alguien sin vincular se ponga a ver algo. No toca la sesión de nadie más.
+router.post('/notifications/broadcast/test', ah(async (req, res) => {
+  const { message } = getBroadcastSettings();
+  if (!message) return res.status(400).json({ error: 'message_required' });
+
+  const [users, sessions] = await Promise.all([getUsers(), getActiveSessions()]);
+  const adminIds = new Set(users.filter((u) => u.isAdmin).map((u) => u.id));
+  const session = sessions.find((s) => adminIds.has(s.userId));
+  if (!session) return res.status(404).json({ error: 'no_active_admin_session' });
+
+  await terminateSession(session.sessionKey, message);
+  res.json({ ok: true });
+}));
 
 router.put('/notifications/settings', (req, res) => {
   const { botToken, mode, groupChatId, groupTopicId, noQuotaMessage, notifyNoQuota, notifyApproved, notifyFreed } = req.body || {};

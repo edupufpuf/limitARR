@@ -1128,3 +1128,87 @@ test('POST /quota/manual-charge: acepta posterUrl y no lo pisa a null', async ()
   db.prepare('DELETE FROM quota_cache WHERE user_id = 9001').run();
   db.prepare('DELETE FROM libraries WHERE id = 1888').run();
 });
+
+test('POST /notifications/broadcast/test: sin sesión activa del admin, 404', async () => {
+  const upsertSetting = db.prepare(`
+    INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+  `);
+  upsertSetting.run('tautulli_url', 'http://tautulli.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
+  upsertSetting.run('broadcast_enabled', '1');
+  upsertSetting.run('broadcast_message', 'Vincula tu Telegram');
+
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes('cmd=get_users')) {
+      return new Response(JSON.stringify({ response: { result: 'success', data: [{ user_id: 5829977, username: 'edupufpuf', is_admin: '1' }] } }), { status: 200 });
+    }
+    if (url.includes('cmd=get_activity')) {
+      return new Response(JSON.stringify({ response: { result: 'success', data: { sessions: [] } } }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    await agent.post('/api/notifications/broadcast/test').expect(404);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'broadcast_enabled', 'broadcast_message')").run();
+  }
+});
+
+test('POST /notifications/broadcast/test: corta la sesión activa del admin, nunca la de otro usuario', async () => {
+  const upsertSetting = db.prepare(`
+    INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+  `);
+  upsertSetting.run('tautulli_url', 'http://tautulli.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
+  upsertSetting.run('broadcast_enabled', '1');
+  upsertSetting.run('broadcast_message', 'Vincula tu Telegram');
+
+  const terminateCalls = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes('cmd=get_users')) {
+      return new Response(JSON.stringify({
+        response: {
+          result: 'success',
+          data: [
+            { user_id: 5829977, username: 'edupufpuf', is_admin: '1' },
+            { user_id: 9002, username: 'otro', is_admin: '0' },
+          ],
+        },
+      }), { status: 200 });
+    }
+    if (url.includes('cmd=get_activity')) {
+      return new Response(JSON.stringify({
+        response: {
+          result: 'success',
+          data: {
+            sessions: [
+              { session_key: 'sess-otro', user_id: 9002, username: 'otro', full_title: 'A', started: '1000' },
+              { session_key: 'sess-admin', user_id: 5829977, username: 'edupufpuf', full_title: 'B', started: '2000' },
+            ],
+          },
+        },
+      }), { status: 200 });
+    }
+    if (url.includes('cmd=terminate_session')) {
+      terminateCalls.push(new URL(url).searchParams.get('session_key'));
+      return new Response(JSON.stringify({ response: { result: 'success', data: {} } }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    await agent.post('/api/notifications/broadcast/test').expect(200);
+    assert.deepEqual(terminateCalls, ['sess-admin']);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'broadcast_enabled', 'broadcast_message')").run();
+  }
+});
