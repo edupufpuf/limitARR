@@ -44,6 +44,7 @@ import {
   normalizeGroupTarget,
   getBotUsername,
   createLinkToken,
+  handlePlexNotifyWebhook,
 } from '../services/telegram.js';
 import {
   handleMaintainerrWebhook,
@@ -161,6 +162,20 @@ router.post('/webhook/maintainerr/:secret', (req, res) => {
   res.status(200).end();
   handleMaintainerrWebhook(req.body || {}).catch((err) =>
     console.error('[maintainerr] webhook failed:', err)
+  );
+});
+
+// Webhook público de Tautulli (mismo esquema que Seerr/Maintainerr: secreto en
+// la URL, sin auth de sesión). Reenvía el aviso SOLO al chat de Telegram
+// vinculado a ese user_id de Plex/Tautulli (ver handlePlexNotifyWebhook) — si
+// ese usuario no tiene Telegram vinculado, el aviso se descarta sin caer a
+// ningún grupo ni a ningún otro usuario. Se responde al momento; el envío
+// sigue en background para no hacer esperar a Tautulli.
+router.post('/webhook/tautulli/:secret', (req, res) => {
+  if (req.params.secret !== getWebhookSecret()) return res.status(404).end();
+  res.status(200).end();
+  handlePlexNotifyWebhook(req.body || {}).catch((err) =>
+    console.error('[tautulli] webhook failed:', err)
   );
 });
 
@@ -483,6 +498,13 @@ router.post('/webhook/configure', ah(async (req, res) => {
   await configureWebhook(url);
   res.json({ ok: true, url });
 }));
+
+// URL que hay que pegar en Tautulli (Settings > Notification Agents > Add >
+// Webhook) para los avisos de eventos de Plex (reproducción, recién
+// añadido...) enrutados por usuario. Ver README para el JSON de cada disparador.
+router.get('/webhook/tautulli/info', (req, res) => {
+  res.json({ url: `http://limitarr:${config.port}/api/webhook/tautulli/${getWebhookSecret()}` });
+});
 
 // Backup consistente de la DB (API de backup online de SQLite, no una simple
 // copia de fichero — segura aunque haya escrituras en curso en WAL).

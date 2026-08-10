@@ -147,6 +147,57 @@ El aviso no lista el contenido pendiente directamente: lleva un botón
 "Ver pendientes" que, al pulsarlo, responde al momento con las carátulas
 (vía TMDB) de lo que le falta por ver.
 
+### Avisos de eventos de Plex (Tautulli → Telegram, por usuario)
+
+Además de los avisos propios de limitARR (sin cupo, aprobado, cupo liberado),
+Tautulli puede avisar de sus propios eventos de Plex (reproducción iniciada,
+recién añadido, transcodificación, etc.) y que limitARR los reenvíe por
+Telegram **solo al usuario al que le pasó**, usando el mismo vínculo
+usuario↔chat de la pestaña Notificaciones / "Mis avisos". limitARR no sabe
+nada del tipo de evento: solo reenvía el texto que Tautulli ya construyó, al
+chat de ese `user_id` — si ese usuario no tiene Telegram vinculado, el aviso
+se descarta silenciosamente (con log), nunca cae a un grupo ni a otro usuario.
+
+**Configuración en Tautulli:**
+
+1. *Settings → Notification Agents → Add a new notification agent → **Webhook***.
+2. *Webhook URL*: la que aparece en el panel, pestaña **Configuración** →
+   "Avisos de Plex por Telegram (Tautulli)" (`.../api/webhook/tautulli/<secreto>`).
+   *Webhook Method*: `POST`.
+3. En **Triggers**, activa los eventos que quieras avisar (p. ej. *Playback
+   Start*, *Recently Added*).
+4. Para CADA trigger activado, en la pestaña **Data** de ese trigger, pon como
+   cuerpo JSON algo así (usa las variables `{}` que ofrece Tautulli, no hace
+   falta escapar nada más):
+
+   ```json
+   {
+     "user_id": "{user_id}",
+     "message": "▶️ {friendly_name} ha empezado a ver {title}"
+   }
+   ```
+
+   `user_id` es obligatorio y es el id de cuenta de Plex/Tautulli (el mismo
+   que usa limitARR en Overrides/Grupos/etc.). `message` es libre — escribe lo
+   que quieras ver en Telegram, con las variables de Tautulli que te interesen
+   para ese evento concreto (así que cada trigger puede tener su propio texto).
+5. Guarda y usa el botón "Test Notifications" de Tautulli con ese trigger para
+   probar sin esperar a un evento real.
+
+**Cómo probarlo con un usuario:**
+
+1. Ese usuario (o el admin desde Notificaciones → Vinculaciones) debe tener
+   ya un chat de Telegram vinculado — compruébalo con el botón "Probar" de esa
+   fila (`POST /api/notifications/test/:userId`), que manda un mensaje suelto
+   de comprobación.
+2. Desde Tautulli, usa "Test Notifications" en el agente Webhook para el
+   trigger que configuraste, o reproduce algo en Plex con la cuenta de ese
+   usuario concreto.
+3. Debe llegarle el mensaje SOLO a él. Si Tautulli manda un `user_id` que no
+   tiene vínculo, revisa los logs del contenedor (`[tautulli] user_id ... sin
+   Telegram vinculado, aviso descartado`) — no llegará a nadie, es el
+   comportamiento esperado, no un fallo.
+
 ## Pendiente / no incluido en esta primera versión
 
 - El chequeo de "aún no disponible" solo cubre películas por ahora.

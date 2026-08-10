@@ -181,6 +181,33 @@ export function getInboxMessages() {
   return db.prepare('SELECT * FROM telegram_inbox ORDER BY id DESC LIMIT 50').all();
 }
 
+// --- Webhook de Tautulli (avisos de eventos de Plex: reproducción, recién
+// añadido, etc.) ---
+//
+// Tautulli manda el JSON que el admin haya escrito en la pestaña "Data" de
+// cada disparador del agente Webhook, con sus propias variables de plantilla
+// ({title}, {friendly_name}...) ya sustituidas — limitARR no necesita saber
+// nada del evento en sí, solo reenviar `message` al chat vinculado a ese
+// `user_id`. Consulta directa por PK (user_id) en vez de reusar getNotifyTarget:
+// así es IMPOSIBLE que esto acabe cayendo en el grupo o mandándose a nadie
+// que no sea exactamente ese usuario — si no hay vínculo, se descarta.
+const getLinkedChatId = db.prepare('SELECT chat_id FROM telegram_links WHERE user_id = ?');
+
+export async function handlePlexNotifyWebhook(body) {
+  const userId = Number(body?.user_id);
+  const message = String(body?.message ?? '').trim();
+  if (!Number.isFinite(userId) || !message) {
+    console.warn('[tautulli] webhook sin user_id/message válidos, descartado:', body);
+    return;
+  }
+  const link = getLinkedChatId.get(userId);
+  if (!link) {
+    console.warn(`[tautulli] user_id ${userId} sin Telegram vinculado, aviso descartado`);
+    return;
+  }
+  await sendMessage(link.chat_id, message);
+}
+
 // Común a handlePendingCallback (botón "sin cupo") y handlePendingCommand
 // (/pendientes escrito a mano) — mismo formato de respuesta para las dos vías.
 async function sendPendingItemsMessage(chatId, messageThreadId, pendingItems) {

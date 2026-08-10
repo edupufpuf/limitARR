@@ -38,6 +38,7 @@ export default function Settings() {
   const [webhookUrl, setWebhookUrl] = useState('');
   const [configuringWebhook, setConfiguringWebhook] = useState(false);
   const [webhookMessage, setWebhookMessage] = useState(null);
+  const [tautulliWebhookUrl, setTautulliWebhookUrl] = useState('');
 
   const [monthlyTotal, setMonthlyTotal] = useState(null);
   const [monthlyTotalForm, setMonthlyTotalForm] = useState({ mode: 'per_library', limit: '' });
@@ -85,6 +86,7 @@ export default function Settings() {
       }));
     });
     api.webhookInfo().then((r) => setWebhookUrl(r.url));
+    api.tautulliWebhookInfo().then((r) => setTautulliWebhookUrl(r.url));
     api.monthlyTotalQuotaSettings().then((s) => {
       setMonthlyTotal(s);
       setMonthlyTotalForm({ mode: s.mode, limit: String(s.limit) });
@@ -357,6 +359,18 @@ export default function Settings() {
             <span className={`text-xs ${webhookMessage.ok ? 'text-green-400' : 'text-accent-400'}`}>{webhookMessage.text}</span>
           )}
         </div>
+      </div>
+
+      <h3 className="text-sm font-semibold text-accent-400 mt-8 mb-2">Avisos de Plex por Telegram (Tautulli)</h3>
+      <div className="card p-5">
+        <p className="text-xs text-gray-500 mb-3">
+          Pégala en Tautulli → Settings → Notification Agents → Add a new
+          notification agent → Webhook. El aviso llega SOLO al Telegram que ese
+          usuario tenga vinculado (pestaña Notificaciones o &quot;Mis avisos&quot;) —
+          si no está vinculado, se descarta sin mandarse a nadie más. Detalle de
+          cómo rellenar el JSON de cada disparador, en el README.
+        </p>
+        <p className="text-xs text-gray-600 break-all font-mono">{tautulliWebhookUrl}</p>
       </div>
 
       <h3 className="text-sm font-semibold text-accent-400 mt-8 mb-2">Cupo mensual</h3>

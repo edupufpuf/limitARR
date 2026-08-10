@@ -127,6 +127,7 @@ export const api = {
     request(`/monthly-total-quota/overrides/role/${roleId}`, { method: 'DELETE', body: JSON.stringify({ roleName }) }),
   webhookInfo: () => request('/webhook/info'),
   configureWebhook: () => request('/webhook/configure', { method: 'POST' }),
+  tautulliWebhookInfo: () => request('/webhook/tautulli/info'),
 
   notificationSettings: () => request('/notifications/settings'),
   updateNotificationSettings: (body) =>

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { db } from '../src/db.js';
-import { processUpdates } from '../src/services/telegram.js';
+import { processUpdates, handlePlexNotifyWebhook } from '../src/services/telegram.js';
 
 // Pedido de Edu (3 ago 2026): comando /pendientes escrito al bot — lista lo
 // pendiente de TODAS las bibliotecas, sin depender de un botón previo.
@@ -118,5 +118,70 @@ test('/pendientes: sin nada pendiente, lo dice', async () => {
     db.prepare('DELETE FROM telegram_links WHERE user_id = 961').run();
     db.prepare('DELETE FROM libraries WHERE id = 9601').run();
     db.prepare("DELETE FROM settings WHERE key IN ('telegram_bot_token', 'tautulli_url', 'tautulli_api_key')").run();
+  }
+});
+
+test('webhook Tautulli: user_id vinculado recibe el mensaje tal cual', async () => {
+  upsertSetting('telegram_bot_token', 'test-bot-token');
+  db.prepare("INSERT INTO telegram_links (user_id, chat_id, linked_at) VALUES (962, 'chat-962', datetime('now'))").run();
+
+  const sent = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (input, options) => {
+    sent.push({ url: String(input), body: JSON.parse(options.body) });
+    return new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 });
+  };
+
+  try {
+    await handlePlexNotifyWebhook({ user_id: '962', message: '▶️ Edu ha empezado a ver Silo' });
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].body.chat_id, 'chat-962');
+    assert.equal(sent[0].body.text, '▶️ Edu ha empezado a ver Silo');
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM telegram_links WHERE user_id = 962').run();
+    db.prepare("DELETE FROM settings WHERE key = 'telegram_bot_token'").run();
+  }
+});
+
+test('webhook Tautulli: user_id sin vincular no manda nada a nadie (nunca broadcast)', async () => {
+  upsertSetting('telegram_bot_token', 'test-bot-token');
+  // Otro usuario SÍ vinculado, para comprobar que el aviso no se le cuela a él.
+  db.prepare("INSERT INTO telegram_links (user_id, chat_id, linked_at) VALUES (963, 'chat-963', datetime('now'))").run();
+
+  const sent = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (input, options) => {
+    sent.push({ url: String(input), body: JSON.parse(options.body) });
+    return new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 });
+  };
+
+  try {
+    await handlePlexNotifyWebhook({ user_id: '999999', message: 'no debería llegar a nadie' });
+    assert.equal(sent.length, 0);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM telegram_links WHERE user_id = 963').run();
+    db.prepare("DELETE FROM settings WHERE key = 'telegram_bot_token'").run();
+  }
+});
+
+test('webhook Tautulli: sin user_id o sin message, se descarta sin llamar a Telegram', async () => {
+  upsertSetting('telegram_bot_token', 'test-bot-token');
+  const sent = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (input, options) => {
+    sent.push({ url: String(input), body: JSON.parse(options.body) });
+    return new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 });
+  };
+
+  try {
+    await handlePlexNotifyWebhook({ message: 'sin user_id' });
+    await handlePlexNotifyWebhook({ user_id: '962' });
+    await handlePlexNotifyWebhook({});
+    assert.equal(sent.length, 0);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare("DELETE FROM settings WHERE key = 'telegram_bot_token'").run();
   }
 });
