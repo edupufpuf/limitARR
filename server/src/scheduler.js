@@ -6,7 +6,7 @@ import { getRawSetting, setRawSetting } from './settings.js';
 import { listPendingRequests, approveRequest, declineRequest, getMediaDetails, getMovieAvailability, listRecentlyApprovedRequests, createSeasonRequest } from './services/seerr.js';
 import { getUsers, getActiveSessions, terminateSession } from './services/tautulli.js';
 import { getBalance, getMonthlyTotalQuota, reconcileVoidedRequests, refreshQuotaCache, listStaleOutstandingPairs, normalize, getRequestHold, clearRequestHold, pruneStaleQuotaCache } from './quota.js';
-import { sendMessage, getNotifyTarget, pendingButton, renderNoQuotaMessage } from './services/telegram.js';
+import { sendMessage, getNotifyTarget, pendingButton, isNotificationEnabled, renderNotificationMessage } from './services/telegram.js';
 import { matchByEmailOrUsername } from './userMatch.js';
 import { isSessionGuardEnabled } from './sessionGuard.js';
 import { getBroadcastSettings, hasSeenBroadcast, markBroadcastSeen } from './services/broadcast.js';
@@ -97,18 +97,17 @@ async function notifyNoQuota(base) {
   const replyMarkup = pendingButton(base.userId, base.libraryId);
   const unit = base.mediaType === 'tv' ? 'una temporada' : 'una película';
 
-  const target = getNotifyTarget();
-  if (!target.notifyNoQuota) return;
+  if (!isNotificationEnabled('no_quota')) return;
 
   // Aviso personal, solo DM al que pidió — nunca al grupo, aunque el modo
   // esté en 'group' (ese modo es solo para el resumen manual de pendientes).
   const chatId = getChatId.get(base.userId)?.chat_id;
   if (!chatId) return;
-  const text = renderNoQuotaMessage(target.noQuotaMessage, {
-    username: base.username,
-    libraryName,
-    mediaTitle: base.mediaTitle,
-    unit,
+  const text = renderNotificationMessage('no_quota', {
+    usuario: base.username ?? '',
+    biblioteca: libraryName,
+    titulo: base.mediaTitle ?? unit ?? 'un contenido',
+    tipo: unit ?? 'un contenido',
   });
   try {
     await sendMessage(chatId, text, { replyMarkup });
@@ -117,18 +116,20 @@ async function notifyNoQuota(base) {
   }
 }
 
-// v2: cupo mensual agotado — reutiliza el toggle de "sin cupo" en vez de sumar
-// un ajuste más, dejando claro en el texto que el motivo es el tope del mes.
+// v2: cupo mensual agotado.
 async function notifyNoMonthlyQuota(base, monthly) {
-  const libraryName = getLibraryName.get(base.libraryId)?.name ?? `biblioteca #${base.libraryId}`;
-  const target = getNotifyTarget();
-  if (!target.notifyNoQuota) return;
+  if (!isNotificationEnabled('monthly_quota')) return;
 
   const chatId = getChatId.get(base.userId)?.chat_id;
   if (!chatId) return;
-  const text =
-    `🚫 Cupo mensual agotado: ${base.mediaTitle ?? 'tu solicitud'} (${libraryName}).\n` +
-    `${base.username}: ya llevas ${monthly.used}/${monthly.limit} este mes.`;
+  const libraryName = getLibraryName.get(base.libraryId)?.name ?? `biblioteca #${base.libraryId}`;
+  const text = renderNotificationMessage('monthly_quota', {
+    usuario: base.username ?? '',
+    biblioteca: libraryName,
+    titulo: base.mediaTitle ?? 'tu solicitud',
+    usado: monthly.used,
+    limite: monthly.limit,
+  });
   try {
     await sendMessage(chatId, text);
   } catch (err) {
@@ -140,14 +141,16 @@ async function notifyNoMonthlyQuota(base, monthly) {
 // claro que el tope es el global (todas las bibliotecas combinadas), no el de
 // esta biblioteca en concreto.
 async function notifyNoMonthlyTotalQuota(base, monthlyTotal) {
-  const target = getNotifyTarget();
-  if (!target.notifyNoQuota) return;
+  if (!isNotificationEnabled('monthly_total_quota')) return;
 
   const chatId = getChatId.get(base.userId)?.chat_id;
   if (!chatId) return;
-  const text =
-    `🚫 Cupo mensual total agotado: ${base.mediaTitle ?? 'tu solicitud'}.\n` +
-    `${base.username}: ya llevas ${monthlyTotal.used}/${monthlyTotal.limit} este mes (todas las bibliotecas).`;
+  const text = renderNotificationMessage('monthly_total_quota', {
+    usuario: base.username ?? '',
+    titulo: base.mediaTitle ?? 'tu solicitud',
+    usado: monthlyTotal.used,
+    limite: monthlyTotal.limit,
+  });
   try {
     await sendMessage(chatId, text);
   } catch (err) {
@@ -158,16 +161,18 @@ async function notifyNoMonthlyTotalQuota(base, monthlyTotal) {
 // v2: temporizador de aprobación — aviso de que una solicitud concreta queda
 // aplazada hasta una fecha (acción puntual del admin, no una norma del usuario).
 async function notifyHeld(base, holdUntilMs) {
-  const libraryName = getLibraryName.get(base.libraryId)?.name ?? `biblioteca #${base.libraryId}`;
-  const target = getNotifyTarget();
-  if (!target.notifyNoQuota) return;
+  if (!isNotificationEnabled('held')) return;
 
   const chatId = getChatId.get(base.userId)?.chat_id;
   if (!chatId) return;
+  const libraryName = getLibraryName.get(base.libraryId)?.name ?? `biblioteca #${base.libraryId}`;
   const dateStr = new Date(holdUntilMs).toLocaleDateString('es-ES', { day: 'numeric', month: 'long' });
-  const text =
-    `⏳ Aplazada: ${base.mediaTitle ?? 'tu solicitud'} (${libraryName}).\n` +
-    `${base.username}: se aprobará a partir del ${dateStr}.`;
+  const text = renderNotificationMessage('held', {
+    usuario: base.username ?? '',
+    biblioteca: libraryName,
+    titulo: base.mediaTitle ?? 'tu solicitud',
+    fecha: dateStr,
+  });
   try {
     await sendMessage(chatId, text);
   } catch (err) {
@@ -179,10 +184,15 @@ async function notifyHeld(base, holdUntilMs) {
 // usuario sepa qué hacer (pedir de una en una) en vez de ver la solicitud
 // desaparecer en silencio.
 async function notifyMultiSeasonDeclined(base, seasonsCount) {
+  if (!isNotificationEnabled('multi_season_declined')) return;
+
   const libraryName = getLibraryName.get(base.libraryId)?.name ?? `biblioteca #${base.libraryId}`;
-  const text =
-    `🚫 Solicitud rechazada: ${base.mediaTitle ?? 'una serie'} (${libraryName}) pedía ${seasonsCount} temporadas de golpe.\n` +
-    `${base.username}: pide las temporadas de una en una.`;
+  const text = renderNotificationMessage('multi_season_declined', {
+    usuario: base.username ?? '',
+    biblioteca: libraryName,
+    titulo: base.mediaTitle ?? 'una serie',
+    temporadas: seasonsCount,
+  });
 
   const target = getNotifyTarget();
   try {
@@ -202,13 +212,19 @@ async function notifyMultiSeasonDeclined(base, seasonsCount) {
 // Issue #13 (fase 3): aviso al dividir una solicitud multi-temporada — la más
 // baja se manda a Seerr y sigue el flujo normal (cupo), el resto queda en cola.
 async function notifySequentialSplit(base, firstSeason, restSeasons) {
+  if (!isNotificationEnabled('sequential_split')) return;
+
   const libraryName = getLibraryName.get(base.libraryId)?.name ?? `biblioteca #${base.libraryId}`;
   const restText = restSeasons.length === 1
     ? `la temporada ${restSeasons[0]}`
     : `las temporadas ${restSeasons.join(', ')}`;
-  const text =
-    `📺 ${base.mediaTitle ?? 'Tu solicitud'} (${libraryName}): se pide primero la temporada ${firstSeason}.\n` +
-    `${base.username}: ${restText} se pedirán solas al terminar de ver la ${firstSeason}.`;
+  const text = renderNotificationMessage('sequential_split', {
+    usuario: base.username ?? '',
+    biblioteca: libraryName,
+    titulo: base.mediaTitle ?? 'Tu solicitud',
+    primera: firstSeason,
+    resto: restText,
+  });
 
   const target = getNotifyTarget();
   try {
@@ -228,10 +244,14 @@ async function notifySequentialSplit(base, firstSeason, restSeasons) {
 // Issue #13 (fase 2): aviso de "en cola" — la solicitud no se pierde, espera a
 // que el usuario termine la temporada que tiene pendiente de esa serie.
 async function notifySeasonHold(base) {
+  if (!isNotificationEnabled('season_hold')) return;
+
   const libraryName = getLibraryName.get(base.libraryId)?.name ?? `biblioteca #${base.libraryId}`;
-  const text =
-    `⏳ En cola: ${base.mediaTitle ?? 'una temporada'} (${libraryName}).\n` +
-    `${base.username}: se aprobará sola cuando termines la temporada que tienes pendiente de esa serie.`;
+  const text = renderNotificationMessage('season_hold', {
+    usuario: base.username ?? '',
+    biblioteca: libraryName,
+    titulo: base.mediaTitle ?? 'una temporada',
+  });
 
   const target = getNotifyTarget();
   try {
@@ -256,8 +276,7 @@ async function notifySeasonHold(base) {
 // de lo malo, el "sin cupo"). `pendingItems` = pendientes de esta biblioteca
 // tras la aprobación (incluye la recién aprobada).
 async function notifyApproved(base, pendingItems) {
-  const target = getNotifyTarget();
-  if (!target.notifyApproved) return;
+  if (!isNotificationEnabled('approved')) return;
 
   // Aviso personal, solo DM al que pidió — nunca al grupo.
   const chatId = getChatId.get(base.userId)?.chat_id;
@@ -267,11 +286,13 @@ async function notifyApproved(base, pendingItems) {
   const list = titles.length > 0
     ? titles.map((t) => `• ${t}`).join('\n')
     : 'nada más por ahora';
+  const text = renderNotificationMessage('approved', {
+    titulo: base.mediaTitle,
+    biblioteca: libraryName,
+    lista: list,
+  });
   try {
-    await sendMessage(
-      chatId,
-      `✅ Solicitud aprobada: ${base.mediaTitle} (${libraryName}).\nPendiente de ver en ${libraryName}:\n${list}`
-    );
+    await sendMessage(chatId, text);
   } catch (err) {
     console.error('[scheduler] telegram notify failed:', err.message);
   }
@@ -334,8 +355,7 @@ async function refreshStaleAndNotify() {
       logFreedItem(user_id, library_id, item, decision, result.limit);
     }
 
-    const target = getNotifyTarget();
-    if (!target.notifyFreed) continue;
+    if (!isNotificationEnabled('freed')) continue;
 
     const freedTitles = freedItems.map((item) => item.title).filter(Boolean);
     if (freedTitles.length === 0) continue;
@@ -348,8 +368,9 @@ async function refreshStaleAndNotify() {
     const libraryName = getLibraryName.get(library_id)?.name ?? `biblioteca #${library_id}`;
     const list = freedTitles.map((t) => `• ${t}`).join('\n');
     const saldo = `Saldo en ${libraryName}: ${result.balance} de ${result.limit}.`;
+    const text = renderNotificationMessage('freed', { lista: list, saldo });
     try {
-      await sendMessage(chatId, `🎉 Has liberado cupo:\n${list}\n${saldo}`);
+      await sendMessage(chatId, text);
     } catch (err) {
       console.error('[scheduler] telegram notify failed:', err.message);
     }
@@ -363,6 +384,7 @@ async function refreshStaleAndNotify() {
 // repite aunque tarde más. Se agrupan las películas por kind (HD/4K) para
 // consultar Seerr una vez por biblioteca en vez de una por título.
 export async function notifyStillUnavailable() {
+  if (!isNotificationEnabled('still_unavailable')) return;
   const rows = getUnnotifiedOldApprovals.all(STILL_UNAVAILABLE_HOURS);
   if (rows.length === 0) return;
 
@@ -408,8 +430,9 @@ export async function notifyStillUnavailable() {
 
     const chatId = getChatId.get(row.user_id)?.chat_id;
     if (!chatId) continue;
+    const text = renderNotificationMessage('still_unavailable', { titulo: row.media_title ?? 'Tu solicitud' });
     try {
-      await sendMessage(chatId, `🕐 ${row.media_title ?? 'Tu solicitud'} sigue sin estar disponible. Se descargará en cuanto esté lista.`);
+      await sendMessage(chatId, text);
     } catch (err) {
       console.error('[scheduler] telegram notify failed:', err.message);
     }
@@ -502,8 +525,7 @@ export async function enforceBroadcast() {
 // informativo aparte (sin cupo, no hay saldo que dar), una vez por
 // request_id — se marca en el Registro para no repetir.
 export async function notifyBypassedApprovals() {
-  const target = getNotifyTarget();
-  if (!target.notifyApproved) return;
+  if (!isNotificationEnabled('bypassed_approved')) return;
 
   let requests;
   try {
@@ -556,8 +578,9 @@ export async function notifyBypassedApprovals() {
     if (!tautulliUser) continue;
     const chatId = getChatId.get(tautulliUser.id)?.chat_id;
     if (!chatId) continue;
+    const text = renderNotificationMessage('bypassed_approved', { titulo: mediaTitle ?? 'tu solicitud' });
     try {
-      await sendMessage(chatId, `✅ Aprobada en Seerr: ${mediaTitle ?? 'tu solicitud'}.`);
+      await sendMessage(chatId, text);
     } catch (err) {
       console.error('[scheduler] telegram notify failed:', err.message);
     }

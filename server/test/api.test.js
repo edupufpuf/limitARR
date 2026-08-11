@@ -972,6 +972,39 @@ test('notifications: los toggles de aviso se guardan y se leen', async () => {
   s = (await agent.put('/api/notifications/settings').send({ notifyApproved: false }).expect(200)).body;
   assert.equal(s.notifyApproved, false);
   assert.equal(s.notifyFreed, true); // el otro no cambia
+
+  await agent.put('/api/notifications/settings').send({ notifyApproved: true }).expect(200); // deja el default como estaba
+});
+
+// Pedido de Edu (11 ago 2026): unificar TODOS los avisos (antes solo
+// no_quota/approved/freed tenían toggle, y solo no_quota tenía texto
+// editable) — catálogo servido por /notifications/types.
+test('notifications: catálogo unificado /notifications/types — toggle y mensaje por aviso', async () => {
+  const list = (await agent.get('/api/notifications/types').expect(200)).body;
+  assert.ok(list.length >= 10);
+  const multiSeason = list.find((t) => t.id === 'multi_season_declined');
+  assert.ok(multiSeason, 'un aviso que ANTES no tenía toggle ahora aparece en el catálogo');
+  assert.equal(multiSeason.enabled, true); // default ON
+  assert.match(multiSeason.message, /temporadas de golpe/);
+
+  const updated = (await agent
+    .put('/api/notifications/types/multi_season_declined')
+    .send({ enabled: false, message: 'Texto de prueba {titulo}' })
+    .expect(200)).body;
+  assert.equal(updated.enabled, false);
+  assert.equal(updated.message, 'Texto de prueba {titulo}');
+
+  // Otro tipo no se ve afectado.
+  const freed = (await agent.get('/api/notifications/types').expect(200)).body.find((t) => t.id === 'freed');
+  assert.equal(freed.enabled, true);
+
+  await agent.put('/api/notifications/types/unknown_type').send({ enabled: false }).expect(404);
+
+  // Restaura el default para no dejar el toggle apagado en la DB de tests.
+  await agent
+    .put('/api/notifications/types/multi_season_declined')
+    .send({ enabled: true, message: multiSeason.message })
+    .expect(200);
 });
 
 test('notifications: chat pegado en formato Tautulli "chat/topic" se separa al guardar', async () => {

@@ -9,16 +9,6 @@ const OFFSET_KEY = 'telegram_last_update_id';
 const MODE_KEY = 'telegram_notify_mode';         // 'dm' | 'group'
 const GROUP_CHAT_KEY = 'telegram_group_chat_id';
 const GROUP_TOPIC_KEY = 'telegram_group_topic_id'; // message_thread_id, opcional
-const NO_QUOTA_MESSAGE_KEY = 'telegram_no_quota_message';
-// Avisos opcionales (default ON): sin cupo, aprobación de solicitud y cupo liberado.
-// Guardados como '1'/'0'; "no configurado" cuenta como activado.
-const NOTIFY_NO_QUOTA_KEY = 'telegram_notify_no_quota';
-const NOTIFY_APPROVED_KEY = 'telegram_notify_approved';
-const NOTIFY_FREED_KEY = 'telegram_notify_freed';
-
-export const DEFAULT_NO_QUOTA_MESSAGE =
-  '🔴 {usuario} se ha pasado del cupo en {biblioteca} pidiendo "{titulo}".\n' +
-  'Ve algo de lo que tienes pendiente antes de solicitar más.';
 
 export function getBotToken() {
   return getRawSetting(TOKEN_KEY);
@@ -33,15 +23,148 @@ export function getBotTokenForDisplay() {
   return { bot_token_set: Boolean(token), bot_token_masked: mask(token) };
 }
 
+// Un único catálogo para todos los avisos automáticos: cada uno se puede
+// activar/desactivar y su texto se puede editar, guardados como
+// telegram_notify_<id> ('1'/'0', "no configurado" = activado) y
+// telegram_<id>_message. Antes cada aviso "tenía su forma de ser" (unos con
+// toggle, otros no; unos con texto editable, otros fijo en el código) — pedido
+// de Edu (11 ago 2026) para que todos funcionen igual. Las claves de
+// no_quota/approved/freed son las mismas que ya existían (mismo patrón), así
+// que no hace falta migrar nada en DBs ya desplegadas.
+export const NOTIFICATION_TYPES = [
+  {
+    id: 'no_quota',
+    label: 'Usuario sin cupo',
+    description: 'Se envía cuando una solicitud no puede aprobarse por falta de saldo.',
+    defaultMessage:
+      '🔴 {usuario} se ha pasado del cupo en {biblioteca} pidiendo "{titulo}".\n' +
+      'Ve algo de lo que tienes pendiente antes de solicitar más.',
+    variables: ['usuario', 'biblioteca', 'titulo', 'tipo'],
+  },
+  {
+    id: 'approved',
+    label: 'Solicitud aprobada',
+    description: 'Confirma la aprobación e indica qué queda pendiente en esa biblioteca.',
+    defaultMessage: '✅ Solicitud aprobada: {titulo} ({biblioteca}).\nPendiente de ver en {biblioteca}:\n{lista}',
+    variables: ['titulo', 'biblioteca', 'lista'],
+  },
+  {
+    id: 'freed',
+    label: 'Cupo liberado',
+    description: 'Avisa al terminar de ver contenido o al caducar una solicitud.',
+    defaultMessage: '🎉 Has liberado cupo:\n{lista}\n{saldo}',
+    variables: ['lista', 'saldo'],
+  },
+  {
+    id: 'monthly_quota',
+    label: 'Cupo mensual agotado (biblioteca)',
+    description: 'El tope mensual de esta biblioteca ya está lleno.',
+    defaultMessage: '🚫 Cupo mensual agotado: {titulo} ({biblioteca}).\n{usuario}: ya llevas {usado}/{limite} este mes.',
+    variables: ['usuario', 'biblioteca', 'titulo', 'usado', 'limite'],
+  },
+  {
+    id: 'monthly_total_quota',
+    label: 'Cupo mensual agotado (total)',
+    description: 'El tope mensual combinando todas las bibliotecas ya está lleno.',
+    defaultMessage: '🚫 Cupo mensual total agotado: {titulo}.\n{usuario}: ya llevas {usado}/{limite} este mes (todas las bibliotecas).',
+    variables: ['usuario', 'titulo', 'usado', 'limite'],
+  },
+  {
+    id: 'held',
+    label: 'Solicitud aplazada',
+    description: 'El admin ha pospuesto esta solicitud concreta a una fecha (botón "Aplazar").',
+    defaultMessage: '⏳ Aplazada: {titulo} ({biblioteca}).\n{usuario}: se aprobará a partir del {fecha}.',
+    variables: ['usuario', 'biblioteca', 'titulo', 'fecha'],
+  },
+  {
+    id: 'multi_season_declined',
+    label: 'Rechazo por multi-temporada',
+    description: 'Se pidieron varias temporadas de golpe y la biblioteca no lo permite.',
+    defaultMessage: '🚫 Solicitud rechazada: {titulo} ({biblioteca}) pedía {temporadas} temporadas de golpe.\n{usuario}: pide las temporadas de una en una.',
+    variables: ['usuario', 'biblioteca', 'titulo', 'temporadas'],
+  },
+  {
+    id: 'sequential_split',
+    label: 'Temporadas en cola secuencial',
+    description: 'Se pide la primera temporada y el resto queda en cola hasta verla.',
+    defaultMessage: '📺 {titulo} ({biblioteca}): se pide primero la temporada {primera}.\n{usuario}: {resto} se pedirán solas al terminar de ver la {primera}.',
+    variables: ['usuario', 'biblioteca', 'titulo', 'primera', 'resto'],
+  },
+  {
+    id: 'season_hold',
+    label: 'Temporada en cola',
+    description: 'La serie ya tiene una temporada pendiente de ver; ésta espera turno.',
+    defaultMessage: '⏳ En cola: {titulo} ({biblioteca}).\n{usuario}: se aprobará sola cuando termines la temporada que tienes pendiente de esa serie.',
+    variables: ['usuario', 'biblioteca', 'titulo'],
+  },
+  {
+    id: 'still_unavailable',
+    label: 'Aún no disponible (12h)',
+    description: 'Aviso único si una aprobación sigue sin llegar a Plex tras 12 horas.',
+    defaultMessage: '🕐 {titulo} sigue sin estar disponible. Se descargará en cuanto esté lista.',
+    variables: ['titulo'],
+  },
+  {
+    id: 'bypassed_approved',
+    label: 'Aprobada directo en Seerr',
+    description: 'Se aprobó fuera de limitARR (autoaprobación de Seerr, admin o similar).',
+    defaultMessage: '✅ Aprobada en Seerr: {titulo}.',
+    variables: ['titulo'],
+  },
+];
+
+const notificationTypeById = new Map(NOTIFICATION_TYPES.map((t) => [t.id, t]));
+const enabledKey = (id) => `telegram_notify_${id}`;
+const messageKey = (id) => `telegram_${id}_message`;
+
+export function isNotificationEnabled(id) {
+  return getRawSetting(enabledKey(id)) !== '0';
+}
+
+export function getNotificationMessage(id) {
+  const def = notificationTypeById.get(id);
+  return getRawSetting(messageKey(id)) || def?.defaultMessage || '';
+}
+
+export function getNotificationType(id) {
+  const def = notificationTypeById.get(id);
+  if (!def) return null;
+  return { ...def, enabled: isNotificationEnabled(id), message: getNotificationMessage(id) };
+}
+
+export function getAllNotificationTypes() {
+  return NOTIFICATION_TYPES.map((def) => getNotificationType(def.id));
+}
+
+export function setNotificationType(id, { enabled, message }) {
+  const def = notificationTypeById.get(id);
+  if (!def) return;
+  if (enabled !== undefined) setRawSetting(enabledKey(id), enabled ? '1' : '0');
+  if (message !== undefined) {
+    const value = String(message ?? '').trim();
+    setRawSetting(messageKey(id), value || def.defaultMessage);
+  }
+}
+
+// Sustituye {clave} por su valor si viene en `values`; deja el placeholder tal
+// cual si no se reconoce (para detectar un typo de variable a simple vista).
+export function renderTemplate(template, values) {
+  return String(template ?? '').replace(/\{(\w+)\}/g, (match, key) => (key in values ? String(values[key] ?? '') : match));
+}
+
+export function renderNotificationMessage(id, values) {
+  return renderTemplate(getNotificationMessage(id), values);
+}
+
 export function getNotifyTarget() {
   return {
     mode: getRawSetting(MODE_KEY) || 'dm',
     groupChatId: getRawSetting(GROUP_CHAT_KEY),
     groupTopicId: getRawSetting(GROUP_TOPIC_KEY),
-    noQuotaMessage: getNoQuotaMessage(),
-    notifyNoQuota: getRawSetting(NOTIFY_NO_QUOTA_KEY) !== '0',
-    notifyApproved: getRawSetting(NOTIFY_APPROVED_KEY) !== '0',
-    notifyFreed: getRawSetting(NOTIFY_FREED_KEY) !== '0',
+    noQuotaMessage: getNotificationMessage('no_quota'),
+    notifyNoQuota: isNotificationEnabled('no_quota'),
+    notifyApproved: isNotificationEnabled('approved'),
+    notifyFreed: isNotificationEnabled('freed'),
   };
 }
 
@@ -67,32 +190,10 @@ export function setNotifyTarget({ mode, groupChatId, groupTopicId, noQuotaMessag
     setRawSetting(GROUP_CHAT_KEY, normalized.groupChatId);
     setRawSetting(GROUP_TOPIC_KEY, normalized.groupTopicId);
   }
-  if (noQuotaMessage !== undefined) setNoQuotaMessage(noQuotaMessage);
-  if (notifyNoQuota !== undefined) setRawSetting(NOTIFY_NO_QUOTA_KEY, notifyNoQuota ? '1' : '0');
-  if (notifyApproved !== undefined) setRawSetting(NOTIFY_APPROVED_KEY, notifyApproved ? '1' : '0');
-  if (notifyFreed !== undefined) setRawSetting(NOTIFY_FREED_KEY, notifyFreed ? '1' : '0');
-}
-
-export function getNoQuotaMessage() {
-  return getRawSetting(NO_QUOTA_MESSAGE_KEY) || DEFAULT_NO_QUOTA_MESSAGE;
-}
-
-export function setNoQuotaMessage(message) {
-  const value = String(message ?? '').trim();
-  setRawSetting(NO_QUOTA_MESSAGE_KEY, value || DEFAULT_NO_QUOTA_MESSAGE);
-}
-
-export function renderNoQuotaMessage(template, values) {
-  const replacements = {
-    usuario: values.username ?? '',
-    biblioteca: values.libraryName ?? '',
-    titulo: values.mediaTitle ?? values.unit ?? 'un contenido',
-    tipo: values.unit ?? 'un contenido',
-  };
-  return String(template || DEFAULT_NO_QUOTA_MESSAGE).replace(
-    /\{(usuario|biblioteca|titulo|tipo)\}/g,
-    (_, key) => replacements[key]
-  );
+  if (noQuotaMessage !== undefined) setNotificationType('no_quota', { message: noQuotaMessage });
+  if (notifyNoQuota !== undefined) setNotificationType('no_quota', { enabled: notifyNoQuota });
+  if (notifyApproved !== undefined) setNotificationType('approved', { enabled: notifyApproved });
+  if (notifyFreed !== undefined) setNotificationType('freed', { enabled: notifyFreed });
 }
 
 async function api(method, params = {}) {

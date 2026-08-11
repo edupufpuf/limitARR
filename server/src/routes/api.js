@@ -45,6 +45,9 @@ import {
   getBotUsername,
   createLinkToken,
   handlePlexNotifyWebhook,
+  getAllNotificationTypes,
+  getNotificationType,
+  setNotificationType,
 } from '../services/telegram.js';
 import {
   handleMaintainerrWebhook,
@@ -1598,6 +1601,20 @@ router.put('/notifications/settings', (req, res) => {
     setNotifyTarget({ mode, groupChatId, groupTopicId, noQuotaMessage, notifyNoQuota, notifyApproved, notifyFreed });
   }
   res.json({ ...getBotTokenForDisplay(), ...getNotifyTarget() });
+});
+
+// Catálogo unificado de avisos automáticos (ver NOTIFICATION_TYPES en
+// telegram.js): cada uno con su propio toggle y texto editable, todos con la
+// misma forma en vez de que cada aviso tenga su propio mecanismo.
+router.get('/notifications/types', (req, res) => {
+  res.json(getAllNotificationTypes());
+});
+
+router.put('/notifications/types/:id', (req, res) => {
+  if (!getNotificationType(req.params.id)) return res.status(404).json({ error: 'unknown_type' });
+  const { enabled, message } = req.body || {};
+  setNotificationType(req.params.id, { enabled, message });
+  res.json(getNotificationType(req.params.id));
 });
 
 router.get('/notifications/links', ah(async (req, res) => {

@@ -132,6 +132,9 @@ export const api = {
   notificationSettings: () => request('/notifications/settings'),
   updateNotificationSettings: (body) =>
     request('/notifications/settings', { method: 'PUT', body: JSON.stringify(body) }),
+  notificationTypes: () => request('/notifications/types'),
+  updateNotificationType: (id, body) =>
+    request(`/notifications/types/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   broadcastSettings: () => request('/notifications/broadcast'),
   updateBroadcastSettings: (body) =>
     request('/notifications/broadcast', { method: 'PUT', body: JSON.stringify(body) }),

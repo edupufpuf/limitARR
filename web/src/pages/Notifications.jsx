@@ -42,16 +42,71 @@ function AccordionSection({ id, title, description, status, tone = 'neutral', op
   );
 }
 
+// Todos los avisos automáticos comparten esta misma forma (toggle + texto
+// editable + Guardar propio), catálogo servido por /notifications/types —
+// antes cada uno "tenía su forma de ser" (unos con toggle, otros sin, unos
+// editables, otros fijos en el código); pedido de Edu (11 ago 2026).
+function NotificationTypeSection({ type, open, onToggle, onSaved }) {
+  const [enabled, setEnabled] = useState(type.enabled);
+  const [message, setMessage] = useState(type.message);
+  const [saving, setSaving] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const dirty = enabled !== type.enabled || message !== type.message;
+  useDirty(`notif-type-${type.id}`, dirty);
+
+  async function save() {
+    setSaving(true);
+    setResult(null);
+    try {
+      const updated = await api.updateNotificationType(type.id, { enabled, message });
+      onSaved(updated);
+      setResult('Guardado.');
+    } catch {
+      setResult('No se pudo guardar.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <AccordionSection
+      id={`type-${type.id}`}
+      title={type.label}
+      description={type.description}
+      status={enabled ? 'Activo' : 'Desactivado'}
+      tone={enabled ? 'active' : 'neutral'}
+      open={open}
+      onToggle={onToggle}
+    >
+      <label className="flex items-center justify-between gap-4 rounded-xl border border-bg-600 bg-bg-950/30 p-4 cursor-pointer mb-5">
+        <span>
+          <span className="block font-bold">Enviar esta notificación</span>
+        </span>
+        <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} className="w-5 h-5 accent-red-500" />
+      </label>
+      <label className="label">Texto del aviso</label>
+      <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={4} className="input min-h-28 resize-y" />
+      <p className="text-xs text-gray-500 mt-2">
+        Variables: <span className="text-gray-300">{type.variables.map((v) => `{${v}}`).join(', ')}</span>
+      </p>
+      <div className="flex flex-wrap items-center gap-3 mt-4">
+        <button type="button" onClick={save} disabled={saving} className="btn btn-primary">
+          {saving ? 'Guardando…' : 'Guardar'}
+        </button>
+        {result && <span className="text-xs text-gray-500">{result}</span>}
+      </div>
+    </AccordionSection>
+  );
+}
+
 export default function Notifications() {
   const [botSettings, setBotSettings] = useState(null);
   const [tokenInput, setTokenInput] = useState('');
   const [mode, setMode] = useState('dm');
   const [groupChatId, setGroupChatId] = useState('');
   const [groupTopicId, setGroupTopicId] = useState('');
-  const [noQuotaMessage, setNoQuotaMessage] = useState('');
-  const [notifyNoQuota, setNotifyNoQuota] = useState(true);
-  const [notifyApproved, setNotifyApproved] = useState(true);
-  const [notifyFreed, setNotifyFreed] = useState(true);
+  const [notificationTypes, setNotificationTypes] = useState(null);
   const [savingSettings, setSavingSettings] = useState(false);
   const [groupTestResult, setGroupTestResult] = useState(null);
   const [pendingSummaryResult, setPendingSummaryResult] = useState(null);
@@ -79,11 +134,7 @@ export default function Notifications() {
       (tokenInput !== '' ||
         mode !== (botSettings.mode ?? 'dm') ||
         groupChatId !== (botSettings.groupChatId ?? '') ||
-        groupTopicId !== (botSettings.groupTopicId ?? '') ||
-        noQuotaMessage !== (botSettings.noQuotaMessage ?? '') ||
-        notifyNoQuota !== (botSettings.notifyNoQuota ?? true) ||
-        notifyApproved !== (botSettings.notifyApproved ?? true) ||
-        notifyFreed !== (botSettings.notifyFreed ?? true))
+        groupTopicId !== (botSettings.groupTopicId ?? ''))
   );
   useDirty('notifications-agent', agentDirty);
 
@@ -104,11 +155,8 @@ export default function Notifications() {
       setMode(s.mode ?? 'dm');
       setGroupChatId(s.groupChatId ?? '');
       setGroupTopicId(s.groupTopicId ?? '');
-      setNoQuotaMessage(s.noQuotaMessage ?? '');
-      setNotifyNoQuota(s.notifyNoQuota ?? true);
-      setNotifyApproved(s.notifyApproved ?? true);
-      setNotifyFreed(s.notifyFreed ?? true);
     });
+    api.notificationTypes().then(setNotificationTypes);
     api.users().then(setUsers);
     loadLinks();
     api.broadcastSettings().then((b) => {
@@ -159,11 +207,14 @@ export default function Notifications() {
   async function saveSettings(e) {
     e.preventDefault();
     setSavingSettings(true);
-    const s = await api.updateNotificationSettings({ botToken: tokenInput, mode, groupChatId, groupTopicId, noQuotaMessage, notifyNoQuota, notifyApproved, notifyFreed });
+    const s = await api.updateNotificationSettings({ botToken: tokenInput, mode, groupChatId, groupTopicId });
     setBotSettings(s);
-    setNoQuotaMessage(s.noQuotaMessage ?? '');
     setTokenInput('');
     setSavingSettings(false);
+  }
+
+  function updateNotificationType(updated) {
+    setNotificationTypes((list) => list.map((t) => (t.id === updated.id ? updated : t)));
   }
 
   async function discover() {
@@ -234,7 +285,7 @@ export default function Notifications() {
     setOpenSection((current) => current === id ? null : id);
   }
 
-  if (!botSettings) return null;
+  if (!botSettings || !notificationTypes) return null;
 
   return (
     <div className="max-w-3xl">
@@ -304,65 +355,15 @@ export default function Notifications() {
           <p className="text-xs text-gray-500 mt-1">Cada aviso mantiene su configuración y estado por separado.</p>
         </div>
 
-        <AccordionSection
-          id="no-quota"
-          title="Usuario sin cupo"
-          description="Se envía cuando una solicitud no puede aprobarse por falta de saldo."
-          status={notifyNoQuota ? 'Activo' : 'Desactivado'}
-          tone={notifyNoQuota ? 'active' : 'neutral'}
-          open={openSection === 'no-quota'}
-          onToggle={toggleSection}
-        >
-          <label className="flex items-center justify-between gap-4 rounded-xl border border-bg-600 bg-bg-950/30 p-4 cursor-pointer mb-5">
-            <span>
-              <span className="block font-bold">Enviar esta notificación</span>
-              <span className="block text-xs text-gray-500 mt-1">Avisa al usuario y al grupo cuando se bloquea una solicitud.</span>
-            </span>
-            <input type="checkbox" checked={notifyNoQuota} onChange={(e) => setNotifyNoQuota(e.target.checked)} className="w-5 h-5 accent-red-500" />
-          </label>
-          <label className="label">Texto del aviso</label>
-          <textarea value={noQuotaMessage} onChange={(e) => setNoQuotaMessage(e.target.value)} rows={5} className="input min-h-32 resize-y" />
-          <p className="text-xs text-gray-500 mt-2">
-            Variables: <span className="text-gray-300">{'{usuario}'}</span>, <span className="text-gray-300">{'{biblioteca}'}</span>,{' '}
-            <span className="text-gray-300">{'{titulo}'}</span> y <span className="text-gray-300">{'{tipo}'}</span>.
-          </p>
-        </AccordionSection>
-
-        <AccordionSection
-          id="approved"
-          title="Solicitud aprobada"
-          description="Confirma la aprobación e indica cuánto cupo le queda al usuario."
-          status={notifyApproved ? 'Activo' : 'Desactivado'}
-          tone={notifyApproved ? 'active' : 'neutral'}
-          open={openSection === 'approved'}
-          onToggle={toggleSection}
-        >
-          <label className="flex items-center justify-between gap-4 rounded-xl border border-bg-600 bg-bg-950/30 p-4 cursor-pointer">
-            <span>
-              <span className="block font-bold">Enviar esta notificación</span>
-              <span className="block text-xs text-gray-500 mt-1">Incluye título, biblioteca y saldo restante.</span>
-            </span>
-            <input type="checkbox" checked={notifyApproved} onChange={(e) => setNotifyApproved(e.target.checked)} className="w-5 h-5 accent-red-500" />
-          </label>
-        </AccordionSection>
-
-        <AccordionSection
-          id="freed"
-          title="Cupo liberado"
-          description="Avisa al terminar de ver contenido o al cancelarse una solicitud."
-          status={notifyFreed ? 'Activo' : 'Desactivado'}
-          tone={notifyFreed ? 'active' : 'neutral'}
-          open={openSection === 'freed'}
-          onToggle={toggleSection}
-        >
-          <label className="flex items-center justify-between gap-4 rounded-xl border border-bg-600 bg-bg-950/30 p-4 cursor-pointer">
-            <span>
-              <span className="block font-bold">Enviar esta notificación</span>
-              <span className="block text-xs text-gray-500 mt-1">Indica qué elemento liberó el hueco y el nuevo saldo.</span>
-            </span>
-            <input type="checkbox" checked={notifyFreed} onChange={(e) => setNotifyFreed(e.target.checked)} className="w-5 h-5 accent-red-500" />
-          </label>
-        </AccordionSection>
+        {notificationTypes.map((type) => (
+          <NotificationTypeSection
+            key={type.id}
+            type={type}
+            open={openSection === `type-${type.id}`}
+            onToggle={() => toggleSection(`type-${type.id}`)}
+            onSaved={updateNotificationType}
+          />
+        ))}
 
         <AccordionSection
           id="broadcast"
