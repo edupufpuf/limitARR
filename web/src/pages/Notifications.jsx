@@ -46,7 +46,11 @@ function AccordionSection({ id, title, description, status, tone = 'neutral', op
 // editable + Guardar propio), catálogo servido por /notifications/types —
 // antes cada uno "tenía su forma de ser" (unos con toggle, otros sin, unos
 // editables, otros fijos en el código); pedido de Edu (11 ago 2026).
-function NotificationTypeSection({ type, open, onToggle, onSaved }) {
+// Selector en vez de una fila por tipo (12 ago 2026, pedido de Edu: con 8
+// tipos el acordeón ocupaba demasiado scroll) — un <select> elige cuál se
+// edita, `key={type.id}` remonta el editor y descarta cambios sin guardar al
+// cambiar de tipo (mismo comportamiento que tenía el acordeón al cerrarse).
+function NotificationTypeEditor({ type, onSaved }) {
   const [enabled, setEnabled] = useState(type.enabled);
   const [message, setMessage] = useState(type.message);
   const [saving, setSaving] = useState(false);
@@ -70,15 +74,8 @@ function NotificationTypeSection({ type, open, onToggle, onSaved }) {
   }
 
   return (
-    <AccordionSection
-      id={`type-${type.id}`}
-      title={type.label}
-      description={type.description}
-      status={enabled ? 'Activo' : 'Desactivado'}
-      tone={enabled ? 'active' : 'neutral'}
-      open={open}
-      onToggle={onToggle}
-    >
+    <div>
+      <p className="text-xs text-gray-500 mb-5 leading-relaxed">{type.description}</p>
       <label className="flex items-center justify-between gap-4 rounded-xl border border-bg-600 bg-bg-950/30 p-4 cursor-pointer mb-5">
         <span>
           <span className="block font-bold">Enviar esta notificación</span>
@@ -96,7 +93,7 @@ function NotificationTypeSection({ type, open, onToggle, onSaved }) {
         </button>
         {result && <span className="text-xs text-gray-500">{result}</span>}
       </div>
-    </AccordionSection>
+    </div>
   );
 }
 
@@ -107,6 +104,7 @@ export default function Notifications() {
   const [groupChatId, setGroupChatId] = useState('');
   const [groupTopicId, setGroupTopicId] = useState('');
   const [notificationTypes, setNotificationTypes] = useState(null);
+  const [selectedTypeId, setSelectedTypeId] = useState(null);
   const [savingSettings, setSavingSettings] = useState(false);
   const [groupTestResult, setGroupTestResult] = useState(null);
   const [pendingSummaryResult, setPendingSummaryResult] = useState(null);
@@ -156,7 +154,10 @@ export default function Notifications() {
       setGroupChatId(s.groupChatId ?? '');
       setGroupTopicId(s.groupTopicId ?? '');
     });
-    api.notificationTypes().then(setNotificationTypes);
+    api.notificationTypes().then((types) => {
+      setNotificationTypes(types);
+      setSelectedTypeId((current) => current ?? types[0]?.id ?? null);
+    });
     api.users().then(setUsers);
     loadLinks();
     api.broadcastSettings().then((b) => {
@@ -270,7 +271,7 @@ export default function Notifications() {
       if (result.mode === 'group') {
         setPendingSummaryResult(`enviado al grupo · ${result.users} usuario(s) · ${result.messages} mensaje(s)`);
       } else {
-        setPendingSummaryResult(`enviado por DM · ${result.sent} usuario(s) · ${result.messages} mensaje(s) · ${result.skipped} sin vincular`);
+        setPendingSummaryResult(`enviado por DM · ${result.users} usuario(s) vinculado(s) · ${result.withPending} con pendientes · ${result.messages} mensaje(s)`);
       }
     } catch (err) {
       setPendingSummaryResult(`error: ${err.message}`);
@@ -280,6 +281,7 @@ export default function Notifications() {
   }
 
   const userName = (id) => users.find((u) => u.id === id)?.username ?? `user#${id}`;
+  const selectedType = notificationTypes?.find((t) => t.id === selectedTypeId) ?? null;
 
   function toggleSection(id) {
     setOpenSection((current) => current === id ? null : id);
@@ -355,15 +357,23 @@ export default function Notifications() {
           <p className="text-xs text-gray-500 mt-1">Cada aviso mantiene su configuración y estado por separado.</p>
         </div>
 
-        {notificationTypes.map((type) => (
-          <NotificationTypeSection
-            key={type.id}
-            type={type}
-            open={openSection === `type-${type.id}`}
-            onToggle={() => toggleSection(`type-${type.id}`)}
-            onSaved={updateNotificationType}
-          />
-        ))}
+        <div className="card p-4 sm:p-5">
+          <label className="label">Elige un aviso</label>
+          <select
+            value={selectedTypeId ?? ''}
+            onChange={(e) => setSelectedTypeId(e.target.value)}
+            className="input mb-5"
+          >
+            {notificationTypes.map((type) => (
+              <option key={type.id} value={type.id}>
+                {type.label} — {type.enabled ? 'Activo' : 'Desactivado'}
+              </option>
+            ))}
+          </select>
+          {selectedType && (
+            <NotificationTypeEditor key={selectedType.id} type={selectedType} onSaved={updateNotificationType} />
+          )}
+        </div>
 
         <AccordionSection
           id="broadcast"

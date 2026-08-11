@@ -1768,21 +1768,26 @@ router.post('/notifications/pending-summary', ah(async (req, res) => {
     return res.json({ ok: true, mode: 'group', users: withPending.length, messages: sent });
   }
 
+  // A TODOS los vinculados, no solo a quien tiene pendientes (antes se
+  // saltaba en silencio a quien no tenía nada, y el contador de "enviados"
+  // solo reflejaba esa minoría — Edu lo leía como que "no detectaba a los
+  // demás usuarios" cuando en realidad ni se les intentaba mandar nada).
+  const summaryByUser = new Map(withPending.map((s) => [s.userId, s]));
+  const links = db.prepare('SELECT user_id, chat_id FROM telegram_links').all();
   let messages = 0;
-  let sent = 0;
-  let skipped = 0;
-  for (const summary of withPending) {
-    if (!summary.link?.chat_id) {
-      skipped += 1;
-      continue;
-    }
-    for (const chunk of chunkTelegramText(formatPendingSummaryForUser(summary, { personal: true }))) {
-      await sendMessage(summary.link.chat_id, chunk);
+  let withPendingCount = 0;
+  for (const link of links) {
+    const summary = summaryByUser.get(link.user_id);
+    const text = summary
+      ? formatPendingSummaryForUser(summary, { personal: true })
+      : '📋 Nada pendiente de ver ahora mismo.';
+    for (const chunk of chunkTelegramText(text)) {
+      await sendMessage(link.chat_id, chunk);
       messages += 1;
     }
-    sent += 1;
+    if (summary) withPendingCount += 1;
   }
-  res.json({ ok: true, mode: 'dm', users: withPending.length, sent, skipped, messages });
+  res.json({ ok: true, mode: 'dm', users: links.length, withPending: withPendingCount, messages });
 }));
 
 router.post('/notifications/test/:userId', async (req, res) => {

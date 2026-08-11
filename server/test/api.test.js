@@ -1024,6 +1024,60 @@ test('notifications: chat pegado en formato Tautulli "chat/topic" se separa al g
   assert.equal(s.groupTopicId, '7');
 });
 
+test('notifications: por DM llega a TODOS los vinculados, no solo a quien tiene pendientes', async () => {
+  const upsertSetting = db.prepare(`
+    INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+  `);
+  upsertSetting.run('tautulli_url', 'http://tautulli.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
+  upsertSetting.run('telegram_bot_token', 'test-bot-token');
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (1789, 'Películas', 'movie', 'standard', 1, 4)
+  `).run();
+  db.prepare(`
+    INSERT OR REPLACE INTO quota_cache (user_id, library_id, limit_applied, outstanding, balance, pending_items)
+    VALUES (1990, 1789, 4, 1, 3, ?)
+  `).run(JSON.stringify([{ title: 'Con pendiente' }]));
+  db.prepare("INSERT INTO telegram_links (user_id, chat_id, linked_at) VALUES (1990, 'chat-1990', datetime('now'))").run();
+  db.prepare("INSERT INTO telegram_links (user_id, chat_id, linked_at) VALUES (1991, 'chat-1991', datetime('now'))").run();
+
+  const sentToChat = {};
+  const originalFetch = global.fetch;
+  global.fetch = async (input, options) => {
+    const url = String(input);
+    if (url.startsWith('http://tautulli.test')) {
+      const cmd = new URL(url).searchParams.get('cmd');
+      const data = cmd === 'get_users'
+        ? [{ user_id: 1990, username: 'con_pendiente' }, { user_id: 1991, username: 'sin_pendiente' }]
+        : { data: [] };
+      return new Response(JSON.stringify({ response: { result: 'success', data } }), { status: 200 });
+    }
+    if (url.includes('api.telegram.org')) {
+      const body = JSON.parse(options.body);
+      sentToChat[body.chat_id] = body.text;
+      return new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const res = await agent.post('/api/notifications/pending-summary').send({ target: 'dm' }).expect(200);
+    assert.equal(res.body.mode, 'dm');
+    assert.equal(res.body.users, 2);
+    assert.equal(res.body.withPending, 1);
+    assert.match(sentToChat['chat-1990'], /Con pendiente/);
+    assert.match(sentToChat['chat-1991'], /Nada pendiente de ver/);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM quota_cache WHERE library_id = 1789').run();
+    db.prepare('DELETE FROM libraries WHERE id = 1789').run();
+    db.prepare('DELETE FROM telegram_links WHERE user_id IN (1990, 1991)').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'telegram_bot_token')").run();
+  }
+});
+
 test('notifications: el resumen de pendientes acepta forzar el destino en el body', async () => {
   await agent
     .put('/api/notifications/settings')
