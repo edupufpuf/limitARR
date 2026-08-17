@@ -263,6 +263,21 @@ export async function getMediaDetails(mediaType, tmdbId, seasonNumber = null) {
   return getMovieDetails(tmdbId);
 }
 
+// Issue #22 (jesusgarrigues): id interno de Sonarr para una serie, para poder
+// armar el enlace "Ver en Sonarr" (getSonarrSeriesUrl). Sonarr indexa por
+// tvdbId, no por tmdbId — Seerr es quien ya hace esa traducción internamente
+// (mediaInfo.externalServiceId, mismo campo que usa getShowDetails para
+// sonarrLabel), así que se reutiliza en vez de duplicar la lógica.
+export async function getSonarrSeriesId(tmdbId) {
+  if (!tmdbId) return null;
+  try {
+    const data = await call(`/tv/${tmdbId}`);
+    return data.mediaInfo?.externalServiceId ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // "No disponible" (issue #1): una película aprobada que aún no está en Plex no
 // resta cupo — el usuario no puede verla todavía. Seerr ya sabe la
 // disponibilidad (media.status 4/5 cuando Plex la tiene), así que no hace falta

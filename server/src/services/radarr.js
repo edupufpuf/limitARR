@@ -33,6 +33,21 @@ export async function getRadarrStatus(radarrId) {
   return 'Falta'; // ya cumple minimumAvailability pero aún sin archivo
 }
 
+// Issue #22 (jesusgarrigues): botón "Ver en Radarr" en la ventana de detalle.
+// Busca por tmdbId (no hace falta el id interno de Radarr, que limitARR no
+// guarda en ningún sitio) y arma la URL con titleSlug — Radarr acepta el slug
+// tal cual en su UI (a veces es el propio tmdbId como texto si el título no
+// generó uno "bonito", verificado contra producción); con id numérico también
+// funciona, pero el slug es lo que la propia API expone para esto.
+export async function getRadarrMovieUrl(tmdbId) {
+  const { radarr_url: baseUrl } = getSettings();
+  if (!baseUrl || tmdbId == null) return null;
+  const movies = await call(`/movie?tmdbId=${tmdbId}`);
+  const movie = Array.isArray(movies) ? movies[0] : null;
+  if (!movie) return null;
+  return `${baseUrl}/movie/${movie.titleSlug ?? movie.id}`;
+}
+
 export async function testRadarrServer() {
   const { radarr_url: baseUrl, radarr_api_key: apiKey } = getSettings();
   if (!baseUrl || !apiKey) throw new Error('Radarr no configurado (pestaña Configuración)');

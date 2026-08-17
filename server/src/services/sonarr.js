@@ -33,6 +33,18 @@ export async function getSonarrSeasonStatus(sonarrSeriesId, seasonNumber) {
   return 'Faltan episodios';
 }
 
+// Issue #22 (jesusgarrigues): botón "Ver en Sonarr" en la ventana de detalle.
+// A diferencia de Radarr, Sonarr no indexa por tmdbId (usa tvdbId, que
+// limitARR no guarda) — hace falta el id interno de Sonarr, que llega vía
+// Seerr (mediaInfo.externalServiceId, ver getSonarrSeriesId en seerr.js).
+export async function getSonarrSeriesUrl(sonarrSeriesId) {
+  const { sonarr_url: baseUrl } = getSettings();
+  if (!baseUrl || sonarrSeriesId == null) return null;
+  const series = await call(`/series/${sonarrSeriesId}`);
+  if (!series) return null;
+  return `${baseUrl}/series/${series.titleSlug ?? series.id}`;
+}
+
 export async function testSonarrServer() {
   const { sonarr_url: baseUrl, sonarr_api_key: apiKey } = getSettings();
   if (!baseUrl || !apiKey) throw new Error('Sonarr no configurado (pestaña Configuración)');

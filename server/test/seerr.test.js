@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { getMovieAvailability, getShowDetails } from '../src/services/seerr.js';
+import { getMovieAvailability, getShowDetails, getSonarrSeriesId } from '../src/services/seerr.js';
+import { getRadarrMovieUrl } from '../src/services/radarr.js';
+import { getSonarrSeriesUrl } from '../src/services/sonarr.js';
 import { updateSettings, setRawSetting } from '../src/settings.js';
 
 updateSettings({ seerr_url: 'http://seerr.test', seerr_api_key: 'k' });
@@ -246,6 +248,83 @@ test('getShowDetails: sonarrLabel "Faltan episodios" si ya emitió pero sin moni
   try {
     const details = await getShowDetails(902, 1);
     assert.equal(details.sonarrLabel, 'Faltan episodios');
+  } finally {
+    global.fetch = originalFetch;
+    setRawSetting('sonarr_url', '');
+    setRawSetting('sonarr_api_key', '');
+  }
+});
+
+// Issue #22 (jesusgarrigues): botón "Ver en Radarr" — busca por tmdbId
+// directamente (Radarr sí lo indexa, a diferencia de Sonarr) y usa el
+// titleSlug de la respuesta para armar la URL de la ficha en su UI.
+test('getRadarrMovieUrl: arma la URL con el titleSlug de Radarr', async () => {
+  updateSettings({ radarr_url: 'http://radarr.test', radarr_api_key: 'k' });
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url === 'http://radarr.test/api/v3/movie?tmdbId=316029') {
+      return new Response(JSON.stringify([{ id: 28, titleSlug: 'el-gran-showman-316029' }]), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const link = await getRadarrMovieUrl(316029);
+    assert.equal(link, 'http://radarr.test/movie/el-gran-showman-316029');
+  } finally {
+    global.fetch = originalFetch;
+    setRawSetting('radarr_url', '');
+    setRawSetting('radarr_api_key', '');
+  }
+});
+
+test('getRadarrMovieUrl: sin coincidencia en Radarr, devuelve null', async () => {
+  updateSettings({ radarr_url: 'http://radarr.test', radarr_api_key: 'k' });
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response(JSON.stringify([]), { status: 200 });
+
+  try {
+    assert.equal(await getRadarrMovieUrl(999999), null);
+  } finally {
+    global.fetch = originalFetch;
+    setRawSetting('radarr_url', '');
+    setRawSetting('radarr_api_key', '');
+  }
+});
+
+// Sonarr indexa por tvdbId, no por tmdbId — el id interno de la serie sale de
+// Seerr (mediaInfo.externalServiceId), igual que ya hace sonarrLabel.
+test('getSonarrSeriesId: lee el externalServiceId de Seerr para una serie', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url === 'http://seerr.test/api/v1/tv/1399') {
+      return new Response(JSON.stringify({ mediaInfo: { externalServiceId: 3 } }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    assert.equal(await getSonarrSeriesId(1399), 3);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('getSonarrSeriesUrl: arma la URL con el titleSlug de Sonarr', async () => {
+  updateSettings({ sonarr_url: 'http://sonarr.test', sonarr_api_key: 'k' });
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url === 'http://sonarr.test/api/v3/series/3') {
+      return new Response(JSON.stringify({ id: 3, titleSlug: 'new-girl' }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    assert.equal(await getSonarrSeriesUrl(3), 'http://sonarr.test/series/new-girl');
   } finally {
     global.fetch = originalFetch;
     setRawSetting('sonarr_url', '');

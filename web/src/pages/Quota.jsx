@@ -234,12 +234,19 @@ export function RecentlyWatchedPoster({ item }) {
   return (
     <div
       className="relative w-16 h-24 rounded-lg overflow-hidden shadow-card flex-shrink-0"
-      title={`${item.title ?? '—'}${watchedAtMs ? ` — vista ${daysAgo(watchedAtMs)}` : ''}`}
+      title={`${item.title ?? '—'}${item.watchedBy ? ` — vista por ${item.watchedBy}` : ''}${watchedAtMs ? ` — vista ${daysAgo(watchedAtMs)}` : ''}`}
     >
       {item.posterUrl ? (
         <img src={item.posterUrl} alt="" loading="lazy" className="w-full h-full object-cover grayscale opacity-60" />
       ) : (
         <div className="w-full h-full bg-gradient-to-br from-bg-600 to-bg-700 flex items-center justify-center text-xl grayscale opacity-60">🎬</div>
+      )}
+      {/* Issue #21 (jesusgarrigues): en un grupo, quién de la familia la vio —
+          sin esto un cupo compartido no dice qué miembro lo liberó. */}
+      {item.watchedBy && (
+        <span className="absolute top-1 left-1 right-1 line-clamp-1 rounded bg-black/75 px-1 py-0.5 text-[7px] leading-tight font-semibold text-gray-200 pointer-events-none">
+          {item.watchedBy}
+        </span>
       )}
       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent pt-6 pb-1 px-1.5 pointer-events-none">
         <span className="block text-[9px] leading-tight text-gray-300 font-medium line-clamp-2">
@@ -507,6 +514,12 @@ export function PendingDetailModal({
             )}
             {detail?.seerrUrl && (
               <a href={detail.seerrUrl} target="_blank" rel="noreferrer" className="btn btn-ghost">Ver en Seerr</a>
+            )}
+            {/* Issue #22 (jesusgarrigues): abrir la ficha directamente en Radarr/Sonarr. */}
+            {detail?.arrUrl && (
+              <a href={detail.arrUrl} target="_blank" rel="noreferrer" className="btn btn-ghost">
+                Ver en {isTv ? 'Sonarr' : 'Radarr'}
+              </a>
             )}
             {/* Issue #16: un pendiente de aprobación se decide aquí mismo; no hay
                 fila de cupo que quitar. */}

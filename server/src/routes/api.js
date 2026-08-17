@@ -16,6 +16,7 @@ import {
   declineRequest,
   getRequest,
   getMediaDetails,
+  getSonarrSeriesId,
 } from '../services/seerr.js';
 import { getSettings, getSettingsForDisplay, updateSettings } from '../settings.js';
 import {
@@ -32,8 +33,8 @@ import { runPollCycle } from '../scheduler.js';
 import { isSessionGuardEnabled, setSessionGuardEnabled } from '../sessionGuard.js';
 import { getVersionInfo } from '../services/version.js';
 import { createPlexPin, claimPlexPin, getPlexAccount, testPlexServer } from '../services/plex.js';
-import { testRadarrServer } from '../services/radarr.js';
-import { testSonarrServer } from '../services/sonarr.js';
+import { testRadarrServer, getRadarrMovieUrl } from '../services/radarr.js';
+import { testSonarrServer, getSonarrSeriesUrl } from '../services/sonarr.js';
 import {
   getBotTokenForDisplay,
   setBotToken,
@@ -183,6 +184,18 @@ router.post('/webhook/tautulli/:secret', (req, res) => {
   );
 });
 
+// Issue #22 (jesusgarrigues): enlace directo a la ficha en Radarr/Sonarr desde
+// la ventana de detalle. Bajo demanda (solo al abrir el detalle), no en el
+// ciclo de sondeo del cupo — evita golpear Radarr/Sonarr en cada refresco.
+async function getArrUrl(mediaType, tmdbId) {
+  if (!tmdbId) return null;
+  if (mediaType === 'tv') {
+    const sonarrId = await getSonarrSeriesId(tmdbId);
+    return sonarrId != null ? getSonarrSeriesUrl(sonarrId) : null;
+  }
+  return getRadarrMovieUrl(tmdbId);
+}
+
 router.use(requireAuth);
 
 router.get('/version', ah(async (req, res) => {
@@ -269,6 +282,7 @@ router.get('/me/quota/pending-detail/:libraryId', ah(async (req, res) => {
   const tautulliUrl = tautulliBase && item.ratingKey
     ? `${tautulliBase}/info?rating_key=${item.ratingKey}`
     : null;
+  const arrUrl = await getArrUrl(item.mediaType, item.tmdbId);
   // Una cuenta Plex normal ve su propio historial; los visionados de las demás
   // cuentas siguen reservados al panel administrativo.
   const ownUserId = Number(req.session.user.id);
@@ -277,6 +291,7 @@ router.get('/me/quota/pending-detail/:libraryId', ah(async (req, res) => {
     watchers: detail.watchers.filter((watcher) => Number(watcher.userId) === ownUserId),
     seerrUrl,
     tautulliUrl,
+    arrUrl,
   });
 }));
 
@@ -943,9 +958,13 @@ async function buildQuotaByUser() {
     if (!watchedByUser.has(r.user_id)) watchedByUser.set(r.user_id, []);
     watchedByUser.get(r.user_id).push(r);
   }
-  function recentlyWatchedFor(memberIds) {
+  // Issue #21 (jesusgarrigues): en un grupo agregado el cupo es compartido,
+  // pero "quién de la familia la ha visto" se perdía al aplanar los watchedRows
+  // de todos los miembros — withWatcher añade el username de quién exactamente
+  // lo vio, solo para grupos (un usuario normal ya sabe que ha sido él).
+  function recentlyWatchedFor(memberIds, { withWatcher = false } = {}) {
     return memberIds
-      .flatMap((uid) => watchedByUser.get(uid) ?? [])
+      .flatMap((uid) => (watchedByUser.get(uid) ?? []).map((r) => ({ ...r, _uid: uid })))
       .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
       .map((r) => ({
         title: r.media_title,
@@ -954,6 +973,7 @@ async function buildQuotaByUser() {
         tmdbId: r.tmdb_id,
         posterUrl: r.poster_url,
         watchedAt: r.created_at,
+        ...(withWatcher ? { watchedBy: tautulliUserMap.get(r._uid)?.username ?? `user#${r._uid}` } : {}),
       }));
   }
   const groupMap = new Map(db.prepare('SELECT id, name FROM groups').all().map((g) => [g.id, g]));
@@ -986,7 +1006,7 @@ async function buildQuotaByUser() {
           blocked7d: memberIds.reduce((sum, uid) => sum + (recentMap.get(uid)?.blocked7d ?? 0), 0),
           requestedTotal: memberIds.reduce((sum, uid) => sum + (requestedMap.get(uid) ?? 0), 0),
           monthlyTotal: await getMonthlyTotalQuota(row.user_id),
-          recentlyWatched: recentlyWatchedFor(memberIds),
+          recentlyWatched: recentlyWatchedFor(memberIds, { withWatcher: true }),
           libraries: [],
         });
       } else {
@@ -1200,7 +1220,8 @@ router.get('/quota/pending-detail/:userId/:libraryId', ah(async (req, res) => {
   const seerrUrl = seerrBase && tmdbId
     ? `${seerrBase}/${mediaType === 'tv' ? 'tv' : 'movie'}/${tmdbId}`
     : null;
-  res.json({ ...detail, seerrUrl });
+  const arrUrl = await getArrUrl(mediaType, tmdbId ? Number(tmdbId) : null);
+  res.json({ ...detail, seerrUrl, arrUrl });
 }));
 
 // Issue #20: historial del cupo mensual (por biblioteca o total, según el modo

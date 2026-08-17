@@ -721,6 +721,60 @@ test('GET /quota: recentlyWatched trae lo visto en los últimos 30 días, no lo 
   }
 });
 
+// Issue #21 (jesusgarrigues): un grupo agregado comparte cupo, pero "quién lo
+// ha visto" se perdía al juntar el historial de todos los miembros en una
+// sola lista — sin distinguirlo no se sabe qué miembro liberó el hueco.
+test('GET /quota: recentlyWatched de un grupo agregado incluye qué miembro la vio', async () => {
+  const upsertSetting = db.prepare(`
+    INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+  `);
+  upsertSetting.run('tautulli_url', 'http://tautulli.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
+  upsertSetting.run('seerr_url', 'http://seerr.test');
+  upsertSetting.run('seerr_api_key', 'test-key');
+
+  const groupId = (await agent.post('/api/groups').send({ name: 'Familia Showman', aggregated: true }).expect(200)).body.id;
+  await agent.put(`/api/groups/${groupId}/members`).send({ userIds: [2001, 2002] }).expect(200);
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (1783, 'Películas', 'movie', 'standard', 1, 4)
+  `).run();
+  db.prepare('INSERT INTO quota_cache (user_id, library_id, limit_applied, outstanding, balance) VALUES (?, 1783, 4, 0, 4)').run(-groupId);
+  db.prepare(`
+    INSERT INTO decisions_log (request_id, user_id, library_id, media_title, decision, created_at)
+    VALUES (-9201, 2002, 1783, 'El gran showman', 'watched', datetime('now', '-2 days'))
+  `).run();
+
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith('http://tautulli.test')) {
+      const cmd = new URL(url).searchParams.get('cmd');
+      const data = cmd === 'get_users' ? [{ user_id: 2001, username: 'papa' }, { user_id: 2002, username: 'hijo' }] : { data: [] };
+      return new Response(JSON.stringify({ response: { result: 'success', data } }), { status: 200 });
+    }
+    if (url.startsWith('http://seerr.test')) {
+      return new Response(JSON.stringify({ results: [] }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const quota = (await agent.get('/api/quota').expect(200)).body;
+    const group = quota.find((u) => u.userId === -groupId);
+    assert.equal(group.recentlyWatched[0].title, 'El gran showman');
+    assert.equal(group.recentlyWatched[0].watchedBy, 'hijo');
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM decisions_log WHERE library_id = 1783').run();
+    db.prepare('DELETE FROM quota_cache WHERE library_id = 1783').run();
+    db.prepare('DELETE FROM libraries WHERE id = 1783').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
+    await agent.delete(`/api/groups/${groupId}`).expect(200);
+  }
+});
+
 test('cupo mensual total: el historial trae las filas aprobadas de todas las bibliotecas', async () => {
   db.prepare(`
     INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
