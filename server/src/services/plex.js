@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { getRawSetting, setRawSetting } from '../settings.js';
+import { getRawSetting, setRawSetting, getSettings } from '../settings.js';
 
 const CLIENT_ID_KEY = 'plex_client_identifier';
 const PRODUCT = 'limitARR';
@@ -43,6 +43,29 @@ export async function getPlexAccount(token) {
   return plexFetch('https://plex.tv/api/v2/user', {
     headers: { 'X-Plex-Token': token },
   });
+}
+
+// Pedido de Edu (17 ago 2026): salir de la colección de borrado de Maintainerr
+// NO significa que se haya borrado — Maintainerr también saca un ítem de la
+// colección cuando deja de cumplir la regla (p.ej. alguien la ha vuelto a ver,
+// resetea el "sin ver hace N días"), sin borrar nada. pollMaintainerrCollections
+// (maintainerr.js) confundía ambos casos y marcaba "YA BORRADA" una película
+// que seguía intacta en Plex. Consulta directa al Plex local (no plex.tv) por
+// ratingKey: 200 con Metadata = sigue ahí, 404 = de verdad ha desaparecido.
+export async function mediaExistsInPlex(ratingKey) {
+  const { plex_url: baseUrl, plex_token: token } = getSettings();
+  if (!baseUrl || !token || !ratingKey) return null; // sin datos para decidir, no se sabe
+  try {
+    const res = await fetch(`${baseUrl.replace(/\/$/, '')}/library/metadata/${ratingKey}`, {
+      headers: { Accept: 'application/json', 'X-Plex-Token': token },
+    });
+    if (res.status === 404) return false;
+    if (!res.ok) return null; // error de red/servidor: no se sabe, mejor no marcar borrada a lo tonto
+    const data = await res.json();
+    return Boolean(data?.MediaContainer?.Metadata?.length);
+  } catch {
+    return null;
+  }
 }
 
 export async function testPlexServer(baseUrl, token) {

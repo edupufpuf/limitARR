@@ -1,6 +1,7 @@
 import { db } from '../db.js';
 import { getRawSetting, setRawSetting, mask } from '../settings.js';
 import { getSeasonInfo, getMediaTitle, getItemWatchHistory } from './tautulli.js';
+import { mediaExistsInPlex } from './plex.js';
 
 // Módulo Maintainerr: cuando Maintainerr mete una película en una colección de
 // borrado, avisa por Telegram con un botón "Salvar" que la mueve a la colección
@@ -452,7 +453,13 @@ export async function pollMaintainerrCollections() {
     for (const id of notifiedIds) {
       if (!currentIds.has(id)) {
         deleteNotified.run(id, source.id);
-        await markMessageDeleted(id, source.id);
+        // Salir de la colección de borrado NO siempre significa que se haya
+        // borrado — Maintainerr también saca un ítem cuando deja de cumplir
+        // la regla (p.ej. alguien lo ha vuelto a ver), sin tocar el archivo.
+        // Se confirma contra el propio Plex antes de decir "YA BORRADA":
+        // false = de verdad ha desaparecido; true/null (sigue ahí, o no se
+        // pudo comprobar) deja el aviso tal cual, sin marcar nada en falso.
+        if ((await mediaExistsInPlex(id)) === false) await markMessageDeleted(id, source.id);
         // Si salió de la colección origen SIN haberse salvado (no hay filas
         // en salvados para este id), es un borrado/quitado genuino — limpia
         // la ventana huérfana. Si SÍ está salvado, se deja intacta: la

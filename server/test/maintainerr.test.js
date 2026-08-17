@@ -75,6 +75,8 @@ before(async () => {
   upsertSetting.run('maintainerr_url', 'http://maintainerr.test:6246');
   upsertSetting.run('maintainerr_bot_token', 'token-de-test');
   upsertSetting.run('maintainerr_chat_id', '-100123');
+  upsertSetting.run('plex_url', 'http://plex.test:32400');
+  upsertSetting.run('plex_token', 'token-plex-test');
   upsertSetting.run(
     'maintainerr_salvados_pairs',
     JSON.stringify([
@@ -403,6 +405,9 @@ test('pollMaintainerrCollections: si el ítem sale de la colección, se limpia l
     if (u.endsWith('/api/collections')) {
       return new Response(JSON.stringify(COLLECTIONS), { status: 200 }); // 9099 no está en su media[]
     }
+    if (u.includes('/library/metadata/')) {
+      return new Response('', { status: 404 }); // de verdad ha desaparecido de Plex
+    }
     throw new Error(`fetch inesperado en test: ${u}`);
   };
 
@@ -414,7 +419,7 @@ test('pollMaintainerrCollections: si el ítem sale de la colección, se limpia l
 // Pedido de Edu (4 ago 2026): si el ítem sale de su colección de borrado sin
 // haber pasado por el botón Salvar, es que Maintainerr lo borró de verdad —
 // el aviso original debe perder el botón y ganar "YA BORRADA".
-test('pollMaintainerrCollections: ítem borrado de verdad (no salvado) marca el aviso original como YA BORRADA', async () => {
+test('pollMaintainerrCollections: ítem borrado de verdad (no salvado, y confirmado ausente en Plex) marca el aviso original como YA BORRADA', async () => {
   db.prepare("INSERT OR IGNORE INTO maintainerr_notified (media_server_id, collection_id) VALUES ('9098', 1)").run();
   db.prepare(`
     INSERT INTO maintainerr_messages (media_server_id, collection_id, chat_id, message_id, has_photo, text)
@@ -427,6 +432,9 @@ test('pollMaintainerrCollections: ítem borrado de verdad (no salvado) marca el 
     calls.push({ url: u, options });
     if (u.endsWith('/api/collections')) {
       return new Response(JSON.stringify(COLLECTIONS), { status: 200 }); // 9098 no está en su media[]: ya no existe
+    }
+    if (u.includes('/library/metadata/9098')) {
+      return new Response('', { status: 404 }); // Plex confirma: ya no está
     }
     if (u.includes('api.telegram.org')) {
       return new Response(JSON.stringify({ ok: true, result: { message_id: 555, chat: { id: -100123 } } }), { status: 200 });
@@ -447,6 +455,43 @@ test('pollMaintainerrCollections: ítem borrado de verdad (no salvado) marca el 
 
   const messageRow = db.prepare("SELECT 1 FROM maintainerr_messages WHERE media_server_id = '9098' AND collection_id = 1").get();
   assert.equal(messageRow, undefined, 'la fila se borra tras marcarlo');
+});
+
+// Bug real reportado por Edu (17 ago 2026): "El gran showman" salió de la
+// colección de borrado (Maintainerr deja de proponerla porque alguien la
+// volvió a ver, la regla ya no la cumple) SIN que se hubiera borrado de
+// verdad — Plex la seguía teniendo. pollMaintainerrCollections confundía
+// "salió de la colección" con "se borró" y marcaba "YA BORRADA" en falso.
+test('pollMaintainerrCollections: sale de la colección pero sigue en Plex (regla ya no aplica) NO marca YA BORRADA', async () => {
+  db.prepare("INSERT OR IGNORE INTO maintainerr_notified (media_server_id, collection_id) VALUES ('9097', 1)").run();
+  db.prepare(`
+    INSERT INTO maintainerr_messages (media_server_id, collection_id, chat_id, message_id, has_photo, text)
+    VALUES ('9097', 1, '-100123', 556, 1, '🎬 «El gran showman» se borrará en 7 días.')
+  `).run();
+
+  const calls = [];
+  global.fetch = async (url, options = {}) => {
+    const u = String(url);
+    calls.push({ url: u, options });
+    if (u.endsWith('/api/collections')) {
+      return new Response(JSON.stringify(COLLECTIONS), { status: 200 }); // 9097 no está en su media[]
+    }
+    if (u.includes('/library/metadata/9097')) {
+      return new Response(JSON.stringify({ MediaContainer: { Metadata: [{ ratingKey: '9097' }] } }), { status: 200 }); // sigue en Plex
+    }
+    if (u.includes('api.telegram.org')) {
+      throw new Error('no debería tocar Telegram: no hay nada que editar');
+    }
+    throw new Error(`fetch inesperado en test: ${u}`);
+  };
+
+  await pollMaintainerrCollections();
+
+  assert.equal(calls.filter((c) => c.url.includes('api.telegram.org')).length, 0);
+  const messageRow = db.prepare("SELECT 1 FROM maintainerr_messages WHERE media_server_id = '9097' AND collection_id = 1").get();
+  assert.ok(messageRow, 'el mensaje original se deja intacto, sin editar');
+  const notifiedRow = db.prepare("SELECT 1 FROM maintainerr_notified WHERE media_server_id = '9097' AND collection_id = 1").get();
+  assert.equal(notifiedRow, undefined, 'igualmente deja de tratarse como candidato activo');
 });
 
 test('webhook: alta en la propia colección de salvados se ignora (sin bucle)', async () => {
