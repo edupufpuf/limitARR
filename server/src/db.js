@@ -411,3 +411,23 @@ addColumnIfMissing("ALTER TABLE salvado_messages ADD COLUMN text TEXT NOT NULL D
 // NULL = usar el valor global de la pestaña Salvadas (ver salvadoGraceDays
 // en maintainerr.js).
 addColumnIfMissing('ALTER TABLE libraries ADD COLUMN salvado_grace_days INTEGER');
+
+// Pedido de Edu (17 ago 2026): fecha de entrada en la biblioteca por tmdb_id,
+// persistida en vez de fiarse solo del mediaAddedAt de Seerr — ese campo no
+// se actualiza si la película sale de Plex (borrado manual o por Maintainerr)
+// y vuelve a entrar después, así que la caducidad (issue #14) seguía contando
+// desde la primera vez aunque ya no aplicara. was_unavailable guarda el estado
+// del último ciclo para detectar la transición "ha vuelto a entrar" (ver
+// trackLibraryEntries en quota.js): solo entonces se pisa entered_at con la
+// fecha nueva; si seguía disponible desde el ciclo anterior, se conserva la
+// que ya había. Clave compuesta con is4k porque Seerr guarda disponibilidad
+// aparte por calidad.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS library_entries (
+    tmdb_id INTEGER NOT NULL,
+    is4k INTEGER NOT NULL DEFAULT 0,
+    entered_at TEXT NOT NULL,
+    was_unavailable INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (tmdb_id, is4k)
+  );
+`);

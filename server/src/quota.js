@@ -410,6 +410,45 @@ function expiresAtMs(row, expiryDays, availableSinceMs = null) {
   return base == null ? null : base + expiryDays * DAY_MS;
 }
 
+// Pedido de Edu (17 ago 2026): persiste la fecha de entrada en biblioteca en
+// vez de fiarse del mediaAddedAt de Seerr tal cual (ver comentario en la
+// tabla library_entries, db.js) — así una película que sale y vuelve a
+// entrar recupera la fecha de la ÚLTIMA vez, no la primera. Muta en sitio los
+// valores de `availability` (Map nuevo por llamada a getMovieAvailability,
+// no el objeto cacheado dentro de seerr.js) para que dropExpiredRows/
+// computeBalance usen ya la fecha corregida sin más cambios.
+const getLibraryEntry = db.prepare('SELECT entered_at, was_unavailable FROM library_entries WHERE tmdb_id = ? AND is4k = ?');
+const upsertLibraryEntry = db.prepare(`
+  INSERT INTO library_entries (tmdb_id, is4k, entered_at, was_unavailable)
+  VALUES (@tmdbId, @is4k, @enteredAt, 0)
+  ON CONFLICT (tmdb_id, is4k) DO UPDATE SET entered_at = @enteredAt, was_unavailable = 0
+`);
+const markLibraryEntryUnavailable = db.prepare(
+  'UPDATE library_entries SET was_unavailable = 1 WHERE tmdb_id = ? AND is4k = ?'
+);
+
+function trackLibraryEntries(availability, is4k) {
+  const is4kFlag = is4k ? 1 : 0;
+  for (const [tmdbId, info] of availability) {
+    if (info.unavailable) {
+      markLibraryEntryUnavailable.run(tmdbId, is4kFlag);
+      continue;
+    }
+    const existing = getLibraryEntry.get(tmdbId, is4kFlag);
+    if (!existing) {
+      const enteredAt = new Date(info.availableSince ?? Date.now()).toISOString();
+      upsertLibraryEntry.run({ tmdbId, is4k: is4kFlag, enteredAt });
+      info.availableSince = Date.parse(enteredAt);
+    } else if (existing.was_unavailable) {
+      const enteredAt = new Date().toISOString();
+      upsertLibraryEntry.run({ tmdbId, is4k: is4kFlag, enteredAt });
+      info.availableSince = Date.parse(enteredAt);
+    } else {
+      info.availableSince = Date.parse(existing.entered_at);
+    }
+  }
+}
+
 // Issue #4: identidad de cupo de un id. Un usuario de un grupo agregado no tiene
 // cupo propio: comparte el del grupo, que vive en quota_cache/quota_resets con
 // user_id = -group_id (los ids de Tautulli son siempre positivos, no chocan).
@@ -778,6 +817,7 @@ export async function getBalance(userId, libraryId) {
   // Issue #14: la disponibilidad se consulta antes de filtrar caducadas porque
   // el plazo cuenta desde que la película llegó a Plex, no desde la aprobación.
   const availability = await getMovieAvailability(allApproved.map((r) => r.tmdb_id), library.kind === '4k');
+  trackLibraryEntries(availability, library.kind === '4k');
   // Issue #10: las aprobadas que han caducado sin verse ni se listan ni cuentan.
   const approved = dropExpiredRows(allApproved, expiryDays, Date.now(), availability);
   const history = [];
