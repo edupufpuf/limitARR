@@ -162,6 +162,52 @@ async function notifyNoMonthlyTotalQuota(base, monthlyTotal) {
   }
 }
 
+// Aviso proactivo: se dispara la aprobación que hace que el cupo mensual de
+// esta biblioteca pase de "quedaba sitio" a "completo" (pedido de Edu, caso
+// Olga: quería que se enterase al llegar al tope, no solo al pedir de más
+// después y que se lo rechacen). Distinto de notifyNoMonthlyQuota, que avisa
+// de un rechazo, no de haber llegado justo al límite.
+async function notifyMonthlyQuotaReached(base, monthly) {
+  if (!isNotificationEnabled('monthly_quota_reached')) return;
+
+  const chatId = getChatId.get(base.userId)?.chat_id;
+  if (!chatId) return;
+  const libraryName = getLibraryName.get(base.libraryId)?.name ?? `biblioteca #${base.libraryId}`;
+  const text = renderNotificationMessage('monthly_quota_reached', {
+    usuario: base.username ?? '',
+    biblioteca: libraryName,
+    usado: monthly.used,
+    limite: monthly.limit,
+    dias: monthly.daysUntilReset,
+    plural: monthly.daysUntilReset === 1 ? '' : 's',
+  });
+  try {
+    await sendMessage(chatId, text);
+  } catch (err) {
+    console.error('[scheduler] telegram notify failed:', err.message);
+  }
+}
+
+// Igual que notifyMonthlyQuotaReached pero para el cupo mensual TOTAL.
+async function notifyMonthlyTotalQuotaReached(base, monthlyTotal) {
+  if (!isNotificationEnabled('monthly_total_quota_reached')) return;
+
+  const chatId = getChatId.get(base.userId)?.chat_id;
+  if (!chatId) return;
+  const text = renderNotificationMessage('monthly_total_quota_reached', {
+    usuario: base.username ?? '',
+    usado: monthlyTotal.used,
+    limite: monthlyTotal.limit,
+    dias: monthlyTotal.daysUntilReset,
+    plural: monthlyTotal.daysUntilReset === 1 ? '' : 's',
+  });
+  try {
+    await sendMessage(chatId, text);
+  } catch (err) {
+    console.error('[scheduler] telegram notify failed:', err.message);
+  }
+}
+
 // v2: temporizador de aprobación — aviso de que una solicitud concreta queda
 // aplazada hasta una fecha (acción puntual del admin, no una norma del usuario).
 async function notifyHeld(base, holdUntilMs) {
@@ -874,6 +920,18 @@ export async function runPollCycle() {
     const refreshed = await refreshQuotaCache(tautulliUser.id, library.id);
     if (decision === 'approved' && isNew) {
       await notifyApproved(base, refreshed.pendingItems);
+
+      // Aviso de "cupo completo" solo la vez que la aprobación es la que hace
+      // saltar de "quedaba sitio" a "lleno" — no en cada aprobación posterior.
+      if (monthly.enabled && monthly.used < monthly.limit && refreshed.monthly.used >= refreshed.monthly.limit) {
+        await notifyMonthlyQuotaReached(base, refreshed.monthly);
+      }
+      if (monthlyTotal.enabled && monthlyTotal.used < monthlyTotal.limit) {
+        const refreshedTotal = await getMonthlyTotalQuota(tautulliUser.id);
+        if (refreshedTotal.used >= refreshedTotal.limit) {
+          await notifyMonthlyTotalQuotaReached(base, refreshedTotal);
+        }
+      }
     }
   }
 

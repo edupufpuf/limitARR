@@ -70,6 +70,20 @@ export const NOTIFICATION_TYPES = [
     variables: ['usuario', 'titulo', 'usado', 'limite', 'dias', 'plural'],
   },
   {
+    id: 'monthly_quota_reached',
+    label: 'Cupo mensual completo (biblioteca)',
+    description: 'Aviso proactivo en cuanto el cupo mensual de una biblioteca se llena — no hace falta que pida nada más para recibirlo.',
+    defaultMessage: '📅 Has completado tu cupo mensual de {biblioteca}: {usado}/{limite}.\nSe resetea en {dias} día{plural}.',
+    variables: ['usuario', 'biblioteca', 'usado', 'limite', 'dias', 'plural'],
+  },
+  {
+    id: 'monthly_total_quota_reached',
+    label: 'Cupo mensual completo (total)',
+    description: 'Aviso proactivo en cuanto el cupo mensual total (todas las bibliotecas) se llena.',
+    defaultMessage: '📅 Has completado tu cupo mensual total: {usado}/{limite} (todas las bibliotecas).\nSe resetea en {dias} día{plural}.',
+    variables: ['usuario', 'usado', 'limite', 'dias', 'plural'],
+  },
+  {
     id: 'held',
     label: 'Solicitud aplazada',
     description: 'El admin ha pospuesto esta solicitud concreta a una fecha (botón "Aplazar").',
