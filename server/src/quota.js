@@ -185,6 +185,14 @@ const getLibraryForRequest = db.prepare(`
 // no en libraries.
 const DEFAULT_MONTHLY_TOTAL_LIMIT = 20;
 
+// Reset de cupo mensual = inicio del mes UTC siguiente (mismo corte que usa
+// filterAvailableThisMonth vía 'start of month' en SQLite, que es UTC).
+export function getDaysUntilMonthlyReset() {
+  const now = new Date();
+  const nextMonthStartMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
+  return Math.ceil((nextMonthStartMs - now.getTime()) / 86400000);
+}
+
 // Filas aprobadas de un usuario en TODAS las bibliotecas habilitadas, con el
 // kind (HD/4K) de cada una — Seerr guarda disponibilidad por separado para
 // cada calidad, hace falta saber cuál mirar (ver filterAvailableThisMonth).
@@ -317,7 +325,7 @@ export async function getMonthlyTotalQuota(userId) {
     const rows = identity.memberIds.flatMap((memberId) => getApprovedRowsAllLibraries.all(memberId));
     used = (await filterAvailableThisMonth(rows)).length;
   }
-  return { enabled, limit, used, remaining: Math.max(0, limit - used) };
+  return { enabled, limit, used, remaining: Math.max(0, limit - used), daysUntilReset: getDaysUntilMonthlyReset() };
 }
 
 // v2: cupo mensual — cuenta lo aprobado (y no anulado, y ya disponible en
@@ -800,6 +808,7 @@ export async function getBalance(userId, libraryId) {
     limit: monthlyLimit,
     used: monthlyUsed,
     remaining: Math.max(0, monthlyLimit - monthlyUsed),
+    daysUntilReset: getDaysUntilMonthlyReset(),
   };
 
   const allApproved = identity.memberIds.flatMap((memberId) => getApprovedTitles.all(memberId, libraryId, resetAt));

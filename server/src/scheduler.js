@@ -129,6 +129,8 @@ async function notifyNoMonthlyQuota(base, monthly) {
     titulo: base.mediaTitle ?? 'tu solicitud',
     usado: monthly.used,
     limite: monthly.limit,
+    dias: monthly.daysUntilReset,
+    plural: monthly.daysUntilReset === 1 ? '' : 's',
   });
   try {
     await sendMessage(chatId, text);
@@ -150,6 +152,8 @@ async function notifyNoMonthlyTotalQuota(base, monthlyTotal) {
     titulo: base.mediaTitle ?? 'tu solicitud',
     usado: monthlyTotal.used,
     limite: monthlyTotal.limit,
+    dias: monthlyTotal.daysUntilReset,
+    plural: monthlyTotal.daysUntilReset === 1 ? '' : 's',
   });
   try {
     await sendMessage(chatId, text);

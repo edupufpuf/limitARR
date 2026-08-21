@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { db } from '../src/db.js';
+import { getDaysUntilMonthlyReset } from '../src/quota.js';
 
 // Tests de rutas con la DB en memoria (DB_PATH=:memory: en npm test). No se
 // crean bibliotecas habilitadas a propósito: así refreshQuotaCache corta antes
@@ -528,7 +529,7 @@ test('cupo mensual: cuenta cargos aprobados en el mes, independientemente de si 
       .post('/api/quota/manual-charge/1890/1779')
       .send({ title: 'Vista fuera de Seerr 1' })
       .expect(200);
-    assert.deepEqual(first.body.monthly, { enabled: true, limit: 1, used: 1, remaining: 0 });
+    assert.deepEqual(first.body.monthly, { enabled: true, limit: 1, used: 1, remaining: 0, daysUntilReset: getDaysUntilMonthlyReset() });
 
     // Un segundo cargo manual sigue aplicándose (acción del admin, no pasa por
     // el tope): el mensual queda en 2/1, por encima del límite, y así se enseña.
@@ -536,7 +537,7 @@ test('cupo mensual: cuenta cargos aprobados en el mes, independientemente de si 
       .post('/api/quota/manual-charge/1890/1779')
       .send({ title: 'Vista fuera de Seerr 2' })
       .expect(200);
-    assert.deepEqual(second.body.monthly, { enabled: true, limit: 1, used: 2, remaining: 0 });
+    assert.deepEqual(second.body.monthly, { enabled: true, limit: 1, used: 2, remaining: 0, daysUntilReset: getDaysUntilMonthlyReset() });
 
     const quota = (await agent.get('/api/quota').expect(200)).body;
     const lib = quota.find((u) => u.userId === 1890)?.libraries.find((l) => l.libraryId === 1779);
@@ -601,7 +602,7 @@ test('cupo mensual: lo aprobado pero aún no descargado no cuenta (pedido de Edu
       .post('/api/quota/manual-charge/1896/1786')
       .send({ title: 'Vista fuera de Seerr' })
       .expect(200);
-    assert.deepEqual(res.body.monthly, { enabled: true, limit: 5, used: 1, remaining: 4 });
+    assert.deepEqual(res.body.monthly, { enabled: true, limit: 5, used: 1, remaining: 4, daysUntilReset: getDaysUntilMonthlyReset() });
 
     const history = (await agent.get('/api/quota/monthly-history/1896/1786').expect(200)).body;
     assert.deepEqual(history.map((r) => r.media_title), ['Vista fuera de Seerr']);

@@ -246,7 +246,11 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
                       style={{ width: `${pct}%` }}
                     />
                   </div>
-                  {maxed && <p className="text-xs text-accent-400 mt-2">Cupo del mes agotado</p>}
+                  {maxed && (
+                    <p className="text-xs text-accent-400 mt-2">
+                      Cupo del mes agotado — se resetea en {mt.daysUntilReset} día{mt.daysUntilReset === 1 ? '' : 's'}
+                    </p>
+                  )}
                 </button>
               );
             })()}
@@ -286,7 +290,11 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
                           style={{ width: `${pct}%` }}
                         />
                       </div>
-                      {maxed && <p className="text-xs text-accent-400 mt-2">Cupo del mes agotado</p>}
+                      {maxed && (
+                        <p className="text-xs text-accent-400 mt-2">
+                          Cupo del mes agotado — se resetea en {l.monthly.daysUntilReset} día{l.monthly.daysUntilReset === 1 ? '' : 's'}
+                        </p>
+                      )}
                     </button>
                   );
                 })}
