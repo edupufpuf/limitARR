@@ -123,17 +123,14 @@ saldo = límite − (películas aprobadas para ese usuario en esa biblioteca que
 - **Registro**: filtrable por decisión y por texto (usuario o título),
   con paginación ("cargar más") y carátula junto al título.
 
-### Auto-limpieza de cupo atascado
+### Sincronización de solicitudes del cupo
 
-Si una solicitud aprobada nunca llega a buen puerto, no se queda
-ocupando cupo para siempre:
+Las solicitudes aprobadas se mantienen sincronizadas con Seerr:
 
 - **Cancelada por el usuario en Seerr**: se detecta y se libera el hueco
   en el siguiente ciclo.
-- **Nunca llega a estar disponible**: pasado `STUCK_REQUEST_GRACE_DAYS` (7
-  días por defecto) sin llegar a "disponible", se libera sola. Una que sí
-  llegó a estar disponible nunca se libera por antigüedad — sigue
-  contando hasta que el usuario la vea de verdad.
+- **Aún no está disponible**: permanece visible como pendiente hasta que se
+  descargue o la solicitud se quite/cancele en Seerr. No caduca por antigüedad.
 
 ## Notificaciones (Telegram)
 

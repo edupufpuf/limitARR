@@ -1,5 +1,4 @@
 import { db } from './db.js';
-import { config } from './config.js';
 import { getRawSetting, setRawSetting } from './settings.js';
 import {
   getItemWatchHistory,
@@ -397,8 +396,8 @@ export function resolveExpiryDays(overrides, libraryDays) {
 // desde la aprobación (una película que tardó 29 días en descargarse caducaba
 // al día siguiente de llegar). `availability` es el Map de getMovieAvailability;
 // sin él (tests, series) se cae al comportamiento antiguo por created_at. Un
-// pendiente aún no disponible no caduca: no se puede ver todavía, y las
-// solicitudes atascadas ya las anula reconcileVoidedRequests.
+// pendiente aún no disponible no caduca: no se puede ver todavía. Se mantiene
+// visible hasta que llegue a estar disponible o se quite/cancele en Seerr.
 export function dropExpiredRows(rows, expiryDays, nowMs = Date.now(), availability = null) {
   if (!expiryDays) return rows;
   const cutoff = nowMs - expiryDays * DAY_MS;
@@ -1505,25 +1504,19 @@ export async function undoQuotaAction(logId) {
   return result;
 }
 
-// Sin esto, una aprobada que nunca llega a ver la luz (cancelada por el usuario, o
-// nunca llega a descargarse) se queda ocupando su hueco de cupo para siempre. Se
-// libera si Seerr confirma que ya no existe, o si sigue "pendiente" (nunca
-// disponible) pasado el plazo de gracia — una ya disponible no se toca nunca,
-// por vieja que sea: sigue contando hasta que el usuario la vea de verdad.
+// Una solicitud aprobada y aún sin descargar debe seguir apareciendo en el cupo
+// sin límite de tiempo. Solo se anula automáticamente cuando Seerr confirma que
+// la solicitud ya no existe; los estados pending/available/unknown se conservan.
+export function shouldVoidApprovedRequest(status) {
+  return status === 'gone';
+}
+
 export async function reconcileVoidedRequests() {
   const rows = getUnvoidedApproved.all();
-  const graceMs = config.stuckRequestGraceDays * 24 * 60 * 60 * 1000;
 
   for (const row of rows) {
     const status = await getRequestStatus(row.request_id);
-    if (status === 'gone') {
-      markVoided.run(row.id);
-      continue;
-    }
-    if (status === 'pending') {
-      const ageMs = Date.now() - new Date(row.created_at.replace(' ', 'T') + 'Z').getTime();
-      if (ageMs > graceMs) markVoided.run(row.id);
-    }
+    if (shouldVoidApprovedRequest(status)) markVoided.run(row.id);
   }
 }
 

@@ -26,6 +26,7 @@ import {
   setRoleOverride,
   deleteRoleOverride,
   refreshQuotaCache,
+  shouldVoidApprovedRequest,
 } from '../src/quota.js';
 import { setRawSetting, updateSettings } from '../src/settings.js';
 import { db } from '../src/db.js';
@@ -60,6 +61,16 @@ test('normalize: título vacío o nulo no rompe', () => {
   assert.equal(normalize(null), '');
   assert.equal(normalize(undefined), '');
   assert.equal(normalize(''), '');
+});
+
+test('reconciliación: una solicitud pendiente no se anula por antigüedad', () => {
+  assert.equal(shouldVoidApprovedRequest('pending'), false);
+});
+
+test('reconciliación: solo se anula cuando Seerr confirma que ya no existe', () => {
+  assert.equal(shouldVoidApprovedRequest('gone'), true);
+  assert.equal(shouldVoidApprovedRequest('available'), false);
+  assert.equal(shouldVoidApprovedRequest('unknown'), false);
 });
 
 test('computeBalance: sin aprobadas, saldo completo', () => {
