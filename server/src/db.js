@@ -347,6 +347,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tmdb_id INTEGER NOT NULL,
     season_number INTEGER NOT NULL,
+    previous_season_number INTEGER,
     user_id INTEGER NOT NULL,         -- Tautulli user_id, para comprobar pendingItems
     seerr_user_id INTEGER,            -- para crear la solicitud siguiente como este usuario en Seerr
     library_id INTEGER NOT NULL,
@@ -406,6 +407,16 @@ db.exec(`
 // arriba): tiene que ir después de ambos, si no "no such table" en DBs que
 // aún no la tienen.
 addColumnIfMissing("ALTER TABLE salvado_messages ADD COLUMN text TEXT NOT NULL DEFAULT ''");
+// La cola solo avanza cuando ESTA temporada predecesora consta como vista. Sin
+// guardarla, quitar/caducar una temporada podía desbloquear por error la siguiente.
+addColumnIfMissing('ALTER TABLE season_queue ADD COLUMN previous_season_number INTEGER');
+// Compatibilidad con filas que ya estuvieran en cola antes de guardar el
+// predecesor explícito (las solicitudes normales son temporadas consecutivas).
+db.prepare(`
+  UPDATE season_queue
+  SET previous_season_number = season_number - 1
+  WHERE previous_season_number IS NULL AND season_number > 1
+`).run();
 
 // Pedido de Edu (9 ago 2026): plazo de gracia de salvados por biblioteca —
 // NULL = usar el valor global de la pestaña Salvadas (ver salvadoGraceDays

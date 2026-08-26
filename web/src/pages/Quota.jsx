@@ -158,7 +158,9 @@ function PendingPoster({ item, onDetail, onDismiss }) {
       className="relative block w-16 h-24 rounded-lg overflow-hidden shadow-card group flex-shrink-0 cursor-pointer"
       title={
         item.pendingApproval
-          ? `${item.title ?? ''} — pendiente de aprobación en Seerr`
+          ? item.sequentialQueue
+            ? `${item.title ?? ''} — pendiente de aprobar cuando se vea la temporada ${item.previousSeasonNumber ?? 'anterior'}`
+            : `${item.title ?? ''} — pendiente de aprobación en Seerr`
           : item.bypassed
           ? `${item.title ?? ''} — aprobada fuera de limitARR, no resta cupo`
           : item.unavailable
@@ -178,7 +180,7 @@ function PendingPoster({ item, onDetail, onDismiss }) {
       )}
       {item.pendingApproval && (
         <span className="absolute top-1 left-1 right-1 line-clamp-2 rounded bg-violet-600 px-1 py-0.5 text-[7px] leading-tight font-semibold uppercase tracking-wide text-white pointer-events-none">
-          Pdte. Aprobar
+          {item.sequentialQueue ? 'Espera t. anterior' : 'Pdte. Aprobar'}
         </span>
       )}
       {item.bypassed && !item.unavailable && (
@@ -377,7 +379,11 @@ export function PendingDetailModal({
               <div className={`text-xs mt-1 ${downloadStatusColor(item)}`}>{downloadStatusLabel(item)} — no resta cupo.</div>
             )}
             {item.pendingApproval && (
-              <div className="text-xs text-gray-400 mt-1">Pendiente de aprobación en Seerr — no resta cupo.</div>
+              <div className="text-xs text-gray-400 mt-1">
+                {item.sequentialQueue
+                  ? `Pendiente de aprobar cuando se vea la temporada ${item.previousSeasonNumber ?? 'anterior'} — no resta cupo.`
+                  : 'Pendiente de aprobación en Seerr — no resta cupo.'}
+              </div>
             )}
             {item.holdUntil != null && (
               <div className="text-xs text-yellow-400 mt-1">
@@ -523,7 +529,7 @@ export function PendingDetailModal({
             )}
             {/* Issue #16: un pendiente de aprobación se decide aquí mismo; no hay
                 fila de cupo que quitar. */}
-            {item.pendingApproval ? (
+            {item.pendingApproval && !item.sequentialQueue ? (
             <>
               {item.holdUntil != null ? (
                 <button onClick={() => onClearHold(item)} className="btn btn-ghost sm:ml-auto">
@@ -541,7 +547,7 @@ export function PendingDetailModal({
                 Rechazar
               </button>
             </>
-          ) : (
+          ) : !item.pendingApproval ? (
             <>
               {/* Issue #11: un pendiente que aún no está en Plex se puede rechazar
                   directamente en Seerr (cancela la descarga y anula la fila). */}
@@ -554,7 +560,7 @@ export function PendingDetailModal({
                 Quitar del cupo
               </button>
             </>
-            )}
+            ) : null}
           </div>
         )}
       </div>
@@ -627,7 +633,7 @@ function PendingApprovals({ items, onAction }) {
           <div className="text-xs uppercase tracking-wider text-gray-500 mb-2">{libraryName}</div>
           <div className="space-y-2">
             {libItems.map((item) => (
-              <div key={item.requestId} className="flex items-center gap-3 text-sm">
+              <div key={item.requestId ?? `queue-${item.queueId}`} className="flex items-center gap-3 text-sm">
                 <span className="w-8 h-12 rounded overflow-hidden bg-bg-600 flex-shrink-0">
                   {item.posterUrl && <img src={item.posterUrl} alt="" loading="lazy" className="w-full h-full object-cover" />}
                 </span>
@@ -640,9 +646,12 @@ function PendingApprovals({ items, onAction }) {
                     {item.holdUntil != null && (
                       <span className="text-yellow-400"> · ⏳ aplazada, {daysLeft(item.holdUntil)}</span>
                     )}
+                    {item.sequentialQueue && (
+                      <span className="text-violet-400"> · espera a que se vea la temporada {item.previousSeasonNumber ?? 'anterior'}</span>
+                    )}
                   </div>
                 </div>
-                {item.holdUntil != null ? (
+                {!item.sequentialQueue && (item.holdUntil != null ? (
                   <button
                     onClick={() => clearHold(item)}
                     disabled={Boolean(acting[item.requestId])}
@@ -658,21 +667,21 @@ function PendingApprovals({ items, onAction }) {
                   >
                     Aplazar
                   </button>
-                )}
-                <button
+                ))}
+                {!item.sequentialQueue && <button
                   onClick={() => act(item, 'approve')}
                   disabled={Boolean(acting[item.requestId])}
                   className="btn btn-primary py-1 px-2.5 text-xs"
                 >
                   {acting[item.requestId] === 'approve' ? 'Aprobando…' : 'Aprobar'}
-                </button>
-                <button
+                </button>}
+                {!item.sequentialQueue && <button
                   onClick={() => act(item, 'decline')}
                   disabled={Boolean(acting[item.requestId])}
                   className="btn btn-ghost py-1 px-2.5 text-xs text-accent-400"
                 >
                   {acting[item.requestId] === 'decline' ? 'Rechazando…' : 'Rechazar'}
-                </button>
+                </button>}
               </div>
             ))}
           </div>
@@ -1255,6 +1264,8 @@ export default function Quota() {
         balance: pa.balance,
         limit: pa.limit,
         holdUntil: pa.holdUntil,
+        sequentialQueue: Boolean(pa.sequentialQueue),
+        previousSeasonNumber: pa.previousSeasonNumber ?? null,
       });
     }
     if (byCard.size === 0) return { mergedUsers: users, unmatchedApprovals: unmatched };

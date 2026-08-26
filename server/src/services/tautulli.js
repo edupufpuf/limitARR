@@ -203,8 +203,20 @@ export async function terminateSession(sessionKey, message) {
 
 export async function getSeasonEpisodes(showRatingKey, seasonNumber) {
   if (!showRatingKey || !seasonNumber) return [];
-  const seasons = await call('get_children_metadata', { rating_key: showRatingKey });
-  const season = (seasons.children_list || []).find(
+  const children = await call('get_children_metadata', { rating_key: showRatingKey });
+  const childrenList = children.children_list || [];
+  // El rating key de respaldo obtenido con search puede ser el de la temporada
+  // (cuando Seerr aún no ha enlazado la serie con Plex), no el de la serie.
+  // En ese caso get_children_metadata ya devuelve directamente los episodios.
+  const directEpisodes = childrenList.filter((item) => item.media_type === 'episode');
+  if (directEpisodes.length > 0) {
+    return directEpisodes.map((item) => ({
+      ratingKey: String(item.rating_key),
+      episodeNumber: Number(item.media_index),
+      title: item.title,
+    }));
+  }
+  const season = childrenList.find(
     (item) => Number(item.media_index) === Number(seasonNumber)
   );
   if (!season?.rating_key) return [];

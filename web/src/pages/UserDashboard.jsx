@@ -33,7 +33,9 @@ function LibraryCard({ library, onDetail }) {
                 aria-label={`Ver detalle de ${item.title}`}
                 className="relative aspect-[2/3] w-full overflow-hidden rounded-lg bg-bg-950 text-left"
                 title={item.pendingApproval
-                  ? `${item.title} — pendiente de aprobar, no cuenta`
+                  ? item.sequentialQueue
+                    ? `${item.title} — pendiente de aprobar cuando se vea la temporada ${item.previousSeasonNumber ?? 'anterior'}, no cuenta`
+                    : `${item.title} — pendiente de aprobar, no cuenta`
                   : item.bypassed
                     ? `${item.title} — aprobada fuera de limitARR, no cuenta`
                     : item.unavailable
@@ -54,7 +56,9 @@ function LibraryCard({ library, onDetail }) {
                       No cuenta
                     </span>
                     <span className={`min-w-0 max-w-full line-clamp-2 rounded px-1 py-0.5 text-[7px] leading-tight font-semibold uppercase tracking-wide ${item.pendingApproval ? 'text-white bg-violet-600' : `${downloadStatusBg(item)} ${downloadStatusChipText(item)}`}`}>
-                      {item.pendingApproval ? 'Pdte. de aprobar' : downloadStatusLabel(item)}
+                      {item.pendingApproval
+                        ? item.sequentialQueue ? 'Espera t. anterior' : 'Pdte. de aprobar'
+                        : downloadStatusLabel(item)}
                     </span>
                   </div>
                 )}

@@ -75,13 +75,19 @@ const insertUnavailableReminder = db.prepare(`
 
 // Issue #13 (fase 3): cola secuencial de temporadas en espera (ver season_queue en db.js).
 const insertSeasonQueue = db.prepare(`
-  INSERT INTO season_queue (tmdb_id, season_number, user_id, seerr_user_id, library_id)
-  VALUES (@tmdbId, @seasonNumber, @userId, @seerrUserId, @libraryId)
+  INSERT INTO season_queue (tmdb_id, season_number, previous_season_number, user_id, seerr_user_id, library_id)
+  VALUES (@tmdbId, @seasonNumber, @previousSeasonNumber, @userId, @seerrUserId, @libraryId)
 `);
 const getSeasonQueueRows = db.prepare(`
   SELECT * FROM season_queue ORDER BY tmdb_id, user_id, season_number ASC
 `);
 const deleteSeasonQueueRow = db.prepare('DELETE FROM season_queue WHERE id = ?');
+const hasWatchedPreviousSeason = db.prepare(`
+  SELECT 1 FROM decisions_log
+  WHERE user_id = ? AND library_id = ? AND media_type = 'tv' AND tmdb_id = ?
+    AND season_number = ? AND decision = 'watched'
+  LIMIT 1
+`);
 
 // Avoids re-logging (and re-notifying) the same still-pending request every poll
 // cycle when nothing about its situation has changed since the last time.
@@ -694,7 +700,7 @@ async function runDailyMaintenance() {
 }
 
 // Issue #13 (fase 3): en cuanto la temporada en curso de una serie sale de
-// pendientes (vista), pide en Seerr la siguiente temporada en cola — una fila
+// pendientes porque consta como VISTA, pide en Seerr la siguiente temporada en cola — una fila
 // por tmdb_id+usuario (solo se procesa la más baja de cada grupo; el resto
 // espera su turno). La solicitud nueva entra en el flujo normal (cupo,
 // aprobación) del próximo ciclo, igual que cualquier otra.
@@ -724,7 +730,15 @@ export async function processSeasonQueue() {
         other.seasons.length > 0 &&
         Math.min(...other.seasons) < row.season_number
     );
-    if (sameShowUnwatched || lowerSeasonPending) continue; // aún viendo/esperando la anterior
+    const previousWatched = row.previous_season_number == null
+      ? false
+      : Boolean(hasWatchedPreviousSeason.get(
+          row.user_id,
+          row.library_id,
+          row.tmdb_id,
+          row.previous_season_number
+        ));
+    if (sameShowUnwatched || lowerSeasonPending || !previousWatched) continue;
 
     try {
       await createSeasonRequest(row.tmdb_id, row.season_number, row.seerr_user_id);
@@ -807,10 +821,12 @@ export async function runPollCycle() {
         await declineRequest(request.id);
         try {
           await createSeasonRequest(request.tmdbId, firstSeason, request.requestedBy?.id);
-          for (const seasonNumber of restSeasons) {
+          for (let index = 0; index < restSeasons.length; index += 1) {
+            const seasonNumber = restSeasons[index];
             insertSeasonQueue.run({
               tmdbId: request.tmdbId,
               seasonNumber,
+              previousSeasonNumber: index === 0 ? firstSeason : restSeasons[index - 1],
               userId: tautulliUser.id,
               seerrUserId: request.requestedBy?.id ?? null,
               libraryId: library.id,

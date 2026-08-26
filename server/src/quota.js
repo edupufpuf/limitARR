@@ -679,9 +679,19 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatc
     }
     const details = showDetailsCache.get(detailsCacheKey);
     const showRatingKey = details?.showRatingKey;
-    const cacheKey = `${showRatingKey || 'missing'}:${row.season_number}`;
+    // Seerr puede quedarse con mediaInfo.ratingKey=null/seasons=[] incluso
+    // después de que Sonarr haya descargado la temporada y Plex la tenga. La
+    // búsqueda directa en Plex evita marcar entonces un falso "No cuenta".
+    const plexRatingKey = await lookupRatingKey({
+      title: row.media_title,
+      mediaType: 'tv',
+      tmdbId: row.tmdb_id,
+      seasonNumber: row.season_number,
+    });
+    const episodesRatingKey = showRatingKey || plexRatingKey;
+    const cacheKey = `${episodesRatingKey || 'missing'}:${row.season_number}`;
     if (!seasonEpisodesCache.has(cacheKey)) {
-      seasonEpisodesCache.set(cacheKey, await getSeasonEpisodes(showRatingKey, row.season_number));
+      seasonEpisodesCache.set(cacheKey, await getSeasonEpisodes(episodesRatingKey, row.season_number));
     }
     const episodes = seasonEpisodesCache.get(cacheKey);
     const state = seasonWatchState(
@@ -700,7 +710,9 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatc
       // no da por disponible (status < 4: nada descargado) no resta cupo, pero
       // se lista con marca. seasonStatuses null = error de red → cuenta.
       const status = details?.seasonStatuses?.[row.season_number];
-      row.unavailable = details?.seasonStatuses != null && (status ?? 0) < 4;
+      // Si Plex ya contiene la temporada, esa evidencia prevalece sobre un
+      // mediaInfo incompleto o atrasado de Seerr.
+      row.unavailable = !plexRatingKey && details?.seasonStatuses != null && (status ?? 0) < 4;
       row.media_status = status ?? null;
       // Estado real de la cola de Sonarr para esa temporada (ver getShowDetails).
       row.queue_status = details?.seasonQueueStatus?.[row.season_number] ?? null;

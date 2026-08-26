@@ -226,6 +226,10 @@ router.get('/me/quota', ah(async (req, res) => {
       pendingApproval: true,
       requestId: item.requestId,
       requestedAt: item.requestedAt,
+      ...(item.sequentialQueue ? {
+        sequentialQueue: true,
+        previousSeasonNumber: item.previousSeasonNumber ?? null,
+      } : {}),
     });
   }
   res.json({
@@ -1275,15 +1279,21 @@ const setUndoDataById = db.prepare('UPDATE decisions_log SET undo_data = ? WHERE
 const lastRowForRequest = db.prepare(
   'SELECT * FROM decisions_log WHERE request_id = ? ORDER BY id DESC LIMIT 1'
 );
+const getSequentialQueueItems = db.prepare(`
+  SELECT sq.*, l.name AS library_name
+  FROM season_queue sq
+  JOIN libraries l ON l.id = sq.library_id
+  ORDER BY sq.user_id, sq.tmdb_id, sq.season_number
+`);
 
 function formatRequestTitle(mediaType, title, seasonNumber = null) {
   if (mediaType !== 'tv' || !seasonNumber) return title;
   return `${title ?? 'Serie'} - Temporada ${seasonNumber}`;
 }
 
-// Lo que sigue sin aprobar en Seerr (el sondeo solo auto-aprueba dentro de
-// cupo, así que esto es en la práctica lo bloqueado por cupo o sin match),
-// con contexto para decidir: biblioteca, usuario y su saldo cacheado.
+// Lo que sigue sin aprobar en Seerr y las temporadas de la cola secuencial que
+// aún ni siquiera se han creado allí. Ambas aparecen en el cupo sin restarlo;
+// las segundas son informativas y no admiten aprobación manual.
 async function buildPendingApprovalItems() {
   const [pending, tautulliUsers] = await Promise.all([listPendingRequests(), getUsers()]);
   const items = [];
@@ -1316,6 +1326,33 @@ async function buildPendingApprovalItems() {
       limit: cached?.limit_applied ?? null,
       // v2: temporizador de aprobación — si el admin aplazó esta solicitud.
       holdUntil: getRequestHold(request.id)?.holdUntil ?? null,
+    });
+  }
+
+  for (const queued of getSequentialQueueItems.all()) {
+    const tautulliUser = tautulliUsers.find((user) => Number(user.id) === Number(queued.user_id));
+    const cacheUserId = quotaIdentity(queued.user_id).cacheId;
+    const cached = getCachedBalance.get(cacheUserId, queued.library_id);
+    const details = await getMediaDetails('tv', queued.tmdb_id, queued.season_number);
+    items.push({
+      requestId: null,
+      queueId: queued.id,
+      mediaType: 'tv',
+      tmdbId: queued.tmdb_id,
+      seasons: [queued.season_number],
+      title: formatRequestTitle('tv', details.title, queued.season_number),
+      posterUrl: details.posterUrl ?? null,
+      libraryId: queued.library_id,
+      libraryName: queued.library_name,
+      userId: queued.user_id,
+      cacheUserId,
+      username: tautulliUser?.username ?? 'unknown',
+      requestedAt: queued.created_at ? `${queued.created_at.replace(' ', 'T')}Z` : null,
+      balance: cached?.balance ?? null,
+      limit: cached?.limit_applied ?? null,
+      holdUntil: null,
+      sequentialQueue: true,
+      previousSeasonNumber: queued.previous_season_number ?? null,
     });
   }
   return items;

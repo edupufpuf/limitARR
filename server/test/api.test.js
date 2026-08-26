@@ -45,6 +45,10 @@ test('auth Plex: usuario normal solo ve su cupo y gestiona su propio chat', asyn
     VALUES (1777, 'Películas', 'movie', 'standard', 1, 4)
   `).run();
   db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit, sequential_seasons)
+    VALUES (1778, 'Series', 'show', 'standard', 1, 2, 1)
+  `).run();
+  db.prepare(`
     INSERT OR REPLACE INTO quota_cache (user_id, library_id, limit_applied, outstanding, balance, pending_items)
     VALUES (1880, 1777, 4, 1, 3, ?)
   `).run(JSON.stringify([{
@@ -57,6 +61,15 @@ test('auth Plex: usuario normal solo ve su cupo y gestiona su propio chat', asyn
     watchedPercent: 25,
     ratingKey: null,
   }]));
+  db.prepare(`
+    INSERT OR REPLACE INTO quota_cache (user_id, library_id, limit_applied, outstanding, balance, pending_items)
+    VALUES (1880, 1778, 2, 1, 1, '[]')
+  `).run();
+  db.prepare(`
+    INSERT INTO season_queue
+      (id, tmdb_id, season_number, previous_season_number, user_id, seerr_user_id, library_id, created_at)
+    VALUES (17780, 700, 3, 2, 1880, 44, 1778, '2026-07-14 09:00:00')
+  `).run();
   db.prepare(`
     INSERT INTO decisions_log
       (request_id, user_id, username, library_id, media_title, media_type, tmdb_id, decision, created_at)
@@ -107,6 +120,9 @@ test('auth Plex: usuario normal solo ve su cupo y gestiona su propio chat', asyn
     if (url === 'http://seerr.test/api/v1/movie/603') {
       return new Response(JSON.stringify({ title: 'Matrix', posterPath: '/matrix.jpg' }), { status: 200 });
     }
+    if (url === 'http://seerr.test/api/v1/tv/700') {
+      return new Response(JSON.stringify({ name: 'Serie de prueba', posterPath: '/serie.jpg', seasons: [] }), { status: 200 });
+    }
     // Historial de cupo mensual (issue #20): solo cuenta lo YA disponible, así
     // que Dune necesita mediaInfo.status >= 4 para no quedar fuera.
     if (url === 'http://seerr.test/api/v1/movie/438631') {
@@ -140,6 +156,19 @@ test('auth Plex: usuario normal solo ve su cupo y gestiona su propio chat', asyn
       requestId: 991,
       requestedAt: '2026-07-13T08:00:00Z',
     });
+    const series = quota.libraries.find((library) => library.libraryId === 1778);
+    assert.deepEqual(series.pendingItems[0], {
+      title: 'Serie de prueba - Temporada 3',
+      mediaType: 'tv',
+      tmdbId: 700,
+      seasonNumber: 3,
+      posterUrl: 'https://image.tmdb.org/t/p/w185/serie.jpg',
+      pendingApproval: true,
+      requestId: null,
+      requestedAt: '2026-07-14T09:00:00Z',
+      sequentialQueue: true,
+      previousSeasonNumber: 2,
+    });
 
     const detail = (await plexAgent
       .get('/api/me/quota/pending-detail/1777?tmdbId=414906&mediaType=movie')
@@ -170,10 +199,11 @@ test('auth Plex: usuario normal solo ve su cupo y gestiona su propio chat', asyn
   } finally {
     global.fetch = originalFetch;
     db.prepare('DELETE FROM telegram_links WHERE user_id = 1880').run();
-    db.prepare('DELETE FROM quota_cache WHERE user_id = 1880 OR library_id = 1777').run();
+    db.prepare('DELETE FROM quota_cache WHERE user_id = 1880 OR library_id IN (1777, 1778)').run();
+    db.prepare('DELETE FROM season_queue WHERE id = 17780').run();
     db.prepare('DELETE FROM decisions_log WHERE request_id IN (990, 992, 993)').run();
     db.prepare('DELETE FROM session_guard_settings WHERE user_id = 1880').run();
-    db.prepare('DELETE FROM libraries WHERE id = 1777').run();
+    db.prepare('DELETE FROM libraries WHERE id IN (1777, 1778)').run();
     db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
   }
 });

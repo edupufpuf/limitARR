@@ -649,11 +649,11 @@ test('runPollCycle: Ted Lasso 2+3+4 con sequential_seasons se divide (pide t2, e
     assert.equal(logged.season_number, null);
 
     const queued = db.prepare(
-      'SELECT season_number FROM season_queue WHERE tmdb_id = 66260 ORDER BY season_number'
+      'SELECT season_number, previous_season_number FROM season_queue WHERE tmdb_id = 66260 ORDER BY season_number'
     ).all();
     assert.deepEqual(
-      queued.map((r) => r.season_number),
-      [3, 4],
+      queued.map((r) => [r.season_number, r.previous_season_number]),
+      [[3, 2], [4, 3]],
       'temporadas 3 y 4 esperan en cola; ninguna se pide todavía porque la 2 sigue pendiente de aprobar/ver'
     );
   } finally {
@@ -665,7 +665,7 @@ test('runPollCycle: Ted Lasso 2+3+4 con sequential_seasons se divide (pide t2, e
   }
 });
 
-test('processSeasonQueue: pide la siguiente temporada en cuanto la anterior deja de estar pendiente', async () => {
+test('processSeasonQueue: pide la siguiente temporada únicamente cuando la anterior consta como vista', async () => {
   upsertSetting('tautulli_url', 'http://tautulli.test');
   upsertSetting('tautulli_api_key', 'test-key');
   upsertSetting('seerr_url', 'http://seerr.test');
@@ -675,8 +675,13 @@ test('processSeasonQueue: pide la siguiente temporada en cuanto la anterior deja
     VALUES (9751, 'Series', 'show', 'standard', 1, 4, 1)
   `).run();
   db.prepare(`
-    INSERT INTO season_queue (id, tmdb_id, season_number, user_id, seerr_user_id, library_id)
-    VALUES (77001, 66261, 3, 6002, 502, 9751)
+    INSERT INTO season_queue (id, tmdb_id, season_number, previous_season_number, user_id, seerr_user_id, library_id)
+    VALUES (77001, 66261, 3, 2, 6002, 502, 9751)
+  `).run();
+  db.prepare(`
+    INSERT INTO decisions_log
+      (request_id, user_id, library_id, media_title, media_type, tmdb_id, season_number, decision)
+    VALUES (77000, 6002, 9751, 'Serie - Temporada 2', 'tv', 66261, 2, 'watched')
   `).run();
 
   const { fetchImpl, createdRequests } = mockSequentialSplit({
@@ -698,7 +703,41 @@ test('processSeasonQueue: pide la siguiente temporada en cuanto la anterior deja
   } finally {
     global.fetch = originalFetch;
     db.prepare('DELETE FROM season_queue WHERE tmdb_id = 66261').run();
+    db.prepare('DELETE FROM decisions_log WHERE request_id = 77000').run();
     db.prepare('DELETE FROM libraries WHERE id = 9751').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
+  }
+});
+
+test('processSeasonQueue: quitar la temporada anterior no desbloquea la siguiente', async () => {
+  upsertSetting('tautulli_url', 'http://tautulli.test');
+  upsertSetting('tautulli_api_key', 'test-key');
+  upsertSetting('seerr_url', 'http://seerr.test');
+  upsertSetting('seerr_api_key', 'test-key');
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit, sequential_seasons)
+    VALUES (9752, 'Series', 'show', 'standard', 1, 4, 1)
+  `).run();
+  db.prepare(`
+    INSERT INTO season_queue (id, tmdb_id, season_number, previous_season_number, user_id, seerr_user_id, library_id)
+    VALUES (77002, 66262, 3, 2, 6003, 503, 9752)
+  `).run();
+
+  const { fetchImpl, createdRequests } = mockSequentialSplit({
+    tautulliUsers: [{ user_id: 6003, username: 'edu3', email: 'edu3@test.com', friendly_name: 'Edu3', is_admin: '0' }],
+    tvPending: [],
+  });
+  const originalFetch = global.fetch;
+  global.fetch = fetchImpl;
+
+  try {
+    await processSeasonQueue();
+    assert.equal(createdRequests.length, 0);
+    assert.ok(db.prepare('SELECT 1 FROM season_queue WHERE id = 77002').get());
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM season_queue WHERE tmdb_id = 66262').run();
+    db.prepare('DELETE FROM libraries WHERE id = 9752').run();
     db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
   }
 });

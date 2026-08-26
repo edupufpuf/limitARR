@@ -868,3 +868,75 @@ test('refreshQuotaCache: una temporada ya confirmada como vista no revive si Mai
     setRawSetting('seerr_api_key', '');
   }
 });
+
+// Caso Samurái de ojos azules (26 ago 2026): Seerr mantenía mediaInfo sin
+// ratingKey ni temporadas aunque Plex ya contenía la temporada completa. La
+// presencia real en Plex debe prevalecer y evitar el falso "No cuenta".
+test('refreshQuotaCache: una temporada presente en Plex cuenta aunque Seerr no la haya enlazado', async () => {
+  updateSettings({
+    tautulli_url: 'http://tautulli.test',
+    tautulli_api_key: 'k',
+    seerr_url: 'http://seerr.test',
+    seerr_api_key: 'k',
+  });
+  db.prepare(`
+    INSERT INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (9501, 'Series Plex', 'show', 'standard', 1, 2)
+  `).run();
+  db.prepare(`
+    INSERT INTO decisions_log (request_id, user_id, library_id, media_title, media_type, tmdb_id, season_number, decision)
+    VALUES (8002, 9601, 9501, 'Serie Desenlazada - Temporada 1', 'tv', 225181, 1, 'approved')
+  `).run();
+
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes('cmd=get_history')) {
+      return new Response(JSON.stringify({ response: { result: 'success', data: [] } }), { status: 200 });
+    }
+    if (url === 'http://seerr.test/api/v1/tv/225181') {
+      return new Response(JSON.stringify({
+        name: 'Serie Desenlazada',
+        seasons: [{ seasonNumber: 1, posterPath: '/season.jpg' }],
+        mediaInfo: { ratingKey: null, seasons: [], downloadStatus: [] },
+      }), { status: 200 });
+    }
+    if (url.includes('cmd=search')) {
+      return new Response(JSON.stringify({ response: { result: 'success', data: {
+        results_list: { season: [{
+          rating_key: '9341',
+          parent_title: 'Serie Desenlazada',
+          media_index: '1',
+          parent_guids: ['tmdb://225181'],
+        }] },
+      } } }), { status: 200 });
+    }
+    if (url.includes('cmd=get_children_metadata') && url.includes('rating_key=9341')) {
+      return new Response(JSON.stringify({ response: { result: 'success', data: {
+        children_list: [
+          { rating_key: '93411', media_index: '1', media_type: 'episode', title: 'Episodio 1' },
+          { rating_key: '93412', media_index: '2', media_type: 'episode', title: 'Episodio 2' },
+        ],
+      } } }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const result = await refreshQuotaCache(9601, 9501);
+    assert.equal(result.outstanding, 1);
+    assert.equal(result.balance, 1);
+    assert.equal(result.pendingItems[0].unavailable, false);
+    assert.equal(result.pendingItems[0].episodesTotal, 2);
+    assert.equal(result.pendingItems[0].ratingKey, 9341);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM decisions_log WHERE library_id = 9501').run();
+    db.prepare('DELETE FROM quota_cache WHERE library_id = 9501').run();
+    db.prepare('DELETE FROM libraries WHERE id = 9501').run();
+    setRawSetting('tautulli_url', '');
+    setRawSetting('tautulli_api_key', '');
+    setRawSetting('seerr_url', '');
+    setRawSetting('seerr_api_key', '');
+  }
+});
