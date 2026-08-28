@@ -311,17 +311,26 @@ async function notifyDeletionCandidate(source, target, item, { fallbackTitle = n
         // Maintainerr) — desde el borrado ligado a visionado (8 ago 2026) esa cifra
         // ya no manda nada, el plazo real es getSalvadoGraceDays (global o el
         // override de la biblioteca, ver getFallbackDeadlineMs) y hay que mostrar esa.
-        .replace(/{diasSalvado}/g, String(getSalvadoGraceDays(source.libraryId != null ? Number(source.libraryId) : null)))
+        .replace(
+          /{diasSalvado}/g,
+          isSeason ? '7 o 14' : String(getSalvadoGraceDays(source.libraryId != null ? Number(source.libraryId) : null))
+        )
     : `🎬 ${tituloTexto} se borrará${diasTexto}.\n\n⚠️ Sin colección de salvados configurada para "${source.title}" — no se puede salvar.`;
   // "Salvar" pide confirmación antes de mover nada (asksave: cambia el
   // teclado a Sí/Cancelar; el save: real solo llega tras confirmar — ver
   // handleAskSaveCallback/handleCancelSaveCallback).
   const replyMarkup = target
-    ? {
-        inline_keyboard: [
-          [{ text: '💾 Salvar', callback_data: `asksave:${item.mediaServerId}:${source.id}:${target.id}` }],
-        ],
-      }
+    ? isSeason
+      ? {
+          inline_keyboard: [[
+            { text: '💾 Salvar', callback_data: `chooseperiod:${item.mediaServerId}:${source.id}:${target.id}` },
+          ]],
+        }
+      : {
+          inline_keyboard: [
+            [{ text: '💾 Salvar', callback_data: `asksave:${item.mediaServerId}:${source.id}:${target.id}` }],
+          ],
+        }
     : undefined;
 
   try {
@@ -490,8 +499,8 @@ const pendingTitles = new Map();
 // abajo), un texto literal en vez del viejo "+N days" — el que se pasa al
 // insertar es el peor caso conocido en ese momento (ver getFallbackDeadlineMs).
 const insertSalvado = db.prepare(`
-  INSERT INTO salvados (media_server_id, tmdb_id, title, poster_url, telegram_user_id, telegram_name, user_id, library_id, saved_at, expires_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
+  INSERT INTO salvados (media_server_id, tmdb_id, title, poster_url, telegram_user_id, telegram_name, user_id, library_id, saved_at, expires_at, grace_days)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?)
 `);
 // Solo filas activas (resolved_at IS NULL): todo lo que llama a esto quiere
 // el estado "sigue salvada" — el histórico completo (incluye resueltas) vive
@@ -550,9 +559,11 @@ function isTvLibrary(libraryId) {
 // ignora y se usa el de la fila ya guardada.
 function getFallbackDeadlineMs(mediaServerId, libraryIdHint) {
   const rows = getSalvadosForItem.all(mediaServerId);
-  const lastSavedMs = rows.length > 0 ? Math.max(...rows.map((r) => sqliteTextToMs(r.saved_at))) : Date.now();
   const libraryId = rows[0]?.library_id ?? libraryIdHint ?? null;
-  return lastSavedMs + getSalvadoGraceDays(libraryId) * 86_400_000;
+  if (rows.length === 0) return Date.now() + getSalvadoGraceDays(libraryId) * 86_400_000;
+  return Math.max(...rows.map((row) =>
+    sqliteTextToMs(row.saved_at) + (row.grace_days ?? getSalvadoGraceDays(libraryId)) * 86_400_000
+  ));
 }
 
 function displayName(from) {
@@ -570,6 +581,12 @@ function resolveTautulliUser(telegramUserId) {
 
 const ADD_SAVE_CALLBACK_PREFIX = 'addsave:';
 function addSaveMarkup(mediaServerId) {
+  const rows = getSalvadosForItem.all(mediaServerId);
+  if (rows.length > 0 && isTvLibrary(rows[0].library_id)) {
+    return { inline_keyboard: [[
+      { text: '➕ Salvar también', callback_data: `chooseaddperiod:${mediaServerId}` },
+    ]] };
+  }
   return { inline_keyboard: [[{ text: '➕ Salvar también', callback_data: `${ADD_SAVE_CALLBACK_PREFIX}${mediaServerId}` }]] };
 }
 
@@ -616,11 +633,14 @@ async function appendSavedNote(mediaServerId, target, from, keepButton) {
 // Primer clic en "💾 Salvar": no mueve nada todavía, solo cambia el teclado
 // a Sí/Cancelar. El save: real (handleSaveCallback) solo llega si confirman.
 async function handleAskSaveCallback(query) {
-  const [, mediaServerId, sourceId, targetId] = query.data.split(':');
+  const [, mediaServerId, sourceId, targetId, graceDays] = query.data.split(':');
+  const saveData = ['7', '14'].includes(graceDays)
+    ? `save:${mediaServerId}:${sourceId}:${targetId}:${graceDays}`
+    : `save:${mediaServerId}:${sourceId}:${targetId}`;
   const confirmMarkup = {
     inline_keyboard: [
       [
-        { text: '✅ Sí, salvar', callback_data: `save:${mediaServerId}:${sourceId}:${targetId}` },
+        { text: '✅ Sí, salvar', callback_data: saveData },
         { text: '✖️ Cancelar', callback_data: `cancelsave:${mediaServerId}:${sourceId}:${targetId}` },
       ],
     ],
@@ -637,14 +657,78 @@ async function handleAskSaveCallback(query) {
   }
 }
 
+// Las series se salvan por temporada y permiten elegir el margen en el
+// propio mensaje de Telegram. La elección es la confirmación de la acción.
+async function handleChoosePeriodCallback(query) {
+  const [, mediaServerId, sourceId, targetId] = query.data.split(':');
+  await botApi('editMessageReplyMarkup', {
+    chat_id: query.message.chat.id,
+    message_id: query.message.message_id,
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '1 semana', callback_data: `save:${mediaServerId}:${sourceId}:${targetId}:7` },
+          { text: '2 semanas', callback_data: `save:${mediaServerId}:${sourceId}:${targetId}:14` },
+        ],
+        [{ text: '✖️ Cancelar', callback_data: `cancelperiod:${mediaServerId}:${sourceId}:${targetId}` }],
+      ],
+    },
+  });
+  await botApi('answerCallbackQuery', { callback_query_id: query.id, text: 'Elige cuánto tiempo' });
+}
+
+async function handleCancelPeriodCallback(query) {
+  const [, mediaServerId, sourceId, targetId] = query.data.split(':');
+  await botApi('editMessageReplyMarkup', {
+    chat_id: query.message.chat.id,
+    message_id: query.message.message_id,
+    reply_markup: { inline_keyboard: [[
+      { text: '💾 Salvar', callback_data: `chooseperiod:${mediaServerId}:${sourceId}:${targetId}` },
+    ]] },
+  });
+  await botApi('answerCallbackQuery', { callback_query_id: query.id, text: 'Cancelado' });
+}
+
+async function handleChooseAddPeriodCallback(query) {
+  const mediaServerId = query.data.slice('chooseaddperiod:'.length);
+  await botApi('editMessageReplyMarkup', {
+    chat_id: query.message.chat.id,
+    message_id: query.message.message_id,
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '1 semana', callback_data: `${ADD_SAVE_CALLBACK_PREFIX}${mediaServerId}:7` },
+          { text: '2 semanas', callback_data: `${ADD_SAVE_CALLBACK_PREFIX}${mediaServerId}:14` },
+        ],
+        [{ text: '✖️ Cancelar', callback_data: `canceladdperiod:${mediaServerId}` }],
+      ],
+    },
+  });
+  await botApi('answerCallbackQuery', { callback_query_id: query.id, text: 'Elige cuánto tiempo' });
+}
+
+async function handleCancelAddPeriodCallback(query) {
+  const mediaServerId = query.data.slice('canceladdperiod:'.length);
+  await botApi('editMessageReplyMarkup', {
+    chat_id: query.message.chat.id,
+    message_id: query.message.message_id,
+    reply_markup: addSaveMarkup(mediaServerId),
+  });
+  await botApi('answerCallbackQuery', { callback_query_id: query.id, text: 'Cancelado' });
+}
+
 // Cancelar: vuelve al botón "💾 Salvar" de partida, sin tocar la colección.
 async function handleCancelSaveCallback(query) {
   const [, mediaServerId, sourceId, targetId] = query.data.split(':');
-  const originalMarkup = {
-    inline_keyboard: [
-      [{ text: '💾 Salvar', callback_data: `asksave:${mediaServerId}:${sourceId}:${targetId}` }],
-    ],
-  };
+  const collections = await listCollections().catch(() => []);
+  const isSeason = collections.find((c) => c.id === Number(sourceId))?.type !== 'movie';
+  const originalMarkup = isSeason
+    ? { inline_keyboard: [[
+        { text: '💾 Salvar', callback_data: `chooseperiod:${mediaServerId}:${sourceId}:${targetId}` },
+      ]] }
+    : { inline_keyboard: [[
+        { text: '💾 Salvar', callback_data: `asksave:${mediaServerId}:${sourceId}:${targetId}` },
+      ]] };
   try {
     await botApi('editMessageReplyMarkup', {
       chat_id: query.message.chat.id,
@@ -662,7 +746,7 @@ async function handleCancelSaveCallback(query) {
 // (handleAddSaveCallback) NO vuelven a tocar Maintainerr — el ítem ya está a
 // salvo aquí, solo se suma su fila.
 async function handleSaveCallback(query) {
-  const [, mediaServerId, sourceId, targetId] = query.data.split(':');
+  const [, mediaServerId, sourceId, targetId, requestedGraceDays] = query.data.split(':');
   try {
     // Consulta la API en vivo ANTES de mover nada: si el proceso reinició
     // entre el aviso y el clic, pendingTitles está vacío (era memoria) pero
@@ -701,6 +785,10 @@ async function handleSaveCallback(query) {
       posterUrl: cached.posterUrl ?? liveMedia?.image_path ?? null,
       libraryId: cached.libraryId ?? (sourceCollection?.libraryId != null ? Number(sourceCollection.libraryId) : null),
     };
+    const graceDays = sourceCollection?.type !== 'movie' && ['7', '14'].includes(requestedGraceDays)
+      ? Number(requestedGraceDays)
+      : null;
+    const initialDeadline = Date.now() + (graceDays ?? getSalvadoGraceDays(meta.libraryId)) * 86_400_000;
     insertSalvado.run(
       String(mediaServerId),
       meta.tmdbId,
@@ -710,7 +798,8 @@ async function handleSaveCallback(query) {
       displayName(query.from),
       resolveTautulliUser(query.from.id),
       meta.libraryId,
-      toSqliteText(getFallbackDeadlineMs(String(mediaServerId), meta.libraryId))
+      toSqliteText(initialDeadline),
+      graceDays
     );
 
     await botApi('answerCallbackQuery', { callback_query_id: query.id, text: 'Salvada' });
@@ -735,7 +824,7 @@ async function handleSaveCallback(query) {
 // sigue dentro de la ventana de salvar (los días que tardaría en borrarse
 // sola, ver maintainerr_candidates).
 async function handleAddSaveCallback(query) {
-  const mediaServerId = query.data.slice(ADD_SAVE_CALLBACK_PREFIX.length);
+  const [mediaServerId, requestedGraceDays] = query.data.slice(ADD_SAVE_CALLBACK_PREFIX.length).split(':');
   try {
     const candidate = getCandidate.get(mediaServerId);
     if (candidate) {
@@ -758,6 +847,10 @@ async function handleAddSaveCallback(query) {
       return;
     }
     const ref = existing[0];
+    const graceDays = isTvLibrary(ref.library_id) && ['7', '14'].includes(requestedGraceDays)
+      ? Number(requestedGraceDays)
+      : null;
+    const initialDeadline = Date.now() + (graceDays ?? getSalvadoGraceDays(ref.library_id)) * 86_400_000;
     insertSalvado.run(
       mediaServerId,
       ref.tmdb_id,
@@ -767,7 +860,8 @@ async function handleAddSaveCallback(query) {
       displayName(query.from),
       resolveTautulliUser(query.from.id),
       ref.library_id,
-      toSqliteText(getFallbackDeadlineMs(mediaServerId))
+      toSqliteText(initialDeadline),
+      graceDays
     );
 
     await botApi('answerCallbackQuery', { callback_query_id: query.id, text: 'Salvada también' });
@@ -1017,7 +1111,15 @@ export function startMaintainerrPoller() {
           setRawSetting(OFFSET_KEY, String(updates[updates.length - 1].update_id));
           for (const u of updates) {
             const data = u.callback_query?.data;
-            if (data?.startsWith('asksave:')) {
+            if (data?.startsWith('chooseperiod:')) {
+              await handleChoosePeriodCallback(u.callback_query);
+            } else if (data?.startsWith('cancelperiod:')) {
+              await handleCancelPeriodCallback(u.callback_query);
+            } else if (data?.startsWith('chooseaddperiod:')) {
+              await handleChooseAddPeriodCallback(u.callback_query);
+            } else if (data?.startsWith('canceladdperiod:')) {
+              await handleCancelAddPeriodCallback(u.callback_query);
+            } else if (data?.startsWith('asksave:')) {
               await handleAskSaveCallback(u.callback_query);
             } else if (data?.startsWith('cancelsave:')) {
               await handleCancelSaveCallback(u.callback_query);

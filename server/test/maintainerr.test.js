@@ -234,6 +234,11 @@ test('webhook: colección de series nombra serie y temporada explícitas contra 
     const payload = JSON.parse(telegram.options.body);
     const text = payload.caption ?? payload.text;
     assert.match(text, /la serie «Breaking Bad» \(temporada 3\) se borrará en 7 días/);
+    assert.equal(
+      payload.reply_markup.inline_keyboard[0][0].callback_data,
+      'chooseperiod:8501:2:5',
+      'las temporadas deben abrir el selector de 1 o 2 semanas'
+    );
   } finally {
     db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key')").run();
   }
@@ -802,6 +807,34 @@ test('processSalvados: con varios salvadores, el plazo cuenta desde el ÚLTIMO e
     assert.ok(new Date(`${row.expires_at.replace(' ', 'T')}Z`).getTime() > Date.now());
   } finally {
     db.prepare("DELETE FROM settings WHERE key = 'maintainerr_salvado_grace_days'").run();
+  }
+});
+
+test('processSalvados: una serie conserva el plazo de 14 días elegido en Telegram', async () => {
+  db.exec("DELETE FROM salvados; DELETE FROM maintainerr_candidates; DELETE FROM salvado_messages; DELETE FROM libraries WHERE id = 76;");
+  upsertSetting.run('maintainerr_salvado_grace_days', '5');
+  db.prepare("INSERT INTO libraries (id, name, section_type, enabled) VALUES (76, 'Series test', 'show', 1)").run();
+  insertCandidateRow.run('ps-tv-14', new Date().toISOString().slice(0, 19).replace('T', ' '), 30, 0);
+  db.prepare(`
+    INSERT INTO salvados (media_server_id, tmdb_id, title, telegram_user_id, telegram_name, user_id, library_id, saved_at, expires_at, watched_at, grace_days)
+    VALUES ('ps-tv-14', NULL, 'Serie - Temporada 1', '111', 'David', NULL, 76, datetime('now', '-8 days'), datetime('now', '+6 days'), NULL, 14)
+  `).run();
+
+  try {
+    const { fetchImpl, calls } = targetCollectionsFetch('ps-tv-14');
+    global.fetch = fetchImpl;
+    await processSalvados();
+    assert.equal(
+      calls.some((c) => c.url.includes('/media/handle')),
+      false,
+      'no debe usar el global de 5 días: la elección de 14 aún está vigente'
+    );
+    const row = db.prepare("SELECT grace_days, expires_at FROM salvados WHERE media_server_id = 'ps-tv-14'").get();
+    assert.equal(row.grace_days, 14);
+    assert.ok(new Date(`${row.expires_at.replace(' ', 'T')}Z`).getTime() > Date.now());
+  } finally {
+    db.prepare("DELETE FROM settings WHERE key = 'maintainerr_salvado_grace_days'").run();
+    db.prepare('DELETE FROM libraries WHERE id = 76').run();
   }
 });
 

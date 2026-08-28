@@ -247,6 +247,9 @@ addColumnIfMissing('ALTER TABLE salvados ADD COLUMN watched_at TEXT');
 // Salvadas necesitan conservarla (antes del 8 ago 2026 la fila nunca se
 // borraba sola; una regresión de esa fecha la borraba de golpe al resolverse).
 addColumnIfMissing('ALTER TABLE salvados ADD COLUMN resolved_at TEXT');
+// Plazo elegido al salvar una serie desde Telegram (7 o 14 días). NULL
+// conserva el comportamiento histórico de películas y filas anteriores.
+addColumnIfMissing('ALTER TABLE salvados ADD COLUMN grace_days INTEGER');
 
 // v2: roles — igual que los grupos, un usuario tiene como mucho un rol
 // (user_roles.user_id es PK), y el rol da valores por defecto de límite,
