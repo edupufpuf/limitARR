@@ -63,8 +63,26 @@ test('auth Plex: usuario normal solo ve su cupo y gestiona su propio chat', asyn
   }]));
   db.prepare(`
     INSERT OR REPLACE INTO quota_cache (user_id, library_id, limit_applied, outstanding, balance, pending_items)
-    VALUES (1880, 1778, 2, 1, 1, '[]')
-  `).run();
+    VALUES (1880, 1778, 2, 1, 1, ?)
+  `).run(JSON.stringify([
+    {
+      title: 'Serie de prueba - Temporada 2',
+      mediaType: 'tv',
+      tmdbId: 700,
+      seasonNumber: 2,
+      posterUrl: 'https://image.tmdb.org/t/p/w185/serie.jpg',
+      unavailable: true,
+    },
+    // Duplicado heredado de una caché creada antes de la corrección.
+    {
+      title: 'Serie de prueba - Temporada 2',
+      mediaType: 'tv',
+      tmdbId: 700,
+      seasonNumber: 2,
+      posterUrl: 'https://image.tmdb.org/t/p/w185/serie.jpg',
+      unavailable: true,
+    },
+  ]));
   db.prepare(`
     INSERT INTO season_queue
       (id, tmdb_id, season_number, previous_season_number, user_id, seerr_user_id, library_id, created_at)
@@ -114,6 +132,20 @@ test('auth Plex: usuario normal solo ve su cupo y gestiona su propio chat', asyn
         pageInfo: { results: 1 },
       }), { status: 200 });
     }
+    if (url.startsWith('http://seerr.test/api/v1/request?filter=pending') && url.includes('mediaType=tv')) {
+      return new Response(JSON.stringify({
+        results: [{
+          id: 994,
+          status: 1,
+          type: 'tv',
+          media: { mediaType: 'tv', tmdbId: 700 },
+          seasons: [{ seasonNumber: 2 }],
+          createdAt: '2026-07-15T08:00:00Z',
+          requestedBy: { id: 44, email: 'ana@example.test', plexUsername: 'ana' },
+        }],
+        pageInfo: { results: 1 },
+      }), { status: 200 });
+    }
     if (url.startsWith('http://seerr.test/api/v1/request?filter=pending')) {
       return new Response(JSON.stringify({ results: [], pageInfo: { results: 0 } }), { status: 200 });
     }
@@ -157,7 +189,11 @@ test('auth Plex: usuario normal solo ve su cupo y gestiona su propio chat', asyn
       requestedAt: '2026-07-13T08:00:00Z',
     });
     const series = quota.libraries.find((library) => library.libraryId === 1778);
-    assert.deepEqual(series.pendingItems[0], {
+    // La T2 ya está en el cupo: la solicitud pendiente idéntica de Seerr no
+    // debe añadir una segunda carátula "Pdte. Aprobar".
+    assert.equal(series.pendingItems.filter((item) => item.tmdbId === 700 && item.seasonNumber === 2).length, 1);
+    assert.equal(series.pendingItems.some((item) => item.requestId === 994), false);
+    assert.deepEqual(series.pendingItems[1], {
       title: 'Serie de prueba - Temporada 3',
       mediaType: 'tv',
       tmdbId: 700,

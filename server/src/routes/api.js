@@ -915,6 +915,43 @@ router.delete('/roles/:id/overrides/:libraryId', ah(async (req, res) => {
 // --- Quota ---
 
 // Agrupado por usuario, con avatar de Seerr, para las tarjetas del panel.
+function mediaUnitKey(item) {
+  const mediaType = item.mediaType || item.media_type || 'movie';
+  const tmdbId = item.tmdbId ?? item.tmdb_id;
+  const seasonNumber = item.seasonNumber ?? item.season_number ?? null;
+  if (tmdbId != null) return `${mediaType}:${tmdbId}:${mediaType === 'tv' ? seasonNumber ?? '' : ''}`;
+  const title = String(item.title ?? item.media_title ?? '').trim().toLocaleLowerCase('es');
+  return title ? `${mediaType}:title:${title}` : null;
+}
+
+// Defensa también al leer quota_cache: una caché generada por una versión
+// anterior puede conservar duplicados hasta el siguiente sondeo. La entrada ya
+// aprobada prevalece sobre una pendiente y una normal sobre un bypass.
+function dedupePendingItems(items) {
+  const unique = [];
+  const indexByUnit = new Map();
+  for (const item of items) {
+    const key = mediaUnitKey(item);
+    if (!key || !indexByUnit.has(key)) {
+      if (key) indexByUnit.set(key, unique.length);
+      unique.push(item);
+      continue;
+    }
+    const index = indexByUnit.get(key);
+    const previous = unique[index];
+    const candidateWins =
+      (previous.pendingApproval && !item.pendingApproval) ||
+      (Boolean(previous.bypassed) && !item.bypassed && Boolean(previous.pendingApproval) === Boolean(item.pendingApproval));
+    if (candidateWins) unique[index] = item;
+  }
+  return unique;
+}
+
+function cardUnitKey(cacheUserId, libraryId, item) {
+  const unit = mediaUnitKey(item);
+  return cacheUserId != null && libraryId != null && unit ? `${cacheUserId}:${libraryId}:${unit}` : null;
+}
+
 async function buildQuotaByUser() {
   const rows = db.prepare(`
     SELECT qc.*
@@ -1030,7 +1067,7 @@ async function buildQuotaByUser() {
     }
     let pendingItems = [];
     try {
-      pendingItems = JSON.parse(row.pending_items || '[]');
+      pendingItems = dedupePendingItems(JSON.parse(row.pending_items || '[]'));
     } catch { /* caché de una versión anterior sin pending_items válido */ }
     byUser.get(row.user_id).libraries.push({
       libraryId: row.library_id,
@@ -1245,7 +1282,7 @@ const getLibraryForRequestStmt = db.prepare(`
   SELECT * FROM libraries WHERE section_type = ? AND kind = ? AND enabled = 1 LIMIT 1
 `);
 const getCachedBalance = db.prepare(
-  'SELECT balance, limit_applied FROM quota_cache WHERE user_id = ? AND library_id = ?'
+  'SELECT balance, limit_applied, pending_items FROM quota_cache WHERE user_id = ? AND library_id = ?'
 );
 const insertManualDecision = db.prepare(`
   INSERT INTO decisions_log
@@ -1297,6 +1334,7 @@ function formatRequestTitle(mediaType, title, seasonNumber = null) {
 async function buildPendingApprovalItems() {
   const [pending, tautulliUsers] = await Promise.all([listPendingRequests(), getUsers()]);
   const items = [];
+  const representedUnits = new Set();
   for (const request of pending) {
     const sectionType = request.mediaType === 'tv' ? 'show' : 'movie';
     const library = getLibraryForRequestStmt.get(sectionType, request.is4k ? '4k' : 'standard');
@@ -1309,6 +1347,27 @@ async function buildPendingApprovalItems() {
     const cached = library && cacheUserId != null
       ? getCachedBalance.get(cacheUserId, library.id)
       : null;
+    const unitKey = cardUnitKey(cacheUserId, library?.id, {
+      mediaType: request.mediaType,
+      tmdbId: request.tmdbId,
+      seasonNumber,
+    });
+    let cachedItems = [];
+    try { cachedItems = JSON.parse(cached?.pending_items || '[]'); } catch { /* caché antigua inválida */ }
+    // Si esa película/temporada ya está representada como aprobada (aunque aún
+    // no se haya descargado), no se añade además otra tarjeta "Pdte. Aprobar".
+    if (unitKey && cachedItems.some((item) => mediaUnitKey(item) === mediaUnitKey({
+      mediaType: request.mediaType,
+      tmdbId: request.tmdbId,
+      seasonNumber,
+    }))) {
+      representedUnits.add(unitKey);
+      continue;
+    }
+    // Dos solicitudes pendientes de Seerr para la misma unidad tampoco deben
+    // producir dos carátulas.
+    if (unitKey && representedUnits.has(unitKey)) continue;
+    if (unitKey) representedUnits.add(unitKey);
     items.push({
       requestId: request.id,
       mediaType: request.mediaType,
@@ -1334,6 +1393,19 @@ async function buildPendingApprovalItems() {
     const cacheUserId = quotaIdentity(queued.user_id).cacheId;
     const cached = getCachedBalance.get(cacheUserId, queued.library_id);
     const details = await getMediaDetails('tv', queued.tmdb_id, queued.season_number);
+    const unitKey = cardUnitKey(cacheUserId, queued.library_id, {
+      mediaType: 'tv',
+      tmdbId: queued.tmdb_id,
+      seasonNumber: queued.season_number,
+    });
+    let cachedItems = [];
+    try { cachedItems = JSON.parse(cached?.pending_items || '[]'); } catch { /* caché antigua inválida */ }
+    if (unitKey && (representedUnits.has(unitKey) || cachedItems.some((item) => mediaUnitKey(item) === mediaUnitKey({
+      mediaType: 'tv',
+      tmdbId: queued.tmdb_id,
+      seasonNumber: queued.season_number,
+    })))) continue;
+    if (unitKey) representedUnits.add(unitKey);
     items.push({
       requestId: null,
       queueId: queued.id,

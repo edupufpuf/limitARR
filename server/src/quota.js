@@ -654,15 +654,47 @@ const hasWatchedOrExpiredForRow = db.prepare(`
   LIMIT 1
 `);
 
+// Una misma temporada puede terminar varias veces en decisions_log (p. ej. una
+// aprobación normal y otra importada del historial de Seerr). La unidad real
+// de cupo es serie+temporada, no la fila del registro: solo debe verse y contar
+// una vez. Si alguna copia pasó por limitARR, prevalece sobre la informativa
+// approved_outside_limitarr para no regalar el cupo por orden de inserción.
+function dedupeTvApprovalRows(rows) {
+  const unique = [];
+  const indexByUnit = new Map();
+  for (const row of rows) {
+    const key = row.tmdb_id != null && row.season_number != null
+      ? `${row.tmdb_id}:${row.season_number}`
+      : null;
+    if (!key || !indexByUnit.has(key)) {
+      if (key) indexByUnit.set(key, unique.length);
+      unique.push(row);
+      continue;
+    }
+    const index = indexByUnit.get(key);
+    const previous = unique[index];
+    if (previous.decision === 'approved_outside_limitarr' && row.decision === 'approved') {
+      unique[index] = {
+        ...row,
+        // Conserva la antigüedad real de la primera copia para la caducidad.
+        created_at: previous.created_at && previous.created_at < row.created_at ? previous.created_at : row.created_at,
+        poster_url: row.poster_url ?? previous.poster_url,
+      };
+    }
+  }
+  return unique;
+}
+
 async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatchedPercent = DEFAULT_SEASON_WATCHED_PERCENT, expiryDays = null) {
-  await hydrateMissingPosters(approvedRows);
+  const uniqueApprovedRows = dedupeTvApprovalRows(approvedRows);
+  await hydrateMissingPosters(uniqueApprovedRows);
   const watchedIndex = buildWatchedEpisodeIndex(watchedEpisodes);
 
   const pending = [];
   const showDetailsCache = new Map();
   const seasonEpisodesCache = new Map();
 
-  for (const row of approvedRows) {
+  for (const row of uniqueApprovedRows) {
     if (!row.tmdb_id || !row.season_number) {
       // Fila legada sin tmdb/temporada: sin datos de disponibilidad, caduca
       // por fecha de aprobación como antes del issue #14.

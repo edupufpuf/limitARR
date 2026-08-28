@@ -872,7 +872,7 @@ test('refreshQuotaCache: una temporada ya confirmada como vista no revive si Mai
 // Caso Samurái de ojos azules (26 ago 2026): Seerr mantenía mediaInfo sin
 // ratingKey ni temporadas aunque Plex ya contenía la temporada completa. La
 // presencia real en Plex debe prevalecer y evitar el falso "No cuenta".
-test('refreshQuotaCache: una temporada presente en Plex cuenta aunque Seerr no la haya enlazado', async () => {
+test('refreshQuotaCache: una temporada presente en Plex cuenta una sola vez aunque Seerr no la haya enlazado y el registro esté duplicado', async () => {
   updateSettings({
     tautulli_url: 'http://tautulli.test',
     tautulli_api_key: 'k',
@@ -886,6 +886,11 @@ test('refreshQuotaCache: una temporada presente en Plex cuenta aunque Seerr no l
   db.prepare(`
     INSERT INTO decisions_log (request_id, user_id, library_id, media_title, media_type, tmdb_id, season_number, decision)
     VALUES (8002, 9601, 9501, 'Serie Desenlazada - Temporada 1', 'tv', 225181, 1, 'approved')
+  `).run();
+  // La misma unidad quedó registrada otra vez al importar/sincronizar Seerr.
+  db.prepare(`
+    INSERT INTO decisions_log (request_id, user_id, library_id, media_title, media_type, tmdb_id, season_number, decision)
+    VALUES (8003, 9601, 9501, 'Serie Desenlazada - Temporada 1', 'tv', 225181, 1, 'approved')
   `).run();
 
   const originalFetch = global.fetch;
@@ -926,6 +931,7 @@ test('refreshQuotaCache: una temporada presente en Plex cuenta aunque Seerr no l
     const result = await refreshQuotaCache(9601, 9501);
     assert.equal(result.outstanding, 1);
     assert.equal(result.balance, 1);
+    assert.equal(result.pendingItems.length, 1);
     assert.equal(result.pendingItems[0].unavailable, false);
     assert.equal(result.pendingItems[0].episodesTotal, 2);
     assert.equal(result.pendingItems[0].ratingKey, 9341);
