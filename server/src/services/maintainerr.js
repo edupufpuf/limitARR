@@ -1,6 +1,6 @@
 import { db } from '../db.js';
 import { getRawSetting, setRawSetting, mask } from '../settings.js';
-import { getSeasonInfo, getMediaTitle, getItemWatchHistory } from './tautulli.js';
+import { getSeasonInfo, getSeasonEpisodes, getMediaTitle, getItemWatchHistory } from './tautulli.js';
 import { mediaExistsInPlex } from './plex.js';
 
 // Módulo Maintainerr: cuando Maintainerr mete una película en una colección de
@@ -962,26 +962,74 @@ export function getSalvadosHistory(days = 30) {
 // sondeo que pollMaintainerrCollections.
 
 const WATCH_THRESHOLD_PERCENT = 85; // mismo criterio que el resto del proyecto (ver DEFAULT_SEASON_WATCHED_PERCENT en quota.js)
+const DEFAULT_SEASON_WATCHED_PERCENT = 85;
 const POST_WATCH_GRACE_MS = 24 * 60 * 60 * 1000;
 
 // Marca watched_at en las filas de un ítem cuyo salvador (vinculado a un
-// usuario de Tautulli) lo haya visto DESPUÉS de salvarlo. Solo películas en
-// v1: para series salvadas por temporada haría falta saber el total de
-// episodios de la temporada para confirmarla "vista entera" (no solo un
-// episodio suelto) — sin implementar todavía, esas filas se quedan sin
-// watched_at para siempre y resuelven solo por el fallback de 7 días.
+// usuario de Tautulli) lo haya visto DESPUÉS de salvarlo. En películas basta
+// una reproducción al 85 %. En series se cuentan episodios distintos y se usa
+// el mismo porcentaje de temporada configurable que libera cupo (85 % por
+// defecto); watched_at es el instante en que se alcanzó ese porcentaje.
 async function markWatchedRows(mediaServerId, rows) {
   const unresolved = rows.filter((r) => r.user_id != null && r.watched_at == null);
   if (unresolved.length === 0) return;
-  if (isTvLibrary(rows[0].library_id)) return;
+
+  const isTv = isTvLibrary(rows[0].library_id);
 
   let history;
   try {
-    history = await getItemWatchHistory(mediaServerId, false);
+    history = await getItemWatchHistory(mediaServerId, isTv);
   } catch (err) {
     console.error('[maintainerr] error consultando historial de visionado:', err.message);
     return;
   }
+
+  if (isTv) {
+    const info = await getSeasonInfo(mediaServerId);
+    if (!info) return;
+
+    let episodes;
+    try {
+      episodes = await getSeasonEpisodes(mediaServerId, info.seasonNumber);
+    } catch (err) {
+      console.error('[maintainerr] error consultando episodios de la temporada:', err.message);
+      return;
+    }
+    const episodeNumbers = new Set(
+      episodes.map((episode) => Number(episode.episodeNumber)).filter(Number.isFinite)
+    );
+    if (episodeNumbers.size === 0) return;
+
+    const configured = Number(getRawSetting('tv_season_watched_percent'));
+    const seasonWatchedPercent = Number.isFinite(configured) && configured >= 1 && configured <= 100
+      ? configured
+      : DEFAULT_SEASON_WATCHED_PERCENT;
+    const requiredEpisodes = Math.ceil(episodeNumbers.size * seasonWatchedPercent / 100);
+
+    for (const row of unresolved) {
+      const savedAtMs = sqliteTextToMs(row.saved_at);
+      const firstWatchByEpisode = new Map();
+      for (const play of history) {
+        if (
+          play.userId !== row.user_id ||
+          play.percent < WATCH_THRESHOLD_PERCENT ||
+          play.watchedAt == null ||
+          play.watchedAt < savedAtMs ||
+          !episodeNumbers.has(play.episodeNumber)
+        ) continue;
+        const previous = firstWatchByEpisode.get(play.episodeNumber);
+        if (previous == null || play.watchedAt < previous) firstWatchByEpisode.set(play.episodeNumber, play.watchedAt);
+      }
+      const completionDates = [...firstWatchByEpisode.values()].sort((a, b) => a - b);
+      if (completionDates.length >= requiredEpisodes) {
+        const watchedAt = completionDates[requiredEpisodes - 1];
+        updateSalvadoWatchedAt.run(toSqliteText(watchedAt), row.id);
+        row.watched_at = toSqliteText(watchedAt);
+      }
+    }
+    return;
+  }
+
   for (const row of unresolved) {
     const savedAtMs = sqliteTextToMs(row.saved_at);
     const qualifying = history

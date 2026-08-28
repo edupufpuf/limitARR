@@ -713,6 +713,62 @@ test('processSalvados: detecta el visionado vía Tautulli (después del salvado)
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM salvados WHERE media_server_id = 'ps-3' AND resolved_at IS NULL").get().n, 0);
 });
 
+test('processSalvados: una temporada se borra 24h después de que todos los salvadores alcancen el umbral', async () => {
+  db.exec("DELETE FROM salvados; DELETE FROM maintainerr_candidates; DELETE FROM salvado_messages; DELETE FROM libraries WHERE id = 75;");
+  upsertSetting.run('tautulli_url', 'http://tautulli.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
+  upsertSetting.run('tv_season_watched_percent', '75');
+  db.prepare("INSERT INTO libraries (id, name, section_type, enabled) VALUES (75, 'Series test', 'show', 1)").run();
+  db.prepare(`
+    INSERT INTO salvados (media_server_id, tmdb_id, title, telegram_user_id, telegram_name, user_id, library_id, saved_at, expires_at, watched_at, grace_days)
+    VALUES
+      ('ps-tv-watch', NULL, 'Breaking Bad - Temporada 3', '111', 'David', 501, 75, datetime('now', '-4 days'), datetime('now', '+10 days'), NULL, 14),
+      ('ps-tv-watch', NULL, 'Breaking Bad - Temporada 3', '222', 'Ana', 502, 75, datetime('now', '-4 days'), datetime('now', '+10 days'), NULL, 14)
+  `).run();
+
+  let anaComplete = false;
+  const watchedAtSec = Math.floor((Date.now() - 3 * 86_400_000) / 1000);
+  const historyRows = () => [
+    ...[1, 2, 3].map((episode) => ({ user_id: 501, date: watchedAtSec, percent_complete: 95, parent_media_index: 3, media_index: episode })),
+    ...[1, 2, ...(anaComplete ? [3] : [])].map((episode) => ({ user_id: 502, date: watchedAtSec, percent_complete: 95, parent_media_index: 3, media_index: episode })),
+  ];
+  const { fetchImpl, calls } = targetCollectionsFetch('ps-tv-watch', {
+    tautulli: async (u) => {
+      const url = new URL(u);
+      const cmd = url.searchParams.get('cmd');
+      if (cmd === 'get_history') {
+        return new Response(JSON.stringify({ response: { result: 'success', data: { data: historyRows() } } }), { status: 200 });
+      }
+      if (cmd === 'get_metadata') {
+        return new Response(JSON.stringify({ response: { result: 'success', data: { media_type: 'season', parent_title: 'Breaking Bad', media_index: 3 } } }), { status: 200 });
+      }
+      if (cmd === 'get_children_metadata') {
+        return new Response(JSON.stringify({ response: { result: 'success', data: { children_list: [1, 2, 3, 4].map((episode) => ({ media_type: 'episode', rating_key: `ep-${episode}`, media_index: episode, title: `Episodio ${episode}` })) } } }), { status: 200 });
+      }
+      throw new Error(`unexpected tautulli cmd ${cmd}`);
+    },
+  });
+  global.fetch = fetchImpl;
+
+  try {
+    await processSalvados();
+    let rows = db.prepare("SELECT user_id, watched_at FROM salvados WHERE media_server_id = 'ps-tv-watch' ORDER BY user_id").all();
+    assert.ok(rows[0].watched_at, 'David alcanzó 3 de 4 episodios y debe constar visto');
+    assert.equal(rows[1].watched_at, null, 'Ana solo lleva 2 de 4: todavía no debe borrarse');
+    assert.equal(calls.some((c) => c.url.includes('/media/handle')), false);
+
+    anaComplete = true;
+    await processSalvados();
+    rows = db.prepare("SELECT user_id, watched_at, resolved_at FROM salvados WHERE media_server_id = 'ps-tv-watch' ORDER BY user_id").all();
+    assert.ok(rows.every((row) => row.watched_at), 'todos los salvadores deben constar vistos');
+    assert.ok(rows.every((row) => row.resolved_at), 'al haber pasado más de 24h desde el último visionado debe resolverse');
+    assert.ok(calls.some((c) => c.url.includes('/media/handle')), 'debe ordenar el borrado a Maintainerr');
+  } finally {
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'tv_season_watched_percent')").run();
+    db.prepare('DELETE FROM libraries WHERE id = 75').run();
+  }
+});
+
 test('processSalvados: cierra la ventana de salvar una sola vez, sin borrar todavía', async () => {
   db.exec("DELETE FROM salvados; DELETE FROM maintainerr_candidates; DELETE FROM salvado_messages;");
   // Ventana (7 días) cerrada hace 3 días: notified_at hace 10 días. El plazo
