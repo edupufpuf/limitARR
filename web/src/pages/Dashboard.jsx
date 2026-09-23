@@ -93,71 +93,71 @@ function DashboardInner({ onLoggedOut }) {
 
       {/* Sidebar — fija en desktop, cajón deslizante escondido en móvil */}
       <nav
-        className={`fixed sm:sticky inset-y-0 left-0 sm:top-0 z-30 sm:z-auto w-[280px] sm:w-[300px] h-screen overflow-y-auto bg-gradient-to-b from-bg-900 via-bg-900 to-bg-950 border-r border-bg-700/55 px-7 py-8 flex flex-col flex-shrink-0 shadow-[18px_0_48px_-32px_rgba(0,0,0,.85)] transition-transform duration-300 sm:transition-none ${
+        className={`fixed sm:sticky inset-y-0 left-0 sm:top-0 z-30 sm:z-auto w-[240px] sm:w-[220px] h-screen overflow-y-auto bg-gradient-to-b from-bg-900 via-bg-900 to-bg-950 border-r border-bg-700/55 px-4 py-6 flex flex-col flex-shrink-0 shadow-[18px_0_48px_-32px_rgba(0,0,0,.85)] transition-transform duration-300 sm:transition-none ${
           menuOpen ? 'translate-x-0' : '-translate-x-full sm:translate-x-0'
         }`}
       >
-        <div className="mb-16 flex items-center justify-between">
-          <Wordmark className="text-[42px]" />
+        <div className="mb-8 flex items-center justify-between">
+          <Wordmark className="text-[30px]" />
           <button onClick={() => setMenuOpen(false)} className="sm:hidden text-gray-400 p-1 -mr-1">
-            <IconXCircle className="w-7 h-7" />
+            <IconXCircle className="w-6 h-6" />
           </button>
         </div>
         <button
           onClick={togglePause}
           disabled={pauseBusy}
           title="Mientras está activo, ninguna solicitud nueva se aprueba: se queda en espera hasta que lo reactives."
-          className={`flex items-center gap-3 w-full mb-6 px-4 py-3 rounded-xl text-sm font-bold transition-colors border ${
+          className={`flex items-center gap-2 w-full mb-5 px-3 py-2 rounded-lg text-xs font-bold text-left transition-colors border ${
             paused
               ? 'bg-accent-600/20 border-accent-500 text-accent-300 animate-pulse'
               : 'bg-bg-800/60 border-bg-600 text-gray-300 hover:text-white hover:bg-bg-800'
           }`}
         >
-          <IconBan className="w-5 h-5 flex-shrink-0" />
+          <IconBan className="w-4 h-4 flex-shrink-0" />
           {paused ? 'Pausa global ACTIVA — tocar para reanudar' : 'Pausar todas las solicitudes'}
         </button>
 
-        <div className="space-y-4">
+        <div className="space-y-1">
           {Object.entries(TABS).map(([key, { label, Icon }]) => (
             <button
               key={key}
               onClick={() => goTab(key)}
-              className={`relative flex items-center gap-5 w-full text-left px-5 py-4 rounded-xl text-[24px] leading-none font-extrabold tracking-tight transition-all ${
+              className={`relative flex items-center gap-3 w-full text-left px-3 py-2.5 rounded-lg text-base leading-none font-bold tracking-tight transition-all ${
                 tab === key
                   ? 'bg-gradient-to-r from-accent-700 via-accent-600 to-accent-500 text-white shadow-glow'
                   : 'text-gray-100/90 hover:text-white hover:bg-bg-800/70'
               }`}
             >
-              <Icon className="w-8 h-8 flex-shrink-0" />
+              <Icon className="w-5 h-5 flex-shrink-0" />
               {label}
             </button>
           ))}
         </div>
         <button
           onClick={logout}
-          className="flex items-center gap-5 mt-auto text-left px-5 py-3 rounded-xl text-lg font-extrabold text-gray-400 hover:text-gray-100 hover:bg-bg-800 transition-colors"
+          className="flex items-center gap-3 mt-auto text-left px-3 py-2 rounded-lg text-sm font-bold text-gray-400 hover:text-gray-100 hover:bg-bg-800 transition-colors"
         >
-          <IconLogout className="w-7 h-7 flex-shrink-0" />
+          <IconLogout className="w-5 h-5 flex-shrink-0" />
           Cerrar sesión
         </button>
         {version && (
-          <div className="mt-5 rounded-xl border border-bg-600/90 bg-bg-950/45 px-5 py-5 text-base text-gray-300 shadow-card">
-            <div className="flex items-center gap-4">
+          <div className="mt-3 rounded-lg border border-bg-600/90 bg-bg-950/45 px-3 py-3 text-sm text-gray-300 shadow-card">
+            <div className="flex items-center gap-3">
               <span
-                className={`inline-flex w-11 h-11 rounded-lg border items-center justify-center ${
+                className={`inline-flex w-8 h-8 rounded-md border items-center justify-center ${
                   version.updateAvailable ? 'border-yellow-400/70 bg-yellow-400/10 text-yellow-300' : 'border-gray-500/70'
                 }`}
               >
-                <IconGear className="w-6 h-6" />
+                <IconGear className="w-4 h-4" />
               </span>
               <div>
                 <div className="font-extrabold text-gray-200">Limitarr</div>
-                <div className="tabular-nums tracking-[0.22em] text-gray-300 text-lg">
+                <div className="tabular-nums tracking-[0.15em] text-gray-300 text-sm">
                   {version.version}
                 </div>
               </div>
             </div>
-            <div className="mt-3 text-xs text-gray-500 tabular-nums">
+            <div className="mt-2 text-[11px] text-gray-500 tabular-nums">
               {version.sha ?? 'dev'}
             </div>
             {version.updateAvailable && (
