@@ -31,6 +31,7 @@ import {
 import { matchByEmailOrUsername } from '../userMatch.js';
 import { runPollCycle } from '../scheduler.js';
 import { isSessionGuardEnabled, setSessionGuardEnabled } from '../sessionGuard.js';
+import { isGlobalPauseEnabled, setGlobalPauseEnabled } from '../pause.js';
 import { getVersionInfo } from '../services/version.js';
 import { createPlexPin, claimPlexPin, getPlexAccount, testPlexServer } from '../services/plex.js';
 import { testRadarrServer, getRadarrMovieUrl } from '../services/radarr.js';
@@ -628,6 +629,22 @@ router.get('/users/:userId/session-guard', (req, res) => {
 router.put('/users/:userId/session-guard', (req, res) => {
   setSessionGuardEnabled(Number(req.params.userId), Boolean(req.body?.enabled));
   res.json({ enabled: isSessionGuardEnabled(Number(req.params.userId)) });
+});
+
+// --- Pausa global ---
+// Botón único: mientras está activa, ninguna solicitud nueva se aprueba (se
+// queda pendiente en Seerr, ver scheduler.js). Al desactivarla se relanza el
+// ciclo de sondeo al momento para que la cola en espera se procese ya, sin
+// esperar al siguiente intervalo.
+
+router.get('/pause', (req, res) => {
+  res.json({ enabled: isGlobalPauseEnabled() });
+});
+
+router.put('/pause', (req, res) => {
+  setGlobalPauseEnabled(Boolean(req.body?.enabled));
+  runPollCycle().catch((err) => console.error('[pause] poll cycle failed:', err));
+  res.json({ enabled: isGlobalPauseEnabled() });
 });
 
 // --- Overrides ---

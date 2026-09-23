@@ -10,6 +10,7 @@ import { sendMessage, getNotifyTarget, pendingButton, isNotificationEnabled, ren
 import { matchByEmailOrUsername } from './userMatch.js';
 import { isSessionGuardEnabled } from './sessionGuard.js';
 import { getBroadcastSettings, hasSeenBroadcast, markBroadcastSeen } from './services/broadcast.js';
+import { isGlobalPauseEnabled } from './pause.js';
 
 const insertLog = db.prepare(`
   INSERT INTO decisions_log
@@ -784,6 +785,20 @@ export async function runPollCycle() {
     }
     if (!tautulliUser) {
       logIfChanged(base, 'unmatched_user');
+      continue;
+    }
+
+    // Pausa global (botón en Ajustes): bloquea CUALQUIER aprobación mientras
+    // esté activa, sin tocar la solicitud en Seerr — se queda pendiente ahí.
+    // Se comprueba antes que el aplazamiento individual porque manda sobre
+    // cualquier otra regla. Al desactivarla no hace falta nada más: la propia
+    // ruta PUT /pause relanza runPollCycle y esta rama deja de aplicar.
+    if (isGlobalPauseEnabled()) {
+      const details = await getMediaDetails(request.mediaType, request.tmdbId, requestedSeasons[0]);
+      base.mediaTitle = formatMediaTitle(request.mediaType, details.title, requestedSeasons[0]);
+      base.posterUrl = details.posterUrl;
+      base.seasonNumber = null; // pausa la solicitud entera, no una temporada suelta
+      logIfChanged(base, 'paused');
       continue;
     }
 

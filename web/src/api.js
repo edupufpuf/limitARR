@@ -30,6 +30,8 @@ export const api = {
   sessionGuard: (userId) => request(`/users/${userId}/session-guard`),
   updateSessionGuard: (userId, enabled) =>
     request(`/users/${userId}/session-guard`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
+  pause: () => request('/pause'),
+  setPause: (enabled) => request('/pause', { method: 'PUT', body: JSON.stringify({ enabled }) }),
   myQuota: () => request('/me/quota'),
   myPendingDetail: (libraryId, params) => {
     const query = new URLSearchParams(

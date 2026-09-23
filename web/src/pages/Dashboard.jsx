@@ -9,7 +9,7 @@ import Settings from './Settings.jsx';
 import Notifications from './Notifications.jsx';
 import WhatsNewModal from '../components/WhatsNewModal.jsx';
 import { Wordmark } from '../components/Brand.jsx';
-import { IconGauge, IconSave, IconFilm, IconUsers, IconClock, IconBell, IconGear, IconLogout, IconMenu, IconXCircle } from '../icons.jsx';
+import { IconGauge, IconSave, IconFilm, IconUsers, IconClock, IconBell, IconGear, IconLogout, IconMenu, IconXCircle, IconBan } from '../icons.jsx';
 import { DirtyGuardProvider, useAnyDirty } from '../DirtyGuard.jsx';
 
 const UNSAVED_WARNING = 'Hay cambios sin guardar en esta pestaña. ¿Salir igualmente?';
@@ -44,12 +44,27 @@ function DashboardInner({ onLoggedOut }) {
   const [tab, setTab] = useState(tabFromHash);
   const [version, setVersion] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [pauseBusy, setPauseBusy] = useState(false);
   const { Component, label } = TABS[tab];
   const anyDirty = useAnyDirty();
 
   useEffect(() => {
     api.version().then(setVersion).catch(() => {});
+    api.pause().then((r) => setPaused(r.enabled)).catch(() => {});
   }, []);
+
+  async function togglePause() {
+    const next = !paused;
+    if (next && !window.confirm('¿Pausar TODAS las solicitudes nuevas? Nadie podrá descargar nada hasta que lo reactives — lo que ya esté pendiente se queda en espera.')) return;
+    setPauseBusy(true);
+    try {
+      const r = await api.setPause(next);
+      setPaused(r.enabled);
+    } finally {
+      setPauseBusy(false);
+    }
+  }
 
   function goTab(key) {
     if (key !== tab && anyDirty() && !window.confirm(UNSAVED_WARNING)) return;
@@ -88,6 +103,20 @@ function DashboardInner({ onLoggedOut }) {
             <IconXCircle className="w-7 h-7" />
           </button>
         </div>
+        <button
+          onClick={togglePause}
+          disabled={pauseBusy}
+          title="Mientras está activo, ninguna solicitud nueva se aprueba: se queda en espera hasta que lo reactives."
+          className={`flex items-center gap-3 w-full mb-6 px-4 py-3 rounded-xl text-sm font-bold transition-colors border ${
+            paused
+              ? 'bg-accent-600/20 border-accent-500 text-accent-300 animate-pulse'
+              : 'bg-bg-800/60 border-bg-600 text-gray-300 hover:text-white hover:bg-bg-800'
+          }`}
+        >
+          <IconBan className="w-5 h-5 flex-shrink-0" />
+          {paused ? 'Pausa global ACTIVA — tocar para reanudar' : 'Pausar todas las solicitudes'}
+        </button>
+
         <div className="space-y-4">
           {Object.entries(TABS).map(([key, { label, Icon }]) => (
             <button
@@ -159,6 +188,12 @@ function DashboardInner({ onLoggedOut }) {
       </header>
 
       <main className="flex-1 p-4 sm:p-8 lg:p-10 pb-8 overflow-x-hidden">
+        {paused && (
+          <div className="mb-6 flex items-center gap-3 rounded-xl border border-accent-500 bg-accent-600/15 px-4 py-3 text-sm font-bold text-accent-300">
+            <IconBan className="w-5 h-5 flex-shrink-0" />
+            Pausa global activa: no se aprueba ninguna solicitud nueva.
+          </div>
+        )}
         <Component />
       </main>
 
