@@ -216,6 +216,33 @@ test('enforceSingleSession: no corta si Tautulli no permite identificar el dispo
   }
 });
 
+test('enforceSingleSession: una sesión pausada en otro dispositivo no cuenta como reproducción simultánea', async () => {
+  upsertSetting('tautulli_url', 'http://tautulli.test');
+  upsertSetting('tautulli_api_key', 'test-key');
+
+  const calls = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes('cmd=terminate_session')) calls.push(new URL(url).searchParams.get('session_key'));
+    return mockActivity({
+      tautulliUsers: [{ user_id: 905, username: 'paused-user', is_admin: '0' }],
+      sessions: [
+        { session_key: 'paused', user_id: 905, username: 'paused-user', started: '1000', machine_id: 'tv', state: 'paused' },
+        { session_key: 'playing', user_id: 905, username: 'paused-user', started: '2000', machine_id: 'phone', state: 'playing' },
+      ],
+    })(input);
+  };
+
+  try {
+    await enforceSingleSession();
+    assert.deepEqual(calls, []);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key')").run();
+  }
+});
+
 test('enforceSingleSession: a un admin nunca se le corta nada', async () => {
   upsertSetting('tautulli_url', 'http://tautulli.test');
   upsertSetting('tautulli_api_key', 'test-key');

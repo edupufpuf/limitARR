@@ -544,7 +544,13 @@ export async function enforceSingleSession() {
     if (!isSessionGuardEnabled(userId)) continue;
 
     const byDevice = new Map();
-    for (const session of userSessions) {
+    // Una sesion pausada sigue apareciendo en get_activity, pero no supone dos
+    // dispositivos reproduciendo a la vez. `state` puede faltar en versiones
+    // antiguas de Tautulli; en ese caso se conserva el comportamiento seguro.
+    const viewingSessions = userSessions.filter(
+      (session) => !session.state || session.state === 'playing' || session.state === 'buffering'
+    );
+    for (const session of viewingSessions) {
       const deviceKey = sessionDeviceKey(session);
       if (!deviceKey) continue;
       if (!byDevice.has(deviceKey)) byDevice.set(deviceKey, []);

@@ -194,6 +194,7 @@ export async function getActiveSessions() {
     username: s.username,
     title: s.full_title || s.title,
     startedAt: Number(s.started) ? Number(s.started) * 1000 : null,
+    state: s.state || null,
     // `session_key` identifica una reproduccion, no el aparato. Tautulli puede
     // mantener dos registros solapados del mismo reproductor y eso no debe
     // parecer un segundo dispositivo.
