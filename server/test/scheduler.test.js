@@ -147,8 +147,8 @@ test('enforceSingleSession: corta la sesión más nueva, deja la más vieja', as
     return mockActivity({
       tautulliUsers: [{ user_id: 900, username: 'jesus', is_admin: '0' }],
       sessions: [
-        { session_key: 'old', user_id: 900, username: 'jesus', full_title: 'A', started: '1000' },
-        { session_key: 'new', user_id: 900, username: 'jesus', full_title: 'B', started: '2000' },
+        { session_key: 'old', user_id: 900, username: 'jesus', full_title: 'A', started: '1000', machine_id: 'tv-salon' },
+        { session_key: 'new', user_id: 900, username: 'jesus', full_title: 'B', started: '2000', machine_id: 'movil' },
       ],
     })(input);
   };
@@ -156,6 +156,60 @@ test('enforceSingleSession: corta la sesión más nueva, deja la más vieja', as
   try {
     await enforceSingleSession();
     assert.deepEqual(calls, ['new']);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key')").run();
+  }
+});
+
+test('enforceSingleSession: no corta dos registros del mismo dispositivo', async () => {
+  upsertSetting('tautulli_url', 'http://tautulli.test');
+  upsertSetting('tautulli_api_key', 'test-key');
+
+  const calls = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes('cmd=terminate_session')) calls.push(new URL(url).searchParams.get('session_key'));
+    return mockActivity({
+      tautulliUsers: [{ user_id: 903, username: 'pikohendrix', is_admin: '0' }],
+      sessions: [
+        { session_key: 'first', user_id: 903, username: 'pikohendrix', full_title: 'A', started: '1000', machine_id: 'same-device' },
+        { session_key: 'overlap', user_id: 903, username: 'pikohendrix', full_title: 'B', started: '2000', machine_id: 'same-device' },
+      ],
+    })(input);
+  };
+
+  try {
+    await enforceSingleSession();
+    assert.deepEqual(calls, []);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key')").run();
+  }
+});
+
+test('enforceSingleSession: no corta si Tautulli no permite identificar el dispositivo', async () => {
+  upsertSetting('tautulli_url', 'http://tautulli.test');
+  upsertSetting('tautulli_api_key', 'test-key');
+
+  const calls = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes('cmd=terminate_session')) calls.push(new URL(url).searchParams.get('session_key'));
+    return mockActivity({
+      tautulliUsers: [{ user_id: 904, username: 'unknown-device', is_admin: '0' }],
+      sessions: [
+        { session_key: 'first', user_id: 904, username: 'unknown-device', full_title: 'A', started: '1000' },
+        { session_key: 'second', user_id: 904, username: 'unknown-device', full_title: 'B', started: '2000' },
+      ],
+    })(input);
+  };
+
+  try {
+    await enforceSingleSession();
+    assert.deepEqual(calls, []);
   } finally {
     global.fetch = originalFetch;
     db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key')").run();

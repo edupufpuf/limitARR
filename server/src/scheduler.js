@@ -504,6 +504,22 @@ export async function notifyStillUnavailable() {
 // tumbe el resto del ciclo de sondeo por esto.
 const DUPLICATE_SESSION_MESSAGE = 'Ya tienes otra sesión activa en este usuario — ciérrala primero.';
 
+function sessionDeviceKey(session) {
+  const clean = (value) => String(value || '').trim().toLowerCase();
+  const machineId = clean(session.machineId);
+  if (machineId) return `machine:${machineId}`;
+
+  // Algunas versiones/clientes no exponen machine_id. En ese caso usamos la
+  // huella que Tautulli si facilita. Si tampoco hay datos suficientes, es mas
+  // seguro no cortar que confundir dos filas de la misma reproduccion.
+  const player = clean(session.player);
+  const product = clean(session.product);
+  const platform = clean(session.platform);
+  const ipAddress = clean(session.ipAddress);
+  if (!player && !product && !platform) return null;
+  return `fallback:${player}|${product}|${platform}|${ipAddress}`;
+}
+
 export async function enforceSingleSession() {
   let sessions;
   try {
@@ -524,17 +540,32 @@ export async function enforceSingleSession() {
   }
 
   for (const [userId, userSessions] of byUser) {
-    if (userSessions.length < 2) continue;
     if (adminIds.has(userId)) continue;
     if (!isSessionGuardEnabled(userId)) continue;
 
-    // La más vieja (started más bajo) se queda; el resto se corta.
-    const sorted = [...userSessions].sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
-    for (const session of sorted.slice(1)) {
-      try {
-        await terminateSession(session.sessionKey, DUPLICATE_SESSION_MESSAGE);
-      } catch (err) {
-        console.error('[scheduler] terminate_session failed:', err.message);
+    const byDevice = new Map();
+    for (const session of userSessions) {
+      const deviceKey = sessionDeviceKey(session);
+      if (!deviceKey) continue;
+      if (!byDevice.has(deviceKey)) byDevice.set(deviceKey, []);
+      byDevice.get(deviceKey).push(session);
+    }
+    if (byDevice.size < 2) continue;
+
+    // Se conserva el dispositivo que empezo antes. Solo se cortan sesiones
+    // pertenecientes a otros dispositivos, nunca duplicados del mismo aparato.
+    const devices = [...byDevice.values()].sort((a, b) => {
+      const oldestA = Math.min(...a.map((s) => s.startedAt ?? Number.MAX_SAFE_INTEGER));
+      const oldestB = Math.min(...b.map((s) => s.startedAt ?? Number.MAX_SAFE_INTEGER));
+      return oldestA - oldestB;
+    });
+    for (const deviceSessions of devices.slice(1)) {
+      for (const session of deviceSessions) {
+        try {
+          await terminateSession(session.sessionKey, DUPLICATE_SESSION_MESSAGE);
+        } catch (err) {
+          console.error('[scheduler] terminate_session failed:', err.message);
+        }
       }
     }
   }
