@@ -890,6 +890,36 @@ export async function getBalance(userId, libraryId) {
   return { ...computeBalance(limit, approved, watchedTitles, unavailable, percentByTitle, expiryDays, availability), monthly };
 }
 
+// Estado fresco de una temporada concreta para la cola secuencial. La cola no
+// puede depender solo del log `watched`: si la temporada se aprobó cuando aún
+// no estaba disponible, puede llegar a Plex y verse antes de que la caché de
+// cupo haya tenido ocasión de registrar la transición a vista. En ese caso el
+// historial real de Tautulli es la fuente de verdad.
+export async function isSeasonWatched(userId, libraryId, tmdbId, seasonNumber) {
+  const identity = quotaIdentity(userId);
+  const history = [];
+  for (const memberId of identity.memberIds) {
+    history.push(...(await getUserEpisodeHistory(memberId, libraryId)));
+  }
+
+  const details = await getMediaDetails('tv', tmdbId, seasonNumber);
+  const title = details?.title;
+  const showRatingKey = details?.showRatingKey || await lookupRatingKey({
+    title,
+    mediaType: 'tv',
+    tmdbId,
+    seasonNumber,
+  });
+  const episodes = await getSeasonEpisodes(showRatingKey, seasonNumber);
+  const state = seasonWatchState(
+    buildWatchedEpisodeIndex(history),
+    episodes,
+    { showTitle: title, showRatingKey: details?.showRatingKey, seasonNumber },
+    getSeasonWatchedPercent()
+  );
+  return state.complete;
+}
+
 // "Resetea" el cupo de un usuario+biblioteca: las aprobaciones anteriores a ahora
 // dejan de contar como pendientes, sin borrar el historial del registro. Queda
 // logueado en decisions_log (decision='reset') con el reset_at anterior (o

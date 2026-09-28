@@ -5,7 +5,7 @@ import { config } from './config.js';
 import { getRawSetting, setRawSetting } from './settings.js';
 import { listPendingRequests, approveRequest, declineRequest, getMediaDetails, getMovieAvailability, listRecentlyApprovedRequests, createSeasonRequest } from './services/seerr.js';
 import { getUsers, getActiveSessions, terminateSession } from './services/tautulli.js';
-import { getBalance, getMonthlyTotalQuota, reconcileVoidedRequests, refreshQuotaCache, listStaleOutstandingPairs, normalize, getRequestHold, clearRequestHold, pruneStaleQuotaCache } from './quota.js';
+import { getBalance, getMonthlyTotalQuota, reconcileVoidedRequests, refreshQuotaCache, listStaleOutstandingPairs, normalize, getRequestHold, clearRequestHold, pruneStaleQuotaCache, isSeasonWatched } from './quota.js';
 import { sendMessage, getNotifyTarget, pendingButton, isNotificationEnabled, renderNotificationMessage } from './services/telegram.js';
 import { matchByEmailOrUsername } from './userMatch.js';
 import { isSessionGuardEnabled } from './sessionGuard.js';
@@ -768,7 +768,7 @@ export async function processSeasonQueue() {
         other.seasons.length > 0 &&
         Math.min(...other.seasons) < row.season_number
     );
-    const previousWatched = row.previous_season_number == null
+    const previousWatchedLogged = row.previous_season_number == null
       ? false
       : Boolean(hasWatchedPreviousSeason.get(
           row.user_id,
@@ -776,6 +776,10 @@ export async function processSeasonQueue() {
           row.tmdb_id,
           row.previous_season_number
         ));
+    const previousWatched = previousWatchedLogged || (
+      row.previous_season_number != null &&
+      await isSeasonWatched(row.user_id, row.library_id, row.tmdb_id, row.previous_season_number)
+    );
     if (sameShowUnwatched || lowerSeasonPending || !previousWatched) continue;
 
     try {

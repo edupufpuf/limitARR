@@ -790,6 +790,83 @@ test('processSeasonQueue: pide la siguiente temporada únicamente cuando la ante
   }
 });
 
+test('processSeasonQueue: desbloquea con el visionado real aunque falte el log watched', async () => {
+  upsertSetting('tautulli_url', 'http://tautulli.test');
+  upsertSetting('tautulli_api_key', 'test-key');
+  upsertSetting('seerr_url', 'http://seerr.test');
+  upsertSetting('seerr_api_key', 'test-key');
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit, sequential_seasons)
+    VALUES (9753, 'Series', 'show', 'standard', 1, 4, 1)
+  `).run();
+  db.prepare(`
+    INSERT INTO season_queue (id, tmdb_id, season_number, previous_season_number, user_id, seerr_user_id, library_id)
+    VALUES (77003, 197929, 3, 2, 6004, 504, 9753)
+  `).run();
+
+  const createdRequests = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (input, options) => {
+    const url = new URL(String(input));
+    const method = options?.method || 'GET';
+    const cmd = url.searchParams.get('cmd');
+
+    if (url.pathname === '/api/v1/request' && url.searchParams.get('filter') === 'pending') {
+      return new Response(JSON.stringify({ results: [], pageInfo: { results: 0 } }), { status: 200 });
+    }
+    if (url.pathname === '/api/v1/tv/197929') {
+      return new Response(JSON.stringify({
+        name: 'El inmortal',
+        seasons: [{ seasonNumber: 2 }],
+        mediaInfo: {
+          ratingKey: '9500',
+          seasons: [{ seasonNumber: 2, status: 5 }],
+        },
+      }), { status: 200 });
+    }
+    if (cmd === 'get_history') {
+      const rows = Array.from({ length: 6 }, (_, index) => ({
+        grandparent_title: 'El inmortal',
+        parent_media_index: 2,
+        media_index: index + 1,
+        rating_key: String(9647 + index),
+        parent_rating_key: '9646',
+        grandparent_rating_key: '9500',
+        percent_complete: 100,
+        date: 1790540627,
+      }));
+      return new Response(JSON.stringify({ response: { result: 'success', data: { data: rows } } }), { status: 200 });
+    }
+    if (cmd === 'get_children_metadata' && url.searchParams.get('rating_key') === '9500') {
+      return new Response(JSON.stringify({ response: { result: 'success', data: {
+        children_list: [{ media_type: 'season', media_index: 2, rating_key: '9646' }],
+      } } }), { status: 200 });
+    }
+    if (cmd === 'get_children_metadata' && url.searchParams.get('rating_key') === '9646') {
+      const children = Array.from({ length: 6 }, (_, index) => ({
+        media_type: 'episode', media_index: index + 1, rating_key: String(9647 + index), title: `Episodio ${index + 1}`,
+      }));
+      return new Response(JSON.stringify({ response: { result: 'success', data: { children_list: children } } }), { status: 200 });
+    }
+    if (method === 'POST' && url.pathname === '/api/v1/request') {
+      createdRequests.push(JSON.parse(options.body));
+      return new Response(JSON.stringify({ id: 77004 }), { status: 201 });
+    }
+    throw new Error(`unexpected fetch ${method} ${url}`);
+  };
+
+  try {
+    await processSeasonQueue();
+    assert.deepEqual(createdRequests, [{ mediaType: 'tv', mediaId: 197929, seasons: [3], userId: 504 }]);
+    assert.equal(db.prepare('SELECT 1 FROM season_queue WHERE id = 77003').get(), undefined);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM season_queue WHERE tmdb_id = 197929 AND user_id = 6004').run();
+    db.prepare('DELETE FROM libraries WHERE id = 9753').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
+  }
+});
+
 test('processSeasonQueue: quitar la temporada anterior no desbloquea la siguiente', async () => {
   upsertSetting('tautulli_url', 'http://tautulli.test');
   upsertSetting('tautulli_api_key', 'test-key');
