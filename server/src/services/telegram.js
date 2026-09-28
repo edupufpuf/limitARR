@@ -325,6 +325,18 @@ export async function handlePlexNotifyWebhook(body) {
 
 // Común a handlePendingCallback (botón "sin cupo") y handlePendingCommand
 // (/pendientes escrito a mano) — mismo formato de respuesta para las dos vías.
+function requestedAtLine(requestedAt, nowMs = Date.now()) {
+  if (!requestedAt) return null;
+  const raw = String(requestedAt);
+  const parsed = Date.parse(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw) ? `${raw.replace(' ', 'T')}Z` : raw);
+  if (!Number.isFinite(parsed)) return null;
+  const date = new Intl.DateTimeFormat('es-ES', {
+    day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Madrid',
+  }).format(new Date(parsed));
+  const days = Math.max(0, Math.floor((nowMs - parsed) / 86_400_000));
+  return `Pedido: ${date} (hace ${days} ${days === 1 ? 'día' : 'días'})`;
+}
+
 async function sendPendingItemsMessage(chatId, messageThreadId, pendingItems) {
   if (pendingItems.length === 0) {
     await sendMessage(chatId, 'No tienes nada pendiente de ver ahora mismo.', { messageThreadId });
@@ -341,7 +353,9 @@ async function sendPendingItemsMessage(chatId, messageThreadId, pendingItems) {
   const withPoster = [];
   const withoutPoster = [];
   shown.forEach((item, i) => {
-    const caption = item.libraryName ? `${item.title} (${item.libraryName})` : item.title;
+    const title = item.libraryName ? `${item.title} (${item.libraryName})` : item.title;
+    const age = requestedAtLine(item.requestedAt);
+    const caption = age ? `${title}\n🗓 ${age}` : title;
     if (posters[i]) withPoster.push({ type: 'photo', media: posters[i], caption });
     else withoutPoster.push(caption);
   });

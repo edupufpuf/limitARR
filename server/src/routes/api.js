@@ -1813,9 +1813,31 @@ router.get('/notifications/discover', (req, res) => {
   res.json(messages);
 });
 
-function pendingTitle(item) {
+const getPendingRequestedAt = db.prepare(`
+  SELECT MIN(created_at) AS requested_at FROM decisions_log
+  WHERE request_id = ? AND decision IN ('approved', 'approved_outside_limitarr')
+`);
+
+function pendingSummaryItem(item) {
   if (!item?.title) return null;
-  return item.title;
+  return {
+    title: item.title,
+    requestedAt: item.requestedAt ?? (
+      item.requestId != null ? getPendingRequestedAt.get(item.requestId)?.requested_at ?? null : null
+    ),
+  };
+}
+
+function formatPendingRequestedAt(requestedAt, nowMs = Date.now()) {
+  if (!requestedAt) return null;
+  const raw = String(requestedAt);
+  const parsed = Date.parse(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw) ? `${raw.replace(' ', 'T')}Z` : raw);
+  if (!Number.isFinite(parsed)) return null;
+  const date = new Intl.DateTimeFormat('es-ES', {
+    day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Madrid',
+  }).format(new Date(parsed));
+  const days = Math.max(0, Math.floor((nowMs - parsed) / 86_400_000));
+  return `${date} · hace ${days} ${days === 1 ? 'día' : 'días'}`;
 }
 
 function buildPendingSummaryRows() {
@@ -1841,7 +1863,7 @@ function buildPendingSummaryRows() {
     }
     let items = [];
     try {
-      items = JSON.parse(row.pending_items || '[]').map(pendingTitle).filter(Boolean);
+      items = JSON.parse(row.pending_items || '[]').map(pendingSummaryItem).filter(Boolean);
     } catch {
       items = [];
     }
@@ -1871,7 +1893,10 @@ function formatPendingSummaryForUser(summary, { personal = false } = {}) {
   for (const lib of summary.libraries) {
     lines.push(`• ${lib.libraryName} (${lib.outstanding})`);
     const items = lib.items.length > 0 ? lib.items : ['Sin título guardado'];
-    for (const title of items) lines.push(`  - ${title}`);
+    for (const item of items) {
+      const requested = formatPendingRequestedAt(item.requestedAt);
+      lines.push(`  - ${item.title}${requested ? ` — pedido el ${requested}` : ''}`);
+    }
   }
   return lines.join('\n');
 }

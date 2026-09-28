@@ -1160,7 +1160,7 @@ test('notifications: por DM llega a TODOS los vinculados, no solo a quien tiene 
   db.prepare(`
     INSERT OR REPLACE INTO quota_cache (user_id, library_id, limit_applied, outstanding, balance, pending_items)
     VALUES (1990, 1789, 4, 1, 3, ?)
-  `).run(JSON.stringify([{ title: 'Con pendiente' }]));
+  `).run(JSON.stringify([{ title: 'Con pendiente', requestId: 199001, requestedAt: '2026-09-20 10:00:00' }]));
   db.prepare("INSERT INTO telegram_links (user_id, chat_id, linked_at) VALUES (1990, 'chat-1990', datetime('now'))").run();
   db.prepare("INSERT INTO telegram_links (user_id, chat_id, linked_at) VALUES (1991, 'chat-1991', datetime('now'))").run();
 
@@ -1189,6 +1189,7 @@ test('notifications: por DM llega a TODOS los vinculados, no solo a quien tiene 
     assert.equal(res.body.users, 2);
     assert.equal(res.body.withPending, 1);
     assert.match(sentToChat['chat-1990'], /Con pendiente/);
+    assert.match(sentToChat['chat-1990'], /pedido el 20\/09\/2026 · hace \d+ días/);
     assert.match(sentToChat['chat-1991'], /Nada pendiente de ver/);
   } finally {
     global.fetch = originalFetch;

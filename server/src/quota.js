@@ -537,6 +537,8 @@ export function computeBalance(limit, approvedRows, watchedTitles, unavailableTm
       expiresAt: isUnavailable(r) ? null : expiresAtMs(r, expiryDays, availableSince),
       // Issue #11: para poder rechazar la solicitud en Seerr desde el detalle.
       requestId: r.request_id ?? null,
+      // Fecha original del pedido para los resúmenes de Telegram y el panel.
+      requestedAt: r.created_at ?? null,
       // Cargo manual: motivo puesto por el admin al restar cupo a mano.
       note: r.note ?? null,
     });
@@ -787,6 +789,7 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatc
     availableSince: r.available_since ?? null,
     expiresAt: r.unavailable ? null : expiresAtMs(r, expiryDays, r.available_since ?? null),
     requestId: r.request_id ?? null,
+    requestedAt: r.created_at ?? null,
     note: r.note ?? null,
   }));
 

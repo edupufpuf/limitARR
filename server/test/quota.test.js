@@ -86,7 +86,7 @@ test('computeBalance: aprobada y no vista resta cupo', () => {
   assert.equal(r.balance, 0);
   assert.equal(r.outstanding, 1);
   assert.deepEqual(r.pendingItems, [
-    { title: 'Matrix', mediaType: 'movie', tmdbId: 603, seasonNumber: null, posterUrl: 'https://img/x.jpg', unavailable: false, bypassed: false, mediaStatus: null, queueStatus: null, radarrLabel: null, watchedPercent: 0, availableSince: null, expiresAt: null, requestId: null, note: null },
+    { title: 'Matrix', mediaType: 'movie', tmdbId: 603, seasonNumber: null, posterUrl: 'https://img/x.jpg', unavailable: false, bypassed: false, mediaStatus: null, queueStatus: null, radarrLabel: null, watchedPercent: 0, availableSince: null, expiresAt: null, requestId: null, requestedAt: null, note: null },
   ]);
 });
 
