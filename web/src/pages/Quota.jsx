@@ -14,6 +14,28 @@ async function impersonate(userId, username) {
 }
 
 const REFRESH_MS = 60_000;
+const DAY_MS = 86_400_000;
+
+function requestDateMs(value) {
+  if (!value) return null;
+  const raw = String(value);
+  const parsed = Date.parse(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw) ? `${raw.replace(' ', 'T')}Z` : raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isOlderThanTwoMonths(dateMs, now = new Date()) {
+  if (dateMs == null) return false;
+  const limit = new Date(dateMs);
+  limit.setMonth(limit.getMonth() + 2);
+  return now.getTime() >= limit.getTime();
+}
+
+function formatRequestDate(dateMs) {
+  if (dateMs == null) return 'Fecha desconocida';
+  return new Intl.DateTimeFormat('es-ES', {
+    day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Madrid',
+  }).format(new Date(dateMs));
+}
 
 const STATUS = {
   danger: { text: 'text-accent-400', bar: 'bg-accent-500', ring: '#f87171' },
@@ -87,6 +109,125 @@ function StatTile({ label, value, Icon, tone, iconTone, active, onClick }) {
         <div className="text-[11px] uppercase tracking-wider text-current/70 truncate">{label}</div>
       </div>
     </button>
+  );
+}
+
+function PendingMoviesByAge({ users, onDetail }) {
+  const [sort, setSort] = useState('oldest');
+  const [overdueOnly, setOverdueOnly] = useState(false);
+
+  const allRows = useMemo(() => {
+    const now = new Date();
+    return users.flatMap((user) => user.libraries.flatMap((lib) =>
+      (lib.pendingItems ?? [])
+        .filter((item) => (item.mediaType || 'movie') !== 'tv')
+        .map((item) => {
+          const dateMs = requestDateMs(item.requestedAt);
+          return {
+            user,
+            lib,
+            item,
+            dateMs,
+            days: dateMs == null ? null : Math.max(0, Math.floor((now.getTime() - dateMs) / DAY_MS)),
+            overdue: isOlderThanTwoMonths(dateMs, now),
+          };
+        })
+    ));
+  }, [users]);
+
+  const rows = useMemo(() => {
+    const filtered = overdueOnly ? allRows.filter((row) => row.overdue) : [...allRows];
+    return filtered.sort((a, b) => {
+      if (sort === 'user') {
+        return a.user.username.localeCompare(b.user.username, 'es') || (a.dateMs ?? Infinity) - (b.dateMs ?? Infinity);
+      }
+      if (a.dateMs == null) return 1;
+      if (b.dateMs == null) return -1;
+      return sort === 'newest' ? b.dateMs - a.dateMs : a.dateMs - b.dateMs;
+    });
+  }, [allRows, sort, overdueOnly]);
+
+  const overdue = allRows.filter((row) => row.overdue).length;
+
+  return (
+    <section className="card mb-5 overflow-hidden">
+      <div className="p-4 border-b border-bg-700 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="font-semibold">🎬 Películas pendientes por antigüedad</h3>
+          <p className="text-xs text-gray-500 mt-1">
+            {allRows.length} pendiente{allRows.length === 1 ? '' : 's'} · <span className={overdue > 0 ? 'text-accent-400 font-semibold' : ''}>{overdue} con más de 2 meses</span>
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setOverdueOnly((value) => !value)}
+            className={`btn text-xs py-1.5 ${overdueOnly ? 'btn-primary' : 'btn-ghost'}`}
+          >
+            {overdueOnly ? 'Mostrando +2 meses' : 'Solo +2 meses'}
+          </button>
+          <select value={sort} onChange={(event) => setSort(event.target.value)} className="input w-auto py-1.5 text-xs">
+            <option value="oldest">Más antiguas primero</option>
+            <option value="newest">Más recientes primero</option>
+            <option value="user">Ordenar por usuario</option>
+          </select>
+        </div>
+      </div>
+
+      {rows.length === 0 ? (
+        <p className="p-4 text-sm text-gray-500">
+          {overdueOnly ? 'No hay películas pendientes desde hace más de dos meses.' : 'No hay películas pendientes.'}
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-[11px] uppercase tracking-wider text-gray-500 bg-bg-900/40">
+              <tr>
+                <th className="text-left font-medium px-4 py-2">Película</th>
+                <th className="text-left font-medium px-3 py-2">Usuario</th>
+                <th className="text-left font-medium px-3 py-2 hidden md:table-cell">Biblioteca</th>
+                <th className="text-left font-medium px-3 py-2">Fecha solicitada</th>
+                <th className="text-right font-medium px-4 py-2">Antigüedad</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-bg-700/70">
+              {rows.map(({ user, lib, item, dateMs, days, overdue: isOverdue }, index) => (
+                <tr
+                  key={`${user.userId}-${lib.libraryId}-${item.requestId ?? item.tmdbId ?? item.title}-${index}`}
+                  onClick={() => onDetail(user, lib, item)}
+                  className={`cursor-pointer hover:bg-bg-700/35 ${isOverdue ? 'bg-accent-500/5' : ''}`}
+                >
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-2 min-w-[190px]">
+                      <div className="w-8 h-12 rounded bg-bg-700 overflow-hidden flex-shrink-0">
+                        {item.posterUrl ? <img src={item.posterUrl} alt="" className="w-full h-full object-cover" /> : <span className="w-full h-full flex items-center justify-center">🎬</span>}
+                      </div>
+                      <div>
+                        <div className="font-medium">{item.title}</div>
+                        {item.pendingApproval && <div className="text-[11px] text-purple-300">Pendiente de aprobación</div>}
+                        {item.unavailable && !item.pendingApproval && <div className="text-[11px] text-sky-300">Pendiente de descarga</div>}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5 text-gray-300">{user.username}</td>
+                  <td className="px-3 py-2.5 text-gray-500 hidden md:table-cell">{lib.libraryName}</td>
+                  <td className="px-3 py-2.5 tabular-nums text-gray-300 whitespace-nowrap">{formatRequestDate(dateMs)}</td>
+                  <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                    {days == null ? (
+                      <span className="text-gray-600">—</span>
+                    ) : isOverdue ? (
+                      <span className="inline-flex rounded-full bg-accent-500/15 text-accent-300 ring-1 ring-accent-400/30 px-2 py-1 text-xs font-semibold">{days} días · +2 meses</span>
+                    ) : (
+                      <span className="text-gray-400 tabular-nums">{days} días</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -1506,6 +1647,11 @@ export default function Quota() {
           </div>
         </>
       )}
+
+      <PendingMoviesByAge
+        users={mergedUsers}
+        onDetail={(user, lib, item) => setDetailTarget({ user, lib, item })}
+      />
 
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="relative max-w-xs">
