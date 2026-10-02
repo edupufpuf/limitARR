@@ -384,19 +384,22 @@ function logFreedItem(userId, libraryId, item, decision, limitApplied) {
 
 // Aviso de cupo liberado: al refrescar los pares con pendientes (issue #5) se
 // compara la caché de antes con la de después — lo que desaparece de la lista
-// con el contador bajando es cupo liberado (visto, o caducado por fecha). Cada
+// es cupo liberado (visto, o caducado por fecha). No se puede exigir que baje
+// `outstanding`: una temporada aprobada cuando aún no estaba disponible vale 0
+// y, si se descarga y se ve entre dos ciclos, la transición también es 0 → 0.
+// Cada
 // ítem liberado queda logueado en el Registro ('watched' o 'expired' según si
 // ya había pasado su expiresAt), y además se avisa por Telegram si está
 // activado. Los avisos van tras el refresco para no retrasar la caché si
 // Telegram cojea.
-async function refreshStaleAndNotify() {
+export async function refreshStaleAndNotify() {
   const pairs = listStaleOutstandingPairs();
 
   for (const { user_id, library_id } of pairs) {
     const before = getCacheRow.get(user_id, library_id);
     const result = await refreshQuotaCache(user_id, library_id);
 
-    if (!before || result.outstanding >= before.outstanding) continue;
+    if (!before) continue;
 
     let oldItems = [];
     try {

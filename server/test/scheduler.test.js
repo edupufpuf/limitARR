@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { db } from '../src/db.js';
-import { notifyStillUnavailable, enforceSingleSession, enforceBroadcast, notifyBypassedApprovals, runPollCycle, processSeasonQueue } from '../src/scheduler.js';
+import { notifyStillUnavailable, enforceSingleSession, enforceBroadcast, notifyBypassedApprovals, runPollCycle, processSeasonQueue, refreshStaleAndNotify } from '../src/scheduler.js';
 import { setSessionGuardEnabled } from '../src/sessionGuard.js';
 import { setBroadcastSettings } from '../src/services/broadcast.js';
 
@@ -896,6 +896,82 @@ test('processSeasonQueue: quitar la temporada anterior no desbloquea la siguient
     global.fetch = originalFetch;
     db.prepare('DELETE FROM season_queue WHERE tmdb_id = 66262').run();
     db.prepare('DELETE FROM libraries WHERE id = 9752').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
+  }
+});
+
+test('refreshStaleAndNotify: registra vista una temporada no disponible aunque el contador siga 0', async () => {
+  upsertSetting('tautulli_url', 'http://tautulli.test');
+  upsertSetting('tautulli_api_key', 'test-key');
+  upsertSetting('seerr_url', 'http://seerr.test');
+  upsertSetting('seerr_api_key', 'test-key');
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (9754, 'Series', 'show', 'standard', 1, 4)
+  `).run();
+  db.prepare(`
+    INSERT INTO decisions_log
+      (request_id, user_id, username, library_id, media_title, media_type, tmdb_id, season_number, poster_url, decision)
+    VALUES (77010, 6005, 'edu5', 9754, 'Serie - Temporada 2', 'tv', 197930, 2, '/poster.jpg', 'approved')
+  `).run();
+  db.prepare(`
+    INSERT INTO quota_cache
+      (user_id, library_id, limit_applied, outstanding, balance, pending_items, computed_at)
+    VALUES (6005, 9754, 4, 0, 4, ?, datetime('now', '-10 minutes'))
+  `).run(JSON.stringify([{
+    title: 'Serie - Temporada 2', mediaType: 'tv', tmdbId: 197930, seasonNumber: 2,
+    requestId: 77010, posterUrl: '/poster.jpg', unavailable: true, expiresAt: null,
+  }]));
+
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = new URL(String(input));
+    const cmd = url.searchParams.get('cmd');
+    if (url.pathname === '/api/v1/tv/197930') {
+      return new Response(JSON.stringify({
+        name: 'Serie',
+        mediaInfo: { ratingKey: '9800', seasons: [{ seasonNumber: 2, status: 5 }] },
+      }), { status: 200 });
+    }
+    if (cmd === 'get_history') {
+      const rows = Array.from({ length: 6 }, (_, index) => ({
+        grandparent_title: 'Serie', parent_media_index: 2, media_index: index + 1,
+        rating_key: String(9811 + index), parent_rating_key: '9810', grandparent_rating_key: '9800',
+        percent_complete: 100, date: 1790540627,
+      }));
+      return new Response(JSON.stringify({ response: { result: 'success', data: { data: rows } } }), { status: 200 });
+    }
+    if (cmd === 'search') {
+      return new Response(JSON.stringify({ response: { result: 'success', data: { results_list: {
+        show: [{ rating_key: '9800', title: 'Serie', guids: ['tmdb://197930'] }],
+      } } } }), { status: 200 });
+    }
+    if (cmd === 'get_children_metadata' && url.searchParams.get('rating_key') === '9800') {
+      return new Response(JSON.stringify({ response: { result: 'success', data: {
+        children_list: [{ media_type: 'season', media_index: 2, rating_key: '9810' }],
+      } } }), { status: 200 });
+    }
+    if (cmd === 'get_children_metadata' && url.searchParams.get('rating_key') === '9810') {
+      const children = Array.from({ length: 6 }, (_, index) => ({
+        media_type: 'episode', media_index: index + 1, rating_key: String(9811 + index), title: `Episodio ${index + 1}`,
+      }));
+      return new Response(JSON.stringify({ response: { result: 'success', data: { children_list: children } } }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    await refreshStaleAndNotify();
+    const watched = db.prepare(`
+      SELECT * FROM decisions_log
+      WHERE request_id = 77010 AND season_number = 2 AND decision = 'watched'
+    `).get();
+    assert.ok(watched, 'debe registrar la temporada en Contenido visto aunque outstanding sea 0 antes y después');
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM decisions_log WHERE request_id = 77010').run();
+    db.prepare('DELETE FROM quota_cache WHERE user_id = 6005').run();
+    db.prepare('DELETE FROM libraries WHERE id = 9754').run();
     db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
   }
 });
