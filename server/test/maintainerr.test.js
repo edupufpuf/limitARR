@@ -374,6 +374,7 @@ test('webhook: película sin título extraíble del mensaje se resuelve por Taut
 test('pollMaintainerrCollections: avisa de un ítem manual que el webhook nunca notificó, y no lo repite', async () => {
   // Por si un test anterior (el webhook normal) ya marcó 9010 como avisado.
   db.prepare("DELETE FROM maintainerr_notified WHERE media_server_id = '9010' AND collection_id = 1").run();
+  db.prepare("DELETE FROM maintainerr_messages WHERE media_server_id = '9010' AND collection_id = 1").run();
 
   const calls = [];
   global.fetch = async (url, options = {}) => {
@@ -497,6 +498,50 @@ test('pollMaintainerrCollections: sale de la colección pero sigue en Plex (regl
   assert.ok(messageRow, 'el mensaje original se deja intacto, sin editar');
   const notifiedRow = db.prepare("SELECT 1 FROM maintainerr_notified WHERE media_server_id = '9097' AND collection_id = 1").get();
   assert.equal(notifiedRow, undefined, 'igualmente deja de tratarse como candidato activo');
+});
+
+// Caso real: New Girl T3 se borró en Sonarr y en disco, pero Plex conservó la
+// ficha vacía de la temporada. Además, la primera comprobación ya había
+// eliminado maintainerr_notified, dejando únicamente el mensaje de Telegram.
+test('pollMaintainerrCollections: temporada vacía y mensaje huérfano quita el botón y marca YA BORRADA', async () => {
+  db.prepare("DELETE FROM maintainerr_notified WHERE media_server_id = '9096' AND collection_id = 2").run();
+  db.prepare(`
+    INSERT INTO maintainerr_messages (media_server_id, collection_id, chat_id, message_id, has_photo, text)
+    VALUES ('9096', 2, '-100123', 557, 1, '📺 New Girl - Temporada 3 se borrará el 4 de octubre.')
+  `).run();
+
+  const calls = [];
+  global.fetch = async (url, options = {}) => {
+    const u = String(url);
+    calls.push({ url: u, options });
+    if (u.endsWith('/api/collections')) {
+      return new Response(JSON.stringify(COLLECTIONS), { status: 200 });
+    }
+    if (u.endsWith('/library/metadata/9096')) {
+      return new Response(JSON.stringify({
+        MediaContainer: { Metadata: [{ ratingKey: '9096', type: 'season' }] },
+      }), { status: 200 });
+    }
+    if (u.endsWith('/library/metadata/9096/children')) {
+      return new Response(JSON.stringify({ MediaContainer: { Metadata: [] } }), { status: 200 });
+    }
+    if (u.includes('api.telegram.org')) {
+      return new Response(JSON.stringify({ ok: true, result: true }), { status: 200 });
+    }
+    throw new Error(`fetch inesperado en test: ${u}`);
+  };
+
+  await pollMaintainerrCollections();
+
+  const editCall = calls.find((c) => c.url.includes('/editMessageCaption'));
+  assert.ok(editCall, 'debe editar el mensaje huérfano de la temporada');
+  const payload = JSON.parse(editCall.options.body);
+  assert.match(payload.caption, /YA BORRADA/);
+  assert.deepEqual(payload.reply_markup, { inline_keyboard: [] });
+  assert.equal(
+    db.prepare("SELECT 1 FROM maintainerr_messages WHERE media_server_id = '9096' AND collection_id = 2").get(),
+    undefined
+  );
 });
 
 test('webhook: alta en la propia colección de salvados se ignora (sin bucle)', async () => {

@@ -247,6 +247,9 @@ const upsertMessageRow = db.prepare(`
 const getMessageRow = db.prepare(
   'SELECT * FROM maintainerr_messages WHERE media_server_id = ? AND collection_id = ?'
 );
+const getMessageIds = db.prepare(
+  'SELECT media_server_id FROM maintainerr_messages WHERE collection_id = ?'
+);
 const deleteMessageRow = db.prepare(
   'DELETE FROM maintainerr_messages WHERE media_server_id = ? AND collection_id = ?'
 );
@@ -458,8 +461,18 @@ export async function pollMaintainerrCollections() {
     const media = source.media ?? [];
     const currentIds = new Set(media.map((m) => String(m.mediaServerId)));
     const notifiedIds = getNotifiedIds.all(source.id).map((r) => r.media_server_id);
+    // Una comprobación antigua podía limpiar maintainerr_notified antes de que
+    // Plex actualizase su biblioteca. El mensaje quedaba entonces huérfano y
+    // nunca volvía a revisarse. Incluimos esos mensajes pendientes para poder
+    // retirar su botón en cuanto Plex confirme que el contenido ya no existe.
+    const trackedIds = [
+      ...new Set([
+        ...notifiedIds,
+        ...getMessageIds.all(source.id).map((r) => r.media_server_id),
+      ]),
+    ];
 
-    for (const id of notifiedIds) {
+    for (const id of trackedIds) {
       if (!currentIds.has(id)) {
         deleteNotified.run(id, source.id);
         // Salir de la colección de borrado NO siempre significa que se haya
@@ -479,7 +492,7 @@ export async function pollMaintainerrCollections() {
 
     for (const item of media) {
       const id = String(item.mediaServerId);
-      if (notifiedIds.includes(id)) continue;
+      if (trackedIds.includes(id)) continue;
       const deleteDays = await notifyDeletionCandidate(source, target, item);
       insertNotified.run(id, source.id);
       if (deleteDays) insertCandidate.run(id, deleteDays);
