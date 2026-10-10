@@ -64,7 +64,7 @@ function isBlocked(user) {
 const STAT_TILES = {
   all: {
     label: 'usuarios',
-    description: 'Usuarios de Tautulli con cupo calculado.',
+    description: 'Usuarios de Plex y cuentas locales de Seerr con cupo calculado.',
     tone: 'from-sky-500/25 via-sky-500/10 to-bg-800 border-sky-400/30 text-sky-100',
     icon: 'bg-sky-400/20 text-sky-100',
   },
@@ -112,34 +112,43 @@ function StatTile({ label, value, Icon, tone, iconTone, active, onClick }) {
   );
 }
 
-function PendingMoviesByAge({ users, onDetail }) {
+const MOVIE_HISTORY_STATUS = {
+  pending: ['Pendiente de ver', 'text-amber-300 bg-amber-500/10'],
+  watched: ['Vista', 'text-emerald-300 bg-emerald-500/10'],
+  expired: ['Caducada', 'text-gray-300 bg-gray-500/10'],
+  removed: ['Retirada', 'text-gray-400 bg-gray-500/10'],
+  no_cuenta: ['No cuenta', 'text-sky-300 bg-sky-500/10'],
+  no_quota: ['Sin cupo', 'text-accent-300 bg-accent-500/10'],
+  no_monthly_quota: ['Sin cupo mensual', 'text-accent-300 bg-accent-500/10'],
+  held: ['Aplazada', 'text-purple-300 bg-purple-500/10'],
+  paused: ['En pausa', 'text-purple-300 bg-purple-500/10'],
+  declined: ['Rechazada', 'text-gray-400 bg-gray-500/10'],
+  unmatched_user: ['Usuario sin identificar', 'text-accent-300 bg-accent-500/10'],
+  no_library_config: ['Sin biblioteca', 'text-accent-300 bg-accent-500/10'],
+};
+
+function MoviesByAge({ movies }) {
   const [sort, setSort] = useState('oldest');
   const [overdueOnly, setOverdueOnly] = useState(false);
 
   const allRows = useMemo(() => {
     const now = new Date();
-    return users.flatMap((user) => user.libraries.flatMap((lib) =>
-      (lib.pendingItems ?? [])
-        .filter((item) => (item.mediaType || 'movie') !== 'tv')
-        .map((item) => {
-          const dateMs = requestDateMs(item.requestedAt);
-          return {
-            user,
-            lib,
-            item,
-            dateMs,
-            days: dateMs == null ? null : Math.max(0, Math.floor((now.getTime() - dateMs) / DAY_MS)),
-            overdue: isOlderThanTwoMonths(dateMs, now),
-          };
-        })
-    ));
-  }, [users]);
+    return movies.map((item) => {
+      const dateMs = requestDateMs(item.requestedAt);
+      return {
+        item,
+        dateMs,
+        days: dateMs == null ? null : Math.max(0, Math.floor((now.getTime() - dateMs) / DAY_MS)),
+        overdue: isOlderThanTwoMonths(dateMs, now),
+      };
+    });
+  }, [movies]);
 
   const rows = useMemo(() => {
     const filtered = overdueOnly ? allRows.filter((row) => row.overdue) : [...allRows];
     return filtered.sort((a, b) => {
       if (sort === 'user') {
-        return a.user.username.localeCompare(b.user.username, 'es') || (a.dateMs ?? Infinity) - (b.dateMs ?? Infinity);
+        return a.item.username.localeCompare(b.item.username, 'es') || (a.dateMs ?? Infinity) - (b.dateMs ?? Infinity);
       }
       if (a.dateMs == null) return 1;
       if (b.dateMs == null) return -1;
@@ -153,9 +162,9 @@ function PendingMoviesByAge({ users, onDetail }) {
     <section className="card mb-5 overflow-hidden">
       <div className="p-4 border-b border-bg-700 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="font-semibold">🎬 Películas pendientes por antigüedad</h3>
+          <h3 className="font-semibold">🎬 Películas solicitadas por antigüedad</h3>
           <p className="text-xs text-gray-500 mt-1">
-            {allRows.length} pendiente{allRows.length === 1 ? '' : 's'} · <span className={overdue > 0 ? 'text-accent-400 font-semibold' : ''}>{overdue} con más de 2 meses</span>
+            {allRows.length} solicitud{allRows.length === 1 ? '' : 'es'} de cualquier estado · <span className={overdue > 0 ? 'text-accent-400 font-semibold' : ''}>{overdue} con más de 2 meses</span>
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -176,7 +185,7 @@ function PendingMoviesByAge({ users, onDetail }) {
 
       {rows.length === 0 ? (
         <p className="p-4 text-sm text-gray-500">
-          {overdueOnly ? 'No hay películas pendientes desde hace más de dos meses.' : 'No hay películas pendientes.'}
+          {overdueOnly ? 'No hay películas solicitadas desde hace más de dos meses.' : 'No hay películas solicitadas registradas.'}
         </p>
       ) : (
         <div className="overflow-x-auto">
@@ -186,31 +195,30 @@ function PendingMoviesByAge({ users, onDetail }) {
                 <th className="text-left font-medium px-4 py-2">Película</th>
                 <th className="text-left font-medium px-3 py-2">Usuario</th>
                 <th className="text-left font-medium px-3 py-2 hidden md:table-cell">Biblioteca</th>
+                <th className="text-left font-medium px-3 py-2">Estado</th>
                 <th className="text-left font-medium px-3 py-2">Fecha solicitada</th>
                 <th className="text-right font-medium px-4 py-2">Antigüedad</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-bg-700/70">
-              {rows.map(({ user, lib, item, dateMs, days, overdue: isOverdue }, index) => (
+              {rows.map(({ item, dateMs, days, overdue: isOverdue }, index) => {
+                const [statusLabel, statusTone] = MOVIE_HISTORY_STATUS[item.status] ?? [item.status, 'text-gray-300 bg-gray-500/10'];
+                return (
                 <tr
-                  key={`${user.userId}-${lib.libraryId}-${item.requestId ?? item.tmdbId ?? item.title}-${index}`}
-                  onClick={() => onDetail(user, lib, item)}
-                  className={`cursor-pointer hover:bg-bg-700/35 ${isOverdue ? 'bg-accent-500/5' : ''}`}
+                  key={`${item.userId}-${item.requestId}-${index}`}
+                  className={isOverdue ? 'bg-accent-500/5' : ''}
                 >
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2 min-w-[190px]">
                       <div className="w-8 h-12 rounded bg-bg-700 overflow-hidden flex-shrink-0">
                         {item.posterUrl ? <img src={item.posterUrl} alt="" className="w-full h-full object-cover" /> : <span className="w-full h-full flex items-center justify-center">🎬</span>}
                       </div>
-                      <div>
-                        <div className="font-medium">{item.title}</div>
-                        {item.pendingApproval && <div className="text-[11px] text-purple-300">Pendiente de aprobación</div>}
-                        {item.unavailable && !item.pendingApproval && <div className="text-[11px] text-sky-300">Pendiente de descarga</div>}
-                      </div>
+                      <div className="font-medium">{item.title}</div>
                     </div>
                   </td>
-                  <td className="px-3 py-2.5 text-gray-300">{user.username}</td>
-                  <td className="px-3 py-2.5 text-gray-500 hidden md:table-cell">{lib.libraryName}</td>
+                  <td className="px-3 py-2.5 text-gray-300">{item.username}</td>
+                  <td className="px-3 py-2.5 text-gray-500 hidden md:table-cell">{item.libraryName || '—'}</td>
+                  <td className="px-3 py-2.5"><span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-medium ${statusTone}`}>{statusLabel}</span></td>
                   <td className="px-3 py-2.5 tabular-nums text-gray-300 whitespace-nowrap">{formatRequestDate(dateMs)}</td>
                   <td className="px-4 py-2.5 text-right whitespace-nowrap">
                     {days == null ? (
@@ -222,7 +230,8 @@ function PendingMoviesByAge({ users, onDetail }) {
                     )}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -1025,6 +1034,11 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
                 grupo
               </span>
             )}
+            {user.source === 'seerr' && (
+              <span className="ml-1.5 text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 ring-1 ring-sky-500/30 align-middle">
+                Seerr local
+              </span>
+            )}
           </div>
           <div className="text-xs text-gray-500 truncate">
             {user.isGroup && user.members?.length > 0
@@ -1034,7 +1048,7 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
         </div>
         <span className={`text-xl font-bold tabular-nums ${statusOf(worst.balance).text}`}>{worst.balance}</span>
         {/* Grupo agregado: sin cuenta Plex propia, no hay quién suplantar. */}
-        {!user.isGroup && (
+        {!user.isGroup && user.source !== 'seerr' && (
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); impersonate(user.userId, user.username); }}
@@ -1337,6 +1351,7 @@ export default function Quota() {
   const [users, setUsers] = useState([]);
   const [stats, setStats] = useState(null);
   const [pendingApprovals, setPendingApprovals] = useState([]);
+  const [movieHistory, setMovieHistory] = useState([]);
   const [salvados, setSalvados] = useState([]);
   const [query, setQuery] = useState('');
   const [recalculating, setRecalculating] = useState(false);
@@ -1367,6 +1382,7 @@ export default function Quota() {
     api.quota().then(setUsers);
     api.stats().then(setStats);
     api.pendingApprovals().then(setPendingApprovals).catch(() => {});
+    api.movieHistory().then(setMovieHistory).catch(() => {});
     // Módulo Maintainerr opcional: si no está configurado, la lista queda vacía.
     api.salvados().then(setSalvados).catch(() => {});
   }
@@ -1648,10 +1664,7 @@ export default function Quota() {
         </>
       )}
 
-      <PendingMoviesByAge
-        users={mergedUsers}
-        onDetail={(user, lib, item) => setDetailTarget({ user, lib, item })}
-      />
+      <MoviesByAge movies={movieHistory} />
 
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="relative max-w-xs">

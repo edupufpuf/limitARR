@@ -11,6 +11,7 @@ import { matchByEmailOrUsername } from './userMatch.js';
 import { isSessionGuardEnabled } from './sessionGuard.js';
 import { getBroadcastSettings, hasSeenBroadcast, markBroadcastSeen } from './services/broadcast.js';
 import { isGlobalPauseEnabled } from './pause.js';
+import { getLimitarrUsers } from './services/users.js';
 
 const insertLog = db.prepare(`
   INSERT INTO decisions_log
@@ -634,7 +635,7 @@ export async function notifyBypassedApprovals() {
   const pending = requests.filter((r) => !hasAnyDecisionForRequest.get(r.id));
   if (pending.length === 0) return;
 
-  const tautulliUsers = await getUsers();
+  const tautulliUsers = await getLimitarrUsers();
 
   for (const request of pending) {
     const tautulliUser = matchByEmailOrUsername(tautulliUsers, request.requestedBy);
@@ -800,7 +801,7 @@ export async function runPollCycle() {
 
   const [pending, tautulliUsers] = await Promise.all([
     listPendingRequests(),
-    getUsers(),
+    getLimitarrUsers(),
   ]);
 
   for (const request of pending) {

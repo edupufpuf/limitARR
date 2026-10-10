@@ -29,6 +29,7 @@ import {
   setRoleMonthlyTotalOverride, deleteRoleMonthlyTotalOverride,
 } from '../quota.js';
 import { matchByEmailOrUsername } from '../userMatch.js';
+import { getLimitarrUsers } from '../services/users.js';
 import { runPollCycle } from '../scheduler.js';
 import { isSessionGuardEnabled, setSessionGuardEnabled } from '../sessionGuard.js';
 import { isGlobalPauseEnabled, setGlobalPauseEnabled } from '../pause.js';
@@ -604,7 +605,7 @@ router.put('/libraries/:id', ah(async (req, res) => {
   if (result.changes === 0) return res.status(404).json({ error: 'not_found' });
 
   if (next.enabled) {
-    const users = await getUsers();
+    const users = await getLimitarrUsers();
     for (const user of users) await refreshQuotaCache(user.id, req.params.id);
   } else {
     db.prepare('DELETE FROM quota_cache WHERE library_id = ?').run(req.params.id);
@@ -613,10 +614,10 @@ router.put('/libraries/:id', ah(async (req, res) => {
   res.json({ ok: true });
 }));
 
-// --- Users (passthrough from Tautulli, for admin dropdowns) ---
+// --- Users (Plex/Tautulli + cuentas exclusivamente locales de Seerr) ---
 
 router.get('/users', ah(async (req, res) => {
-  res.json(await getUsers());
+  res.json(await getLimitarrUsers());
 }));
 
 // Pedido de Edu (2 ago 2026): solo el admin decide si a un usuario se le
@@ -675,7 +676,7 @@ router.post('/overrides/bulk', ah(async (req, res) => {
     return res.status(400).json({ error: 'libraryId_and_limitOverride_required' });
   }
 
-  const users = await getUsers();
+  const users = await getLimitarrUsers();
   const upsert = db.prepare(`
     INSERT INTO overrides (user_id, library_id, limit_override, note, updated_at)
     VALUES (?, ?, ?, ?, datetime('now'))
@@ -976,8 +977,8 @@ async function buildQuotaByUser() {
     JOIN libraries l ON l.id = qc.library_id
     WHERE l.enabled = 1
   `).all();
-  const [tautulliUsers, seerrUsers] = await Promise.all([getUsers(), getSeerrUsers()]);
-  const tautulliUserMap = new Map(tautulliUsers.map((u) => [u.id, u]));
+  const [limitarrUsers, seerrUsers] = await Promise.all([getLimitarrUsers(), getSeerrUsers()]);
+  const tautulliUserMap = new Map(limitarrUsers.map((u) => [u.id, u]));
 
   const libraries = db.prepare('SELECT id, name, section_type FROM libraries WHERE enabled = 1').all();
   const libraryMap = new Map(libraries.map((l) => [l.id, l]));
@@ -1043,7 +1044,7 @@ async function buildQuotaByUser() {
 
   function findAvatar(tautulliUser) {
     if (!tautulliUser) return null;
-    return matchByEmailOrUsername(seerrUsers, tautulliUser)?.avatar ?? null;
+    return tautulliUser.avatar ?? matchByEmailOrUsername(seerrUsers, tautulliUser)?.avatar ?? null;
   }
 
   const byUser = new Map();
@@ -1073,6 +1074,7 @@ async function buildQuotaByUser() {
           userId: row.user_id,
           username: tautulliUser?.username ?? `user#${row.user_id}`,
           avatar: findAvatar(tautulliUser),
+          source: tautulliUser?.source ?? 'plex',
           approved7d: recentMap.get(row.user_id)?.approved7d ?? 0,
           blocked7d: recentMap.get(row.user_id)?.blocked7d ?? 0,
           requestedTotal: requestedMap.get(row.user_id) ?? 0,
@@ -1109,6 +1111,74 @@ router.get('/quota', ah(async (req, res) => {
   res.json(await buildQuotaByUser());
 }));
 
+// Historial completo de películas solicitadas. No parte de quota_cache porque
+// esa caché, por definición, solo conserva lo que todavía ocupa cupo.
+router.get('/quota/movie-history', (req, res) => {
+  const rows = db.prepare(`
+    SELECT dl.*, l.name AS library_name
+    FROM decisions_log dl
+    LEFT JOIN libraries l ON l.id = dl.library_id
+    WHERE dl.media_type = 'movie'
+      AND dl.decision IN (
+        'approved', 'approved_outside_limitarr', 'watched', 'expired',
+        'no_quota', 'no_monthly_quota', 'held', 'paused',
+        'declined', 'unmatched_user', 'no_library_config'
+      )
+    ORDER BY dl.created_at ASC, dl.id ASC
+  `).all();
+
+  const requests = new Map();
+  for (const row of rows) {
+    // request_id identifica una petición real de Seerr. Los cargos/importes
+    // manuales usan ids negativos, pero también son solicitudes distintas.
+    const key = `${row.user_id ?? 'unknown'}:${row.request_id}`;
+    const current = requests.get(key) ?? {
+      requestId: row.request_id,
+      userId: row.user_id,
+      username: row.username ?? 'unknown',
+      libraryId: row.library_id,
+      libraryName: row.library_name ?? null,
+      title: row.media_title ?? 'Película',
+      tmdbId: row.tmdb_id,
+      posterUrl: row.poster_url ?? null,
+      requestedAt: row.created_at,
+      status: row.decision,
+      resolvedAt: null,
+      _approved: false,
+      _activeApproval: false,
+    };
+    current.username = current.username === 'unknown' && row.username ? row.username : current.username;
+    current.title = row.media_title || current.title;
+    current.posterUrl = current.posterUrl || row.poster_url || null;
+    current.libraryId = current.libraryId ?? row.library_id;
+    current.libraryName = current.libraryName ?? row.library_name;
+    if (row.decision === 'approved' || row.decision === 'approved_outside_limitarr') {
+      current._approved = true;
+      current._activeApproval ||= !row.voided_at;
+      current.status = row.decision;
+      if (row.voided_at) current.resolvedAt = row.voided_at;
+    } else if (row.decision === 'watched' || row.decision === 'expired') {
+      current.status = row.decision;
+      current.resolvedAt = row.created_at;
+    } else if (!current._approved) {
+      current.status = row.decision;
+    }
+    requests.set(key, current);
+  }
+
+  const history = [...requests.values()].map((item) => {
+    let status = item.status;
+    if (status !== 'watched' && status !== 'expired') {
+      if (item._activeApproval) status = item.status === 'approved_outside_limitarr' ? 'no_cuenta' : 'pending';
+      else if (item._approved) status = 'removed';
+    }
+    const { _approved, _activeApproval, ...publicItem } = item;
+    return { ...publicItem, status };
+  }).sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt)));
+
+  res.json(history);
+});
+
 // Rellena decisions_log con solicitudes aprobadas en Seerr que limitARR no vio
 // (de antes de instalarlo, o aprobadas a mano en Seerr). Idempotente.
 router.post('/quota/import-seerr-history', ah(async (req, res) => {
@@ -1128,7 +1198,7 @@ router.post('/quota/backfill-watched-history', ah(async (req, res) => {
 // Force-compute quota for every user x enabled library, so the panel shows
 // something even before anyone has made a request through Seerr.
 router.post('/quota/recalculate', ah(async (req, res) => {
-  const users = await getUsers();
+  const users = await getLimitarrUsers();
   const libraries = db.prepare('SELECT * FROM libraries WHERE enabled = 1').all();
 
   for (const user of users) {
@@ -1349,7 +1419,7 @@ function formatRequestTitle(mediaType, title, seasonNumber = null) {
 // aún ni siquiera se han creado allí. Ambas aparecen en el cupo sin restarlo;
 // las segundas son informativas y no admiten aprobación manual.
 async function buildPendingApprovalItems() {
-  const [pending, tautulliUsers] = await Promise.all([listPendingRequests(), getUsers()]);
+  const [pending, tautulliUsers] = await Promise.all([listPendingRequests(), getLimitarrUsers()]);
   const items = [];
   const representedUnits = new Set();
   for (const request of pending) {
@@ -1455,7 +1525,7 @@ router.get('/requests/pending-approval', ah(async (req, res) => {
 // el sondeo solo loguea solicitudes que siguen pendientes).
 router.post('/requests/:id/approve', ah(async (req, res) => {
   const requestId = Number(req.params.id);
-  const [request, tautulliUsers] = await Promise.all([getRequest(requestId), getUsers()]);
+  const [request, tautulliUsers] = await Promise.all([getRequest(requestId), getLimitarrUsers()]);
   const sectionType = request.mediaType === 'tv' ? 'show' : 'movie';
   const library = getLibraryForRequestStmt.get(sectionType, request.is4k ? '4k' : 'standard');
   const tautulliUser = matchByEmailOrUsername(tautulliUsers, request.requestedBy || {});
@@ -1766,7 +1836,7 @@ router.put('/notifications/types/:id', (req, res) => {
 
 router.get('/notifications/links', ah(async (req, res) => {
   const rows = db.prepare('SELECT * FROM telegram_links').all();
-  const users = await getUsers();
+  const users = await getLimitarrUsers();
   const userMap = new Map(users.map((u) => [u.id, u]));
   res.json(
     rows.map((r) => ({ ...r, username: userMap.get(r.user_id)?.username ?? `user#${r.user_id}` }))
@@ -1877,7 +1947,7 @@ function buildPendingSummaryRows() {
 }
 
 async function hydratePendingSummaryUsers(summaries) {
-  const users = await getUsers();
+  const users = await getLimitarrUsers();
   const userMap = new Map(users.map((u) => [u.id, u]));
   const groupMap = new Map(db.prepare('SELECT id, name FROM groups').all().map((g) => [g.id, g.name]));
   return summaries.map((summary) => ({

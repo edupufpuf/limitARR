@@ -76,6 +76,7 @@ export const api = {
     request(`/roles/${id}/overrides/${libraryId}`, { method: 'DELETE', body: JSON.stringify({ roleName }) }),
 
   quota: () => request('/quota'),
+  movieHistory: () => request('/quota/movie-history'),
   recalculateQuota: () => request('/quota/recalculate', { method: 'POST' }),
   resetQuota: (userId, libraryId, username) =>
     request(`/quota/reset/${userId}/${libraryId}`, { method: 'POST', body: JSON.stringify({ username }) }),

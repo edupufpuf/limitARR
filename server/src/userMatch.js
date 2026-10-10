@@ -4,8 +4,8 @@ export function matchByEmailOrUsername(candidates, { email, username }) {
   const e = email?.toLowerCase();
   const u = username?.toLowerCase();
   return (
-    candidates.find((c) => c.email?.toLowerCase() === e) ||
-    candidates.find((c) => c.username?.toLowerCase() === u) ||
+    (e ? candidates.find((c) => c.email?.toLowerCase() === e) : null) ||
+    (u ? candidates.find((c) => c.username?.toLowerCase() === u) : null) ||
     null
   );
 }

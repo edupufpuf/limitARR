@@ -788,6 +788,37 @@ test('GET /quota: recentlyWatched trae lo visto en los últimos 30 días, no lo 
   }
 });
 
+test('GET /quota/movie-history incluye películas pendientes, vistas y retiradas', async () => {
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (2991, 'Películas historial', 'movie', 'standard', 1, 3)
+  `).run();
+  const insert = db.prepare(`
+    INSERT INTO decisions_log
+      (request_id, user_id, username, library_id, media_title, media_type, tmdb_id, poster_url, decision, created_at, voided_at)
+    VALUES (?, 2991, 'historia', 2991, ?, 'movie', ?, ?, ?, ?, ?)
+  `);
+  insert.run(99101, 'Pendiente antigua', 99101, '/poster-1.jpg', 'approved', '2026-01-01 10:00:00', null);
+  insert.run(99102, 'Ya vista', 99102, '/poster-2.jpg', 'approved', '2026-02-01 10:00:00', null);
+  insert.run(99102, 'Ya vista', 99102, '/poster-2.jpg', 'watched', '2026-02-10 10:00:00', null);
+  insert.run(99103, 'Retirada', 99103, null, 'approved', '2026-03-01 10:00:00', '2026-03-05 10:00:00');
+
+  try {
+    const res = await agent.get('/api/quota/movie-history').expect(200);
+    const ours = res.body.filter((item) => [99101, 99102, 99103].includes(item.requestId));
+    assert.deepEqual(ours.map((item) => [item.requestId, item.status]), [
+      [99101, 'pending'],
+      [99102, 'watched'],
+      [99103, 'removed'],
+    ]);
+    assert.equal(ours[0].requestedAt, '2026-01-01 10:00:00');
+    assert.equal(ours[0].libraryName, 'Películas historial');
+  } finally {
+    db.prepare('DELETE FROM decisions_log WHERE request_id BETWEEN 99101 AND 99103').run();
+    db.prepare('DELETE FROM libraries WHERE id = 2991').run();
+  }
+});
+
 // Issue #21 (jesusgarrigues): un grupo agregado comparte cupo, pero "quién lo
 // ha visto" se perdía al juntar el historial de todos los miembros en una
 // sola lista — sin distinguirlo no se sabe qué miembro liberó el hueco.

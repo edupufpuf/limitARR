@@ -18,6 +18,7 @@ import {
   declineRequest,
 } from './services/seerr.js';
 import { matchByEmailOrUsername } from './userMatch.js';
+import { getLimitarrUsers, isSeerrLocalUserId } from './services/users.js';
 
 // Tautulli's own "watched" threshold; below this a play doesn't free up quota.
 const WATCHED_THRESHOLD = 85;
@@ -466,14 +467,31 @@ export function quotaIdentity(id) {
   if (numericId < 0) {
     const groupId = -numericId;
     const memberIds = getGroupMemberIdsStmt.all(groupId).map((r) => r.user_id);
-    return { cacheId: numericId, groupId, memberIds, aggregated: true };
+    return {
+      cacheId: numericId,
+      groupId,
+      memberIds,
+      watchMemberIds: memberIds.filter((memberId) => !isSeerrLocalUserId(memberId)),
+      aggregated: true,
+    };
   }
   const group = getAggregatedGroupForUser.get(numericId);
   if (group) {
     const memberIds = getGroupMemberIdsStmt.all(group.id).map((r) => r.user_id);
-    return { cacheId: -group.id, groupId: group.id, memberIds, aggregated: true };
+    return {
+      cacheId: -group.id,
+      groupId: group.id,
+      memberIds,
+      watchMemberIds: memberIds.filter((memberId) => !isSeerrLocalUserId(memberId)),
+      aggregated: true,
+    };
   }
-  return { cacheId: numericId, memberIds: [numericId], aggregated: false };
+  return {
+    cacheId: numericId,
+    memberIds: [numericId],
+    watchMemberIds: isSeerrLocalUserId(numericId) ? [] : [numericId],
+    aggregated: false,
+  };
 }
 
 // Precedencia del límite efectivo: el primer valor no-null de `overrides`, en
@@ -862,7 +880,7 @@ export async function getBalance(userId, libraryId) {
     // Issue #10/#14: la caducidad de series se aplica dentro de computeTvBalance,
     // donde ya se conoce la disponibilidad por temporada.
     const history = [];
-    for (const memberId of identity.memberIds) {
+    for (const memberId of identity.watchMemberIds ?? identity.memberIds) {
       history.push(...(await getUserEpisodeHistory(memberId, libraryId)));
     }
     const tvResult = await computeTvBalance(limit, allApproved, history, getSeasonWatchedPercent(), expiryDays);
@@ -876,7 +894,7 @@ export async function getBalance(userId, libraryId) {
   // Issue #10: las aprobadas que han caducado sin verse ni se listan ni cuentan.
   const approved = dropExpiredRows(allApproved, expiryDays, Date.now(), availability);
   const history = [];
-  for (const memberId of identity.memberIds) {
+  for (const memberId of identity.watchMemberIds ?? identity.memberIds) {
     history.push(...(await getUserMovieHistory(memberId, libraryId)));
   }
   const watchedTitles = new Set(
@@ -901,7 +919,7 @@ export async function getBalance(userId, libraryId) {
 export async function isSeasonWatched(userId, libraryId, tmdbId, seasonNumber) {
   const identity = quotaIdentity(userId);
   const history = [];
-  for (const memberId of identity.memberIds) {
+  for (const memberId of identity.watchMemberIds ?? identity.memberIds) {
     history.push(...(await getUserEpisodeHistory(memberId, libraryId)));
   }
 
@@ -1607,7 +1625,7 @@ const deleteCacheByUser = db.prepare('DELETE FROM quota_cache WHERE user_id = ?'
 // (recalculable siempre) — decisions_log no se toca, es historial. Ids
 // negativos son grupos agregados, no usuarios de Tautulli: se ignoran.
 export async function pruneStaleQuotaCache() {
-  const activeIds = new Set((await getTautulliUsers()).map((u) => u.id));
+  const activeIds = new Set((await getLimitarrUsers()).map((u) => u.id));
   let removed = 0;
   for (const { user_id: userId } of getCachedUserIds.all()) {
     if (!activeIds.has(userId)) {
@@ -1623,11 +1641,13 @@ export async function pruneStaleQuotaCache() {
 // contra el usuario. Recorre el historial real de Seerr y rellena decisions_log
 // con lo que falte (created_at real, no "ahora"), sin duplicar por request_id.
 export async function importSeerrHistory() {
-  const [seerrUsers, tautulliUsers] = await Promise.all([getSeerrUsers(), getTautulliUsers()]);
+  const [seerrUsers, limitarrUsers] = await Promise.all([getSeerrUsers(), getLimitarrUsers()]);
 
   let imported = 0;
-  for (const tautulliUser of tautulliUsers) {
-    const seerrUser = matchByEmailOrUsername(seerrUsers, tautulliUser);
+  for (const limitarrUser of limitarrUsers) {
+    const seerrUser = limitarrUser.seerrId != null
+      ? seerrUsers.find((user) => Number(user.id) === Number(limitarrUser.seerrId))
+      : matchByEmailOrUsername(seerrUsers, limitarrUser);
     if (!seerrUser) continue;
 
     const requests = await getApprovedRequestsForUser(seerrUser.id);
@@ -1643,8 +1663,8 @@ export async function importSeerrHistory() {
         const { title, posterUrl } = await getMediaDetails(request.mediaType, request.tmdbId, seasonNumber);
         insertImportedApproval.run({
           requestId: request.id,
-          userId: tautulliUser.id,
-          username: tautulliUser.username,
+          userId: limitarrUser.id,
+          username: limitarrUser.username,
           libraryId: library.id,
           mediaTitle: formatMediaTitle(request.mediaType, title, seasonNumber),
           mediaType: request.mediaType,
@@ -1704,6 +1724,9 @@ export async function backfillWatchedHistory() {
 
   for (const [key, groupRows] of groups) {
     const [userId, libraryId] = key.split(':').map(Number);
+    // Una cuenta exclusivamente local de Seerr no tiene historial en Plex.
+    // Conservamos sus solicitudes/cupo, pero no inventamos visionados.
+    if (isSeerrLocalUserId(userId)) continue;
 
     const movieRows = groupRows.filter((r) => r.media_type !== 'tv');
     if (movieRows.length > 0) {

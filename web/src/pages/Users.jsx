@@ -647,6 +647,7 @@ function UserFichaModal({ user, group, role, allGroups, allRoles, overrides, mon
             <div className="min-w-0">
               <div className="flex items-baseline gap-2 flex-wrap">
                 <h3 className="font-bold text-lg text-accent-300 leading-tight truncate">{user.username}</h3>
+                {user.source === 'seerr' && <FichaBadge tone="sky">Seerr local</FichaBadge>}
                 {user.email && <span className="text-gray-500 text-sm truncate">({user.email})</span>}
               </div>
               <div className="text-xs text-gray-500 mt-0.5">Id de usuario: {user.id}</div>
@@ -960,6 +961,7 @@ function UsersTable({ users, groups, roles, quotaByUserId, pendingCountByUserId,
               <div className="flex-1 min-w-0">
                 <div className="font-medium truncate flex items-center gap-1.5 flex-wrap">
                   {u.username}
+                  {u.source === 'seerr' && <FichaBadge tone="sky">Seerr local</FichaBadge>}
                   {group && <FichaBadge tone="accent">{group.name}</FichaBadge>}
                   {role && <FichaBadge tone="sky">{role.name}</FichaBadge>}
                 </div>
