@@ -113,8 +113,8 @@ export const NOTIFICATION_TYPES = [
   },
   {
     id: 'still_unavailable',
-    label: 'Aún no disponible (12h)',
-    description: 'Aviso único si una aprobación sigue sin llegar a Plex tras 12 horas.',
+    label: 'Aún no disponible',
+    description: 'Primer aviso tras 12 horas y recordatorio semanal mientras no llegue a Plex.',
     defaultMessage: '🕐 {titulo} sigue sin estar disponible. Se descargará en cuanto esté lista.',
     variables: ['titulo'],
   },

@@ -49,11 +49,11 @@ const getLastUsernameForUser = db.prepare(`
   WHERE user_id = ? AND library_id = ? AND username IS NOT NULL
   ORDER BY id DESC LIMIT 1
 `);
-// Pedido de Edu (2 ago 2026): si a las 12h de aprobarse sigue sin estar en
-// Plex, avisar una vez de que aún no está disponible — antes solo se avisaba
-// al aprobar/rechazar, y el usuario se quedaba sin saber por qué no llegaba.
+// Si a las 12h de aprobarse sigue sin estar en Plex, avisar de que aún no está
+// disponible y repetir el recordatorio como máximo una vez cada siete días.
 const STILL_UNAVAILABLE_HOURS = 12;
-const getUnnotifiedOldApprovals = db.prepare(`
+const STILL_UNAVAILABLE_REPEAT_DAYS = 7;
+const getDueUnavailableApprovals = db.prepare(`
   SELECT dl.id, dl.request_id, dl.user_id, dl.username, dl.library_id, dl.media_title, dl.media_type,
          dl.tmdb_id, dl.season_number, dl.created_at, l.kind AS library_kind
   FROM decisions_log dl
@@ -66,6 +66,7 @@ const getUnnotifiedOldApprovals = db.prepare(`
       WHERE r.request_id = dl.request_id AND r.media_type = dl.media_type
         AND COALESCE(r.season_number, -1) = COALESCE(dl.season_number, -1)
         AND r.decision = 'unavailable_reminder'
+        AND r.created_at > datetime('now', '-' || ? || ' days')
     )
 `);
 const insertUnavailableReminder = db.prepare(`
@@ -439,14 +440,17 @@ export async function refreshStaleAndNotify() {
   return pairs.length;
 }
 
-// Pedido de Edu (2 ago 2026): aviso único a las 12h si la aprobación sigue sin
-// llegar a Plex. Idempotente vía el propio 'unavailable_reminder' en
-// decisions_log (mismo patrón que hasWatchedOrExpired en quota.js) — no se
-// repite aunque tarde más. Se agrupan las películas por kind (HD/4K) para
-// consultar Seerr una vez por biblioteca en vez de una por título.
+// Primer aviso a las 12h si la aprobación sigue sin llegar a Plex y después,
+// mientras continúe sin estar disponible, un recordatorio semanal. El propio
+// 'unavailable_reminder' en decisions_log fija cuándo puede salir el siguiente.
+// Se agrupan las películas por kind (HD/4K) para consultar Seerr una vez por
+// biblioteca en vez de una por título.
 export async function notifyStillUnavailable() {
   if (!isNotificationEnabled('still_unavailable')) return;
-  const rows = getUnnotifiedOldApprovals.all(STILL_UNAVAILABLE_HOURS);
+  const rows = getDueUnavailableApprovals.all(
+    STILL_UNAVAILABLE_HOURS,
+    STILL_UNAVAILABLE_REPEAT_DAYS
+  );
   if (rows.length === 0) return;
 
   const movieTmdbIdsByKind = new Map();

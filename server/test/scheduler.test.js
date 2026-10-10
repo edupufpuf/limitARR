@@ -5,9 +5,8 @@ import { notifyStillUnavailable, enforceSingleSession, enforceBroadcast, notifyB
 import { setSessionGuardEnabled } from '../src/sessionGuard.js';
 import { setBroadcastSettings } from '../src/services/broadcast.js';
 
-// Pedido de Edu (2 ago 2026): si a las 12h de aprobarse sigue sin estar en
-// Plex, avisar una vez de que aún no está disponible. Idempotente: no debe
-// repetirse en ciclos siguientes, ni dispararse para algo ya disponible.
+// Si a las 12h de aprobarse sigue sin estar en Plex, avisar y repetir como
+// máximo una vez por semana mientras continúe sin estar disponible.
 
 function upsertSetting(key, value) {
   db.prepare(`
@@ -16,7 +15,7 @@ function upsertSetting(key, value) {
   `).run(key, value);
 }
 
-test('notifyStillUnavailable: avisa una sola vez si sigue sin descargar a las 12h', async () => {
+test('notifyStillUnavailable: avisa a las 12h y después como máximo una vez por semana', async () => {
   upsertSetting('seerr_url', 'http://seerr.test');
   upsertSetting('seerr_api_key', 'test-key');
   upsertSetting('telegram_bot_token', 'test-bot-token');
@@ -58,9 +57,26 @@ test('notifyStillUnavailable: avisa una sola vez si sigue sin descargar a las 12
     ).get();
     assert.ok(logged, 'debe quedar logueado en Registro');
 
-    // Un segundo ciclo no debe repetir el aviso (idempotente).
+    // Un segundo ciclo inmediato no debe repetir el aviso.
     await notifyStillUnavailable();
     assert.equal(sentMessages.length, 1);
+
+    // Al cumplir una semana desde el último aviso, vuelve a recordarlo.
+    db.prepare(`
+      UPDATE decisions_log SET created_at = datetime('now', '-7 days')
+      WHERE request_id = 9801 AND decision = 'unavailable_reminder'
+    `).run();
+    await notifyStillUnavailable();
+    assert.equal(sentMessages.length, 2);
+
+    // Y la nueva marca vuelve a bloquearlo durante los siguientes siete días.
+    await notifyStillUnavailable();
+    assert.equal(sentMessages.length, 2);
+    const reminderCount = db.prepare(`
+      SELECT COUNT(*) AS total FROM decisions_log
+      WHERE request_id = 9801 AND decision = 'unavailable_reminder'
+    `).get().total;
+    assert.equal(reminderCount, 2);
   } finally {
     global.fetch = originalFetch;
     db.prepare('DELETE FROM decisions_log WHERE request_id = 9801').run();
