@@ -127,9 +127,10 @@ const MOVIE_HISTORY_STATUS = {
   no_library_config: ['Sin biblioteca', 'text-accent-300 bg-accent-500/10'],
 };
 
-function MoviesByAge({ movies }) {
+export function MoviesByAge({ movies, initialVisible = 2 }) {
   const [sort, setSort] = useState('oldest');
   const [overdueOnly, setOverdueOnly] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(initialVisible);
 
   const allRows = useMemo(() => {
     const now = new Date();
@@ -144,7 +145,7 @@ function MoviesByAge({ movies }) {
     });
   }, [movies]);
 
-  const rows = useMemo(() => {
+  const sortedRows = useMemo(() => {
     const filtered = overdueOnly ? allRows.filter((row) => row.overdue) : [...allRows];
     return filtered.sort((a, b) => {
       if (sort === 'user') {
@@ -155,6 +156,9 @@ function MoviesByAge({ movies }) {
       return sort === 'newest' ? b.dateMs - a.dateMs : a.dateMs - b.dateMs;
     });
   }, [allRows, sort, overdueOnly]);
+  const rows = sortedRows.slice(0, visibleCount);
+
+  useEffect(() => setVisibleCount(initialVisible), [sort, overdueOnly, initialVisible]);
 
   const overdue = allRows.filter((row) => row.overdue).length;
 
@@ -234,6 +238,18 @@ function MoviesByAge({ movies }) {
               })}
             </tbody>
           </table>
+          {visibleCount < sortedRows.length && (
+            <div className="p-4 border-t border-bg-700 flex flex-wrap items-center justify-center gap-3">
+              <span className="text-xs text-gray-500">Mostrando {rows.length} de {sortedRows.length}</span>
+              <button
+                type="button"
+                onClick={() => setVisibleCount((count) => Math.min(count + 2, sortedRows.length))}
+                className="btn btn-ghost"
+              >
+                Cargar más
+              </button>
+            </div>
+          )}
         </div>
       )}
     </section>
@@ -1347,11 +1363,10 @@ function ManualChargeModal({ username, sectionType, onClose, onSubmit }) {
   );
 }
 
-export default function Quota() {
+export default function Quota({ onNavigate }) {
   const [users, setUsers] = useState([]);
   const [stats, setStats] = useState(null);
   const [pendingApprovals, setPendingApprovals] = useState([]);
-  const [movieHistory, setMovieHistory] = useState([]);
   const [salvados, setSalvados] = useState([]);
   const [query, setQuery] = useState('');
   const [recalculating, setRecalculating] = useState(false);
@@ -1382,7 +1397,6 @@ export default function Quota() {
     api.quota().then(setUsers);
     api.stats().then(setStats);
     api.pendingApprovals().then(setPendingApprovals).catch(() => {});
-    api.movieHistory().then(setMovieHistory).catch(() => {});
     // Módulo Maintainerr opcional: si no está configurado, la lista queda vacía.
     api.salvados().then(setSalvados).catch(() => {});
   }
@@ -1664,7 +1678,17 @@ export default function Quota() {
         </>
       )}
 
-      <MoviesByAge movies={movieHistory} />
+      <button
+        type="button"
+        onClick={() => onNavigate?.('movie-history')}
+        className="card w-full mb-5 p-4 flex items-center justify-between gap-4 text-left hover:border-accent-500/50 hover:bg-bg-800/70 transition-colors"
+      >
+        <span>
+          <span className="block font-semibold">🎬 Antigüedad de películas solicitadas</span>
+          <span className="block text-xs text-gray-500 mt-1">Consulta todas las películas, su fecha de solicitud y su estado.</span>
+        </span>
+        <span className="text-accent-300 font-semibold whitespace-nowrap">Ver listado →</span>
+      </button>
 
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="relative max-w-xs">

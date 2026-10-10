@@ -7,6 +7,7 @@ import Users from './Users.jsx';
 import DecisionsLog from './DecisionsLog.jsx';
 import Settings from './Settings.jsx';
 import Notifications from './Notifications.jsx';
+import MovieHistory from './MovieHistory.jsx';
 import WhatsNewModal from '../components/WhatsNewModal.jsx';
 import { Wordmark } from '../components/Brand.jsx';
 import { IconGauge, IconSave, IconFilm, IconUsers, IconClock, IconBell, IconGear, IconLogout, IconMenu, IconXCircle, IconBan } from '../icons.jsx';
@@ -16,6 +17,7 @@ const UNSAVED_WARNING = 'Hay cambios sin guardar en esta pestaña. ¿Salir igual
 
 const TABS = {
   quota: { label: 'Cupo', Icon: IconGauge, Component: Quota },
+  'movie-history': { label: 'Antigüedad de películas', Icon: IconFilm, Component: MovieHistory, hidden: true },
   salvadas: { label: 'Salvadas', Icon: IconSave, Component: Salvadas },
   libraries: { label: 'Bibliotecas', Icon: IconFilm, Component: Libraries },
   users: { label: 'Usuarios', Icon: IconUsers, Component: Users },
@@ -118,7 +120,7 @@ function DashboardInner({ onLoggedOut }) {
         </button>
 
         <div className="space-y-1">
-          {Object.entries(TABS).map(([key, { label, Icon }]) => (
+          {Object.entries(TABS).filter(([, item]) => !item.hidden).map(([key, { label, Icon }]) => (
             <button
               key={key}
               onClick={() => goTab(key)}
@@ -194,7 +196,7 @@ function DashboardInner({ onLoggedOut }) {
             Pausa global activa: no se aprueba ninguna solicitud nueva.
           </div>
         )}
-        <Component />
+        <Component onNavigate={goTab} />
       </main>
 
       <WhatsNewModal />
