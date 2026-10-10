@@ -5,11 +5,12 @@ import { MoviesByAge } from './Quota.jsx';
 export default function MovieHistory({ onNavigate }) {
   const [movies, setMovies] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     api.movieHistory()
       .then(setMovies)
-      .catch(() => setMovies([]))
+      .catch(() => setError(true))
       .finally(() => setLoading(false));
   }, []);
 
@@ -25,6 +26,8 @@ export default function MovieHistory({ onNavigate }) {
 
       {loading ? (
         <div className="card p-6 text-sm text-gray-500">Cargando historial…</div>
+      ) : error ? (
+        <div className="card p-6 text-sm text-accent-300">No se ha podido comprobar ahora qué películas siguen en Plex.</div>
       ) : (
         <MoviesByAge movies={movies} initialVisible={2} />
       )}

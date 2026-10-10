@@ -788,7 +788,13 @@ test('GET /quota: recentlyWatched trae lo visto en los últimos 30 días, no lo 
   }
 });
 
-test('GET /quota/movie-history incluye películas pendientes, vistas y retiradas', async () => {
+test('GET /quota/movie-history incluye solo películas que todavía siguen en Plex', async () => {
+  const upsertSetting = db.prepare(`
+    INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `);
+  upsertSetting.run('tautulli_url', 'http://tautulli-history.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
   db.prepare(`
     INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
     VALUES (2991, 'Películas historial', 'movie', 'standard', 1, 3)
@@ -803,19 +809,37 @@ test('GET /quota/movie-history incluye películas pendientes, vistas y retiradas
   insert.run(99102, 'Ya vista', 99102, '/poster-2.jpg', 'watched', '2026-02-10 10:00:00', null);
   insert.run(99103, 'Retirada', 99103, null, 'approved', '2026-03-01 10:00:00', '2026-03-05 10:00:00');
 
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.origin !== 'http://tautulli-history.test' || url.searchParams.get('cmd') !== 'search') {
+      throw new Error(`unexpected fetch ${url}`);
+    }
+    const query = url.searchParams.get('query');
+    const plexMovies = query === 'Pendiente antigua'
+      ? [{ rating_key: '1', title: 'Pendiente antigua', guids: ['tmdb://99101'] }]
+      : query === 'Ya vista'
+        ? [{ rating_key: '2', title: 'Ya vista', guids: ['tmdb://99102'] }]
+        : [];
+    return new Response(JSON.stringify({
+      response: { result: 'success', data: { results_list: { movie: plexMovies } } },
+    }), { status: 200 });
+  };
+
   try {
     const res = await agent.get('/api/quota/movie-history').expect(200);
     const ours = res.body.filter((item) => [99101, 99102, 99103].includes(item.requestId));
     assert.deepEqual(ours.map((item) => [item.requestId, item.status]), [
       [99101, 'pending'],
       [99102, 'watched'],
-      [99103, 'removed'],
     ]);
     assert.equal(ours[0].requestedAt, '2026-01-01 10:00:00');
     assert.equal(ours[0].libraryName, 'Películas historial');
   } finally {
+    global.fetch = originalFetch;
     db.prepare('DELETE FROM decisions_log WHERE request_id BETWEEN 99101 AND 99103').run();
     db.prepare('DELETE FROM libraries WHERE id = 2991').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key')").run();
   }
 });
 

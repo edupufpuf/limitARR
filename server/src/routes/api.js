@@ -27,6 +27,7 @@ import {
   getMonthlyQuotaMode, setMonthlyQuotaMode, getMonthlyHistoryRows, getMonthlyHistoryRowsTotal,
   setMonthlyTotalOverride, deleteMonthlyTotalOverride, setGroupMonthlyTotalOverride, deleteGroupMonthlyTotalOverride,
   setRoleMonthlyTotalOverride, deleteRoleMonthlyTotalOverride,
+  normalize,
 } from '../quota.js';
 import { matchByEmailOrUsername } from '../userMatch.js';
 import { getLimitarrUsers } from '../services/users.js';
@@ -1113,7 +1114,39 @@ router.get('/quota', ah(async (req, res) => {
 
 // Historial completo de películas solicitadas. No parte de quota_cache porque
 // esa caché, por definición, solo conserva lo que todavía ocupa cupo.
-router.get('/quota/movie-history', (req, res) => {
+async function keepMoviesStillInPlex(history) {
+  const representatives = new Map();
+  for (const item of history) {
+    const key = item.tmdbId != null ? `tmdb:${item.tmdbId}` : `title:${normalize(item.title)}`;
+    if (!representatives.has(key)) representatives.set(key, item);
+  }
+
+  const present = new Map();
+  const entries = [...representatives.entries()];
+  // Tautulli es local, pero una biblioteca grande puede contener cientos de
+  // solicitudes históricas. Se consulta en grupos pequeños para no lanzarle
+  // todas las búsquedas simultáneamente.
+  for (let index = 0; index < entries.length; index += 6) {
+    const chunk = entries.slice(index, index + 6);
+    const results = await Promise.all(chunk.map(async ([key, item]) => {
+      const { movies } = await searchMedia(item.title);
+      const tmdbGuid = item.tmdbId != null ? `tmdb://${item.tmdbId}` : null;
+      const wantedTitle = normalize(item.title);
+      const found = movies.some((movie) =>
+        (tmdbGuid && movie.guids.includes(tmdbGuid)) || normalize(movie.title) === wantedTitle
+      );
+      return [key, found];
+    }));
+    for (const [key, found] of results) present.set(key, found);
+  }
+
+  return history.filter((item) => {
+    const key = item.tmdbId != null ? `tmdb:${item.tmdbId}` : `title:${normalize(item.title)}`;
+    return present.get(key) === true;
+  });
+}
+
+router.get('/quota/movie-history', ah(async (req, res) => {
   const rows = db.prepare(`
     SELECT dl.*, l.name AS library_name
     FROM decisions_log dl
@@ -1176,8 +1209,8 @@ router.get('/quota/movie-history', (req, res) => {
     return { ...publicItem, status };
   }).sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt)));
 
-  res.json(history);
-});
+  res.json(await keepMoviesStillInPlex(history));
+}));
 
 // Rellena decisions_log con solicitudes aprobadas en Seerr que limitARR no vio
 // (de antes de instalarlo, o aprobadas a mano en Seerr). Idempotente.
