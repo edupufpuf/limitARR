@@ -12,6 +12,7 @@ import { isSessionGuardEnabled } from './sessionGuard.js';
 import { getBroadcastSettings, hasSeenBroadcast, markBroadcastSeen } from './services/broadcast.js';
 import { isGlobalPauseEnabled } from './pause.js';
 import { getLimitarrUsers } from './services/users.js';
+import { enqueueApprovedDownload, processDownloadWaitlist, reconcileApprovedWaitlist } from './downloadWaitlist.js';
 
 const insertLog = db.prepare(`
   INSERT INTO decisions_log
@@ -802,6 +803,7 @@ export async function processSeasonQueue() {
 export async function runPollCycle() {
   await runDailyMaintenance();
   await reconcileVoidedRequests();
+  await reconcileApprovedWaitlist();
 
   const [pending, tautulliUsers] = await Promise.all([
     listPendingRequests(),
@@ -958,17 +960,22 @@ export async function runPollCycle() {
     // biblioteca en concreto no tenga cupo mensual propio.
     const monthlyTotal = await getMonthlyTotalQuota(tautulliUser.id);
     const monthlyTotalOk = !monthlyTotal.enabled || monthlyTotal.remaining >= requiredUnits;
+    // El limite simultaneo ya no bloquea la aceptacion en Seerr: la solicitud
+    // entra en download_waitlist sin monitorizar y no consume cupo. Solo se
+    // activa cuando haya una release Y un hueco. Los topes mensuales si siguen
+    // limitando cuantas cosas puede pedir una persona durante el mes.
     const decision =
-      balance >= requiredUnits && monthlyOk && monthlyTotalOk
+      monthlyOk && monthlyTotalOk
         ? 'approved'
         : !monthlyTotalOk
           ? 'no_monthly_total_quota'
-          : monthlyOk
-            ? 'no_quota'
-            : 'no_monthly_quota';
+          : 'no_monthly_quota';
 
     if (decision === 'approved') {
       await approveRequest(request.id);
+      for (const seasonNumber of requestedSeasons) {
+        await enqueueApprovedDownload({ ...base, seasonNumber }, detailsBySeason.get(seasonNumber ?? 'movie') || {});
+      }
     }
 
     base.balanceBefore = balance;
@@ -1019,6 +1026,7 @@ export async function runPollCycle() {
   // los pares recién refrescados arriba quedan excluidos por su computed_at.
   // Además avisa por Telegram del cupo liberado (si está activado).
   await refreshStaleAndNotify();
+  await processDownloadWaitlist();
   await processSeasonQueue();
   await notifyStillUnavailable();
   await enforceSingleSession();

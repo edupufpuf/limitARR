@@ -1271,6 +1271,26 @@ export async function refreshQuotaCache(userId, libraryId) {
     return { limit: 0, outstanding: 0, balance: 0, pendingItems: [], disabled: true, monthly: { enabled: false, limit: 0, used: 0, remaining: 0 } };
   }
   const { limit, outstanding, balance, pendingItems, monthly } = await getBalance(identity.cacheId, libraryId);
+  const waitRows = identity.memberIds.flatMap((memberId) => db.prepare(`
+    SELECT request_id,season_number,state,release_ready
+    FROM download_waitlist WHERE user_id=? AND library_id=?
+  `).all(memberId, libraryId));
+  for (const item of pendingItems) {
+    const wait = waitRows.find((row) =>
+      Number(row.request_id) === Number(item.requestId) &&
+      Number(row.season_number) === Number(item.seasonNumber ?? -1)
+    );
+    if (!wait) continue;
+    item.waitlistState = wait.state === 'activated'
+      ? 'downloading'
+      : wait.release_ready
+        ? 'waiting_quota'
+        : 'waiting_release';
+    if (item.waitlistState === 'waiting_quota') {
+      if (item.mediaType === 'tv') item.sonarrLabel = 'Pendiente de cupo';
+      else item.radarrLabel = 'Pendiente de cupo';
+    }
+  }
   for (const item of pendingItems) {
     item.ratingKey = await lookupRatingKey(item);
   }

@@ -15,6 +15,56 @@ async function call(path) {
   }
 }
 
+async function write(path, method, body) {
+  const { sonarr_url: baseUrl, sonarr_api_key: apiKey } = getSettings();
+  if (!baseUrl || !apiKey) throw new Error('Sonarr no configurado');
+  const res = await fetch(`${baseUrl}/api/v3${path}`, {
+    method,
+    headers: { 'X-Api-Key': apiKey, 'Content-Type': 'application/json' },
+    body: body == null ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Sonarr ${method} ${path} HTTP ${res.status}`);
+  return res.status === 204 ? null : res.json();
+}
+
+export async function setSonarrSeasonMonitored(seriesId, seasonNumber, monitored) {
+  if (seriesId == null || seasonNumber == null) return null;
+  const series = await call(`/series/${seriesId}`);
+  if (!series) return null;
+  const season = (series.seasons || []).find((row) => Number(row.seasonNumber) === Number(seasonNumber));
+  if (!season) return null;
+  if (Boolean(season.monitored) !== Boolean(monitored)) {
+    season.monitored = Boolean(monitored);
+    await write(`/series/${series.id}`, 'PUT', series);
+  }
+  return series.id;
+}
+
+export async function getSonarrWaitState(seriesId, seasonNumber) {
+  if (seriesId == null) return { externalServiceId: null, downloaded: false, downloading: false, releaseAvailable: false };
+  const series = await call(`/series/${seriesId}`);
+  const season = series?.seasons?.find((row) => Number(row.seasonNumber) === Number(seasonNumber));
+  if (!series || !season) return { externalServiceId: seriesId, downloaded: false, downloading: false, releaseAvailable: false };
+  const downloaded = Number(season.statistics?.episodeFileCount ?? 0) > 0;
+  const queue = await call('/queue?page=1&pageSize=100&includeUnknownSeriesItems=true');
+  const downloading = (queue?.records || []).some((row) =>
+    Number(row.seriesId) === Number(series.id) && Number(row.episode?.seasonNumber) === Number(seasonNumber)
+  );
+  let releaseAvailable = false;
+  if (!downloaded && !downloading) {
+    const releases = await call(`/release?seriesId=${series.id}&seasonNumber=${seasonNumber}`);
+    releaseAvailable = Array.isArray(releases) && releases.some((release) => (release.rejections || []).length === 0);
+  }
+  return { externalServiceId: series.id, downloaded, downloading, releaseAvailable };
+}
+
+export async function searchSonarrSeason(seriesId, seasonNumber) {
+  const id = await setSonarrSeasonMonitored(seriesId, seasonNumber, true);
+  if (id == null) throw new Error(`temporada ${seasonNumber} no encontrada en Sonarr`);
+  await write('/command', 'POST', { name: 'SeasonSearch', seriesId: id, seasonNumber });
+  return id;
+}
+
 // A diferencia de Radarr (que sí tiene un campo "Estado" único por película),
 // Sonarr no tiene un equivalente por temporada en su API/app — hay que
 // derivarlo de sus propias estadísticas (statistics.episodeFileCount,

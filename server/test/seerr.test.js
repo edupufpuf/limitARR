@@ -1,11 +1,84 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { getMovieAvailability, getShowDetails, getSonarrSeriesId } from '../src/services/seerr.js';
-import { getRadarrMovieUrl } from '../src/services/radarr.js';
-import { getSonarrSeriesUrl } from '../src/services/sonarr.js';
+import { getRadarrMovieUrl, getRadarrWaitState, searchRadarrMovie, setRadarrMovieMonitored } from '../src/services/radarr.js';
+import { getSonarrSeriesUrl, getSonarrWaitState, searchSonarrSeason, setSonarrSeasonMonitored } from '../src/services/sonarr.js';
 import { updateSettings, setRawSetting } from '../src/settings.js';
 
 updateSettings({ seerr_url: 'http://seerr.test', seerr_api_key: 'k' });
+
+test('Radarr waitlist: pausa, detecta release aceptable y activa busqueda', async () => {
+  updateSettings({ radarr_url: 'http://radarr.test', radarr_api_key: 'rk' });
+  const writes = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (input, options = {}) => {
+    const url = String(input);
+    if (url === 'http://radarr.test/api/v3/movie?tmdbId=101') {
+      return new Response(JSON.stringify([{ id: 44, monitored: true, hasFile: false }]), { status: 200 });
+    }
+    if (url === 'http://radarr.test/api/v3/queue?page=1&pageSize=100') {
+      return new Response(JSON.stringify({ records: [] }), { status: 200 });
+    }
+    if (url === 'http://radarr.test/api/v3/release?movieId=44') {
+      return new Response(JSON.stringify([{ title: 'valida', rejections: [] }]), { status: 200 });
+    }
+    if (url === 'http://radarr.test/api/v3/movie/44' || url === 'http://radarr.test/api/v3/command') {
+      writes.push({ url, method: options.method, body: JSON.parse(options.body) });
+      return new Response(JSON.stringify({ id: 1 }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+  try {
+    await setRadarrMovieMonitored(101, false);
+    const state = await getRadarrWaitState(101);
+    assert.equal(state.releaseAvailable, true);
+    await searchRadarrMovie(101);
+    assert.equal(writes[0].body.monitored, false);
+    assert.equal(writes.at(-1).body.name, 'MoviesSearch');
+  } finally {
+    global.fetch = originalFetch;
+    updateSettings({ radarr_url: '', radarr_api_key: '' });
+  }
+});
+
+test('Sonarr waitlist: controla solo la temporada y lanza SeasonSearch', async () => {
+  updateSettings({ sonarr_url: 'http://sonarr.test', sonarr_api_key: 'sk' });
+  const writes = [];
+  const series = { id: 55, seasons: [{ seasonNumber: 1, monitored: true, statistics: { episodeFileCount: 0 } }] };
+  const originalFetch = global.fetch;
+  global.fetch = async (input, options = {}) => {
+    const url = String(input);
+    if (url === 'http://sonarr.test/api/v3/series/55' && options.method === 'PUT') {
+      const body = JSON.parse(options.body);
+      writes.push({ url, body });
+      Object.assign(series, body);
+      return new Response(JSON.stringify(series), { status: 200 });
+    }
+    if (url === 'http://sonarr.test/api/v3/series/55') return new Response(JSON.stringify(series), { status: 200 });
+    if (url === 'http://sonarr.test/api/v3/queue?page=1&pageSize=100&includeUnknownSeriesItems=true') {
+      return new Response(JSON.stringify({ records: [] }), { status: 200 });
+    }
+    if (url === 'http://sonarr.test/api/v3/release?seriesId=55&seasonNumber=1') {
+      return new Response(JSON.stringify([{ title: 'valida', rejections: [] }]), { status: 200 });
+    }
+    if (url === 'http://sonarr.test/api/v3/command') {
+      writes.push({ url, body: JSON.parse(options.body) });
+      return new Response(JSON.stringify({ id: 1 }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+  try {
+    await setSonarrSeasonMonitored(55, 1, false);
+    const state = await getSonarrWaitState(55, 1);
+    assert.equal(state.releaseAvailable, true);
+    await searchSonarrSeason(55, 1);
+    assert.equal(writes[0].body.seasons[0].monitored, false);
+    assert.equal(writes.at(-1).body.name, 'SeasonSearch');
+  } finally {
+    global.fetch = originalFetch;
+    updateSettings({ sonarr_url: '', sonarr_api_key: '' });
+  }
+});
 
 // Bug real: una petición en biblioteca 4K mostraba el estado de la versión
 // estándar (o al revés), porque siempre se leía mediaInfo.status y nunca

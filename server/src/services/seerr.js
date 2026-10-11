@@ -197,6 +197,7 @@ export async function getMovieDetails(tmdbId) {
     return {
       title: data.title || null,
       posterUrl: data.posterPath ? `https://image.tmdb.org/t/p/w185${data.posterPath}` : null,
+      externalServiceId: data.mediaInfo?.externalServiceId ?? null,
     };
   } catch {
     return { title: null, posterUrl: null };
@@ -252,6 +253,7 @@ export async function getShowDetails(tmdbId, seasonNumber = null) {
       seasonAvailableSince,
       seasonQueueStatus,
       sonarrLabel,
+      externalServiceId: data.mediaInfo?.externalServiceId ?? null,
     };
   } catch {
     return { title: null, posterUrl: null, showRatingKey: null, seasonStatuses: null, seasonAvailableSince: null, seasonQueueStatus: null, sonarrLabel: null };

@@ -19,6 +19,54 @@ async function call(path) {
   }
 }
 
+async function write(path, method, body) {
+  const { radarr_url: baseUrl, radarr_api_key: apiKey } = getSettings();
+  if (!baseUrl || !apiKey) throw new Error('Radarr no configurado');
+  const res = await fetch(`${baseUrl}/api/v3${path}`, {
+    method,
+    headers: { 'X-Api-Key': apiKey, 'Content-Type': 'application/json' },
+    body: body == null ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Radarr ${method} ${path} HTTP ${res.status}`);
+  return res.status === 204 ? null : res.json();
+}
+
+async function movieByTmdbId(tmdbId) {
+  const movies = await call(`/movie?tmdbId=${tmdbId}`);
+  return Array.isArray(movies) ? movies[0] ?? null : null;
+}
+
+// Control de la lista de espera. PUT exige el recurso completo, no un parche.
+export async function setRadarrMovieMonitored(tmdbId, monitored) {
+  const movie = await movieByTmdbId(tmdbId);
+  if (!movie) return null;
+  if (Boolean(movie.monitored) !== Boolean(monitored)) {
+    movie.monitored = Boolean(monitored);
+    await write(`/movie/${movie.id}`, 'PUT', movie);
+  }
+  return movie.id;
+}
+
+export async function getRadarrWaitState(tmdbId) {
+  const movie = await movieByTmdbId(tmdbId);
+  if (!movie) return { externalServiceId: null, downloaded: false, downloading: false, releaseAvailable: false };
+  const queue = await call('/queue?page=1&pageSize=100');
+  const downloading = (queue?.records || []).some((row) => Number(row.movieId) === Number(movie.id));
+  let releaseAvailable = false;
+  if (!movie.hasFile && !downloading) {
+    const releases = await call(`/release?movieId=${movie.id}`);
+    releaseAvailable = Array.isArray(releases) && releases.some((release) => (release.rejections || []).length === 0);
+  }
+  return { externalServiceId: movie.id, downloaded: Boolean(movie.hasFile), downloading, releaseAvailable };
+}
+
+export async function searchRadarrMovie(tmdbId) {
+  const movieId = await setRadarrMovieMonitored(tmdbId, true);
+  if (movieId == null) throw new Error(`pelicula TMDB ${tmdbId} no encontrada en Radarr`);
+  await write('/command', 'POST', { name: 'MoviesSearch', movieIds: [movieId] });
+  return movieId;
+}
+
 // El campo "Estado" que muestra la propia ficha de Radarr NO es el status de
 // estreno (tba/announced/inCinemas/released) — es esta lógica aparte, según
 // isAvailable/monitored/hasFile (verificado contra la app de Radarr en

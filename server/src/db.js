@@ -357,6 +357,29 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  -- Solicitudes aprobadas en Seerr que todavia no pueden consumir cupo. Se
+  -- mantienen sin monitorizar en Radarr/Sonarr y solo se activan, de una en
+  -- una, despues de comprobar que existe una release y que el usuario tiene
+  -- hueco. Asi una pelicula futura no resta cupo, pero tampoco puede aparecer
+  -- meses despues y provocar un 5/2.
+  CREATE TABLE IF NOT EXISTS download_waitlist (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    username TEXT,
+    library_id INTEGER NOT NULL,
+    media_type TEXT NOT NULL CHECK (media_type IN ('movie', 'tv')),
+    tmdb_id INTEGER NOT NULL,
+    season_number INTEGER NOT NULL DEFAULT -1,
+    external_service_id INTEGER,
+    state TEXT NOT NULL DEFAULT 'waiting' CHECK (state IN ('waiting', 'activated')),
+    release_ready INTEGER NOT NULL DEFAULT 0,
+    next_check_at TEXT,
+    activated_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (request_id, media_type, season_number)
+  );
+
   -- Pedido de Edu (8 ago 2026): borrado de salvados ligado a visionado, no a
   -- días fijos. "Ventana de salvar" = los mismos días que tardaría en
   -- borrarse sola (delete_after_days de la colección origen en el momento del
@@ -404,6 +427,10 @@ db.exec(`
     WHERE decision = 'approved' AND voided_at IS NULL;
   CREATE INDEX IF NOT EXISTS idx_decisions_created ON decisions_log (created_at);
   CREATE INDEX IF NOT EXISTS idx_decisions_request ON decisions_log (request_id);
+  CREATE INDEX IF NOT EXISTS idx_download_waitlist_due
+    ON download_waitlist (state, next_check_at, created_at);
+  CREATE INDEX IF NOT EXISTS idx_download_waitlist_quota
+    ON download_waitlist (user_id, library_id, state);
 `);
 
 // Migración de salvado_messages (tabla creada en el segundo bloque db.exec de
@@ -413,6 +440,7 @@ addColumnIfMissing("ALTER TABLE salvado_messages ADD COLUMN text TEXT NOT NULL D
 // La cola solo avanza cuando ESTA temporada predecesora consta como vista. Sin
 // guardarla, quitar/caducar una temporada podía desbloquear por error la siguiente.
 addColumnIfMissing('ALTER TABLE season_queue ADD COLUMN previous_season_number INTEGER');
+addColumnIfMissing('ALTER TABLE download_waitlist ADD COLUMN release_ready INTEGER NOT NULL DEFAULT 0');
 // Compatibilidad con filas que ya estuvieran en cola antes de guardar el
 // predecesor explícito (las solicitudes normales son temporadas consecutivas).
 db.prepare(`
