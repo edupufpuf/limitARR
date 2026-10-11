@@ -94,16 +94,16 @@ const STAT_TILES = {
   },
 };
 
-function StatTile({ label, value, Icon, tone, iconTone, active, onClick }) {
+function StatTile({ label, value, Icon, active, onClick }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-2xl border px-4 py-4 min-w-0 text-left transition-all active:scale-[.98] ${
-        active ? 'bg-white border-white text-black shadow-[0_12px_35px_-18px_rgba(255,255,255,.55)]' : `${tone} hover:border-bg-600`
+      className={`px-2 py-3 min-w-0 text-left transition-all active:scale-[.98] border-b-2 ${
+        active ? 'border-black text-black' : 'border-transparent text-gray-500 hover:text-black'
       }`}
     >
-      <span className={`w-10 h-10 rounded-full flex items-center justify-center mb-5 ${active ? 'bg-black text-white' : iconTone}`}>
+      <span className={`w-10 h-10 rounded-full flex items-center justify-center mb-4 ${active ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}>
         <Icon className="w-5 h-5" />
       </span>
       <div className="min-w-0 flex items-end justify-between gap-2">
@@ -882,10 +882,10 @@ function DebtorBubble({ debtor, lead, open, onToggle }) {
       onAnimationEnd={() => setWobble(false)}
       onClick={onToggle}
       title={`${user.username} debe ${owed} de ${requested} pedidas (${Math.round(ratio * 100)}%)`}
-      className={`min-w-[180px] flex-1 rounded-2xl border p-4 text-left select-none transition-all active:scale-[.98] ${lead ? 'bg-white text-black border-white' : 'bg-bg-800 border-bg-700 text-white'} ${wobble ? 'animate-debtor-wobble' : ''} ${open ? 'ring-2 ring-accent-400' : ''}`}
+      className={`w-full flex py-4 text-left text-black border-b border-gray-200 select-none transition-all active:opacity-60 ${wobble ? 'animate-debtor-wobble' : ''} ${open ? 'border-b-2 border-b-black' : ''}`}
     >
       <div className="flex items-center gap-3">
-        <span className={`w-11 h-11 rounded-full overflow-hidden flex items-center justify-center flex-shrink-0 ${lead ? 'bg-black text-white' : 'bg-bg-600'}`}>
+        <span className="w-11 h-11 rounded-full overflow-hidden flex items-center justify-center flex-shrink-0 bg-gray-200 text-black">
           {user.isGroup ? (
             <IconUsers className="w-1/2 h-1/2 text-gray-300" />
           ) : user.avatar ? (
@@ -896,11 +896,11 @@ function DebtorBubble({ debtor, lead, open, onToggle }) {
         </span>
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-black leading-tight truncate">{user.username}</span>
-          <span className={`block text-[11px] mt-1 ${lead ? 'text-gray-600' : 'text-gray-500'}`}>{Math.round(ratio * 100)}% de lo pedido sin ver</span>
+          <span className="block text-[11px] mt-1 text-gray-500">{Math.round(ratio * 100)}% de lo pedido sin ver</span>
         </span>
         <span className="text-right">
-          <span className={`block text-3xl font-black tracking-[-0.06em] tabular-nums ${lead ? 'text-black' : 'text-accent-300'}`}>{owed}</span>
-          <span className={`block text-[9px] font-extrabold uppercase tracking-widest ${lead ? 'text-gray-500' : 'text-gray-600'}`}>debe</span>
+          <span className={`block text-3xl font-black tracking-[-0.06em] tabular-nums ${lead ? 'text-accent-600' : 'text-black'}`}>{owed}</span>
+          <span className="block text-[9px] font-extrabold uppercase tracking-widest text-gray-500">debe</span>
         </span>
       </div>
     </button>
@@ -919,7 +919,7 @@ function DebtorBubbles({ debtors, onDetail }) {
         </div>
         <span className="text-xs text-gray-600">Toca para ver el detalle</span>
       </div>
-      <div className="flex gap-3 overflow-x-auto pb-2">
+      <div className="border-t border-gray-200">
         {debtors.map((d, i) => (
           <DebtorBubble
             key={d.user.userId}
@@ -931,7 +931,7 @@ function DebtorBubbles({ debtors, onDetail }) {
         ))}
       </div>
       {open && (
-        <div className="card w-full mt-3 p-5">
+        <div className="w-full mt-3 py-5 border-b border-gray-200 text-black">
           <div className="text-xs uppercase tracking-wider text-gray-500 mb-2">Lo que debe {open.user.username}</div>
           <div className="space-y-2">
             {open.user.libraries.flatMap((lib) =>
@@ -1033,10 +1033,10 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
   const worst = worstLib(user.libraries);
   const pending = totalOutstanding(user.libraries);
   return (
-    <article className={`rounded-3xl border overflow-hidden text-white transition-all ${expanded ? 'bg-bg-800 border-bg-600' : 'bg-bg-800 border-bg-700 hover:border-bg-600'}`}>
+    <article className="border-b border-gray-200 text-black transition-all">
       <button
         onClick={onToggle}
-        className="w-full flex items-center gap-4 p-5 text-left transition-colors"
+        className="w-full flex items-center gap-4 py-5 text-left transition-colors active:opacity-60"
       >
         <BalanceRing balance={worst.balance} limit={worst.limitApplied}>
           {user.isGroup ? (
@@ -1044,7 +1044,7 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
           ) : user.avatar ? (
             <img src={user.avatar} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
           ) : (
-            <span className="text-xs font-bold">{user.username.slice(0, 2).toUpperCase()}</span>
+            <span className="text-xs font-bold text-white">{user.username.slice(0, 2).toUpperCase()}</span>
           )}
         </BalanceRing>
         <div className="flex-1 min-w-0 self-stretch flex flex-col justify-center">
@@ -1082,11 +1082,11 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
             <IconEye className="w-4 h-4" />
           </button>
         )}
-        <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm transition-colors ${expanded ? 'bg-white text-black' : 'bg-bg-700 text-gray-400'}`}>{expanded ? '−' : '+'}</span>
+        <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm transition-colors ${expanded ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}>{expanded ? '−' : '+'}</span>
       </button>
 
       {expanded && (
-        <div className="border-t border-bg-700 p-5 space-y-6 bg-bg-900/50">
+        <div className="border-t border-gray-200 py-5 space-y-6 bg-white">
           {user.monthlyTotal?.enabled && (
             <button
               type="button"
@@ -1103,7 +1103,7 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
           {user.libraries.map((lib) => {
             const key = `${user.userId}-${lib.libraryId}`;
             return (
-              <div key={key} className="rounded-2xl border border-bg-700 bg-bg-800 p-4">
+              <div key={key} className="py-4 border-b border-gray-200 last:border-b-0">
                 <div className="flex flex-wrap items-center gap-3 text-sm mb-3">
                   <span className="flex-1 truncate font-black text-base">{lib.libraryName}</span>
                   <span className="text-gray-400 tabular-nums">
@@ -1604,7 +1604,7 @@ export default function Quota({ onNavigate }) {
 
   return (
     <div>
-      <div className="rounded-[2rem] border border-bg-700 bg-bg-800 text-white p-6 sm:p-8 flex flex-wrap items-end justify-between gap-5 mb-8">
+      <div className="pb-8 border-b border-gray-200 text-black flex flex-wrap items-end justify-between gap-5 mb-8">
         <div>
           <p className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-gray-600 mb-3">Administración</p>
           <h2 className="page-title">Cupo</h2>
@@ -1690,7 +1690,7 @@ export default function Quota({ onNavigate }) {
       <button
         type="button"
         onClick={() => onNavigate?.('movie-history')}
-        className="rounded-2xl border border-bg-700 bg-bg-800 text-white w-full mb-6 p-5 flex items-center justify-between gap-4 text-left hover:border-white/40 transition-colors"
+        className="w-full mb-6 py-5 border-y border-gray-200 text-black flex items-center justify-between gap-4 text-left active:opacity-60 transition-opacity"
       >
         <span>
           <span className="block font-black text-lg tracking-tight">Antigüedad de películas</span>
@@ -1699,24 +1699,24 @@ export default function Quota({ onNavigate }) {
         <span className="w-10 h-10 rounded-full bg-white text-black flex items-center justify-center font-black flex-shrink-0">→</span>
       </button>
 
-      <div className="rounded-2xl border border-bg-700 bg-bg-900 p-3 flex flex-wrap items-center gap-3 mb-5">
+      <div className="py-4 flex flex-wrap items-center gap-3 mb-2 border-b border-gray-200">
         <div className="relative max-w-xs">
           <IconSearch className="w-4 h-4 text-gray-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Buscar usuario…"
-            className="input pl-8"
+            className="input pl-8 !bg-[#f3f3f3] !border-transparent !text-black placeholder:!text-gray-500"
           />
         </div>
-        <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="input w-auto py-1.5">
+        <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="input w-auto py-1.5 !bg-[#f3f3f3] !border-transparent !text-black">
           <option value="busiest">Más ocupados primero</option>
           <option value="quietest">Menos ocupados primero</option>
           <option value="name">Nombre (A-Z)</option>
         </select>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
+      <div className="flex flex-col">
         {visibleUsers.map((u) => (
           <UserCard
             key={u.userId}

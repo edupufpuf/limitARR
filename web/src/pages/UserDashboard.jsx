@@ -9,20 +9,20 @@ import { downloadStatusLabel, downloadStatusBg, downloadStatusChipText } from '.
 function LibraryCard({ library, onDetail }) {
   const percent = library.limitApplied > 0 ? Math.max(0, Math.min(100, (library.balance / library.limitApplied) * 100)) : 0;
   return (
-    <section className="card p-6 sm:p-7 overflow-hidden">
+    <section className="py-7 sm:py-9 text-black border-b border-gray-200 last:border-b-0">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-gray-500">Biblioteca</p>
-          <h3 className="font-black tracking-tight text-xl mt-1">{library.libraryName}</h3>
-          <p className="text-sm text-gray-400 mt-1">{library.outstanding} pendiente{library.outstanding === 1 ? '' : 's'} de ver</p>
+          <h3 className="font-black tracking-tight text-2xl mt-1">{library.libraryName}</h3>
+          <p className="text-sm text-gray-500 mt-1">{library.outstanding} pendiente{library.outstanding === 1 ? '' : 's'} de ver</p>
         </div>
         <div className="text-right">
-          <div className="text-5xl leading-none font-black tracking-[-0.06em] text-white">{library.balance}</div>
+          <div className="text-5xl leading-none font-black tracking-[-0.06em] text-black">{library.balance}</div>
           <div className="text-xs font-bold text-gray-500 mt-1">de {library.limitApplied} libres</div>
         </div>
       </div>
-      <div className="h-1.5 rounded-full bg-bg-700 mt-6 overflow-hidden">
-        <div className="h-full rounded-full bg-white" style={{ width: `${percent}%` }} />
+      <div className="h-1.5 rounded-full bg-gray-200 mt-6 overflow-hidden">
+        <div className="h-full rounded-full bg-black" style={{ width: `${percent}%` }} />
       </div>
       {library.pendingItems?.length > 0 && (
         <div className="grid grid-cols-3 sm:grid-cols-5 gap-3 mt-5">
@@ -69,7 +69,7 @@ function LibraryCard({ library, onDetail }) {
                   </span>
                 )}
               </button>
-              <p className="text-[11px] text-gray-400 mt-1 line-clamp-2">{item.title}</p>
+              <p className="text-[11px] text-gray-600 mt-1 line-clamp-2">{item.title}</p>
             </div>
           ))}
         </div>
@@ -193,16 +193,16 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
   }
 
   return (
-    <div className="min-h-screen bg-[#f3f3f3] text-gray-950">
-      <header className="border-b border-bg-700 bg-black/95 sticky top-0 z-10 backdrop-blur-xl">
+    <div className="min-h-screen bg-white text-gray-950">
+      <header className="border-b border-gray-200 bg-white/95 sticky top-0 z-10 backdrop-blur-xl">
         <div className="max-w-6xl mx-auto h-[72px] px-5 sm:px-8 flex items-center justify-between">
-          <Wordmark className="text-2xl" />
-          <div className="flex items-center gap-3 text-sm text-gray-400">
+          <Wordmark className="text-2xl" dark />
+          <div className="flex items-center gap-3 text-sm text-gray-600">
             <span>{session?.username}</span>
             {impersonating ? (
               <button onClick={stopImpersonating} className="btn btn-ghost py-1 px-2.5 text-xs">Volver a admin</button>
             ) : (
-              <button onClick={logout} aria-label="Cerrar sesión" className="p-2 hover:text-white"><IconLogout className="w-5 h-5" /></button>
+              <button onClick={logout} aria-label="Cerrar sesión" className="p-2 hover:text-black"><IconLogout className="w-5 h-5" /></button>
             )}
           </div>
         </div>
@@ -213,7 +213,7 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
         </div>
       )}
       <main className="max-w-6xl mx-auto p-5 sm:p-8 lg:py-12 pb-28 sm:pb-8">
-        <section id="resumen" className="scroll-mt-24 relative overflow-hidden rounded-[2rem] bg-white text-black p-6 sm:p-9 mb-6">
+        <section id="resumen" className="scroll-mt-24 text-black pt-2 sm:pt-4 pb-9 border-b border-gray-200 mb-8">
           <div className="relative z-[1] flex flex-col sm:flex-row sm:items-end justify-between gap-8">
             <div>
               <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">Tu espacio disponible</p>
@@ -234,14 +234,14 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
             </div>
           </div>
         </section>
-        {error && <div role="alert" className="card p-4 mb-5 text-accent-400">{error}</div>}
+        {error && <div role="alert" className="py-4 mb-5 border-y border-accent-200 text-accent-600">{error}</div>}
         <div id="bibliotecas" className="scroll-mt-24 flex items-end justify-between gap-4 mb-4 mt-8">
           <div>
             <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-gray-600">Resumen</p>
             <h2 className="text-2xl font-black tracking-tight mt-1">Mis bibliotecas</h2>
           </div>
         </div>
-        <div className="grid md:grid-cols-2 gap-4">
+        <div>
           {quota?.libraries?.map((library) => (
             <LibraryCard
               key={library.libraryId}
@@ -250,10 +250,10 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
             />
           ))}
         </div>
-        {quota && quota.libraries?.length === 0 && <div className="card p-6 text-gray-400">Todavía no hay cupo calculado para tu cuenta.</div>}
+        {quota && quota.libraries?.length === 0 && <div className="py-8 border-y border-gray-200 text-gray-500">Todavía no hay cupo calculado para tu cuenta.</div>}
 
         {quota?.monthlyTotal?.enabled && (
-          <section id="salvadas" className="card scroll-mt-24 p-5 mt-8">
+          <section className="py-8 mt-8 border-t border-gray-200 text-black">
             <h2 className="font-extrabold text-xl mb-1">📅 Cupo mensual total</h2>
             <p className="text-sm text-gray-500 mb-4">
               Límite de cuántas puedes pedir al mes en total, sumando todas las bibliotecas
@@ -268,15 +268,15 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
                   type="button"
                   onClick={() => setHistoryTarget({ lib: null })}
                   title="Ver qué has pedido este mes"
-                  className="w-full text-left rounded-xl bg-bg-950/60 p-4 max-w-sm hover:brightness-110"
+                  className="w-full text-left py-4 max-w-sm border-y border-gray-200 active:opacity-60"
                 >
                   <div className="flex items-center justify-between gap-4">
                     <span className="font-semibold">Todas las bibliotecas</span>
-                    <div className={`text-2xl font-black tabular-nums ${maxed ? 'text-accent-400' : 'text-white'}`}>
+                    <div className={`text-2xl font-black tabular-nums ${maxed ? 'text-accent-500' : 'text-black'}`}>
                       {mt.used}<span className="text-sm text-gray-500 font-bold">/{mt.limit}</span>
                     </div>
                   </div>
-                  <div className="h-1.5 rounded-full bg-bg-800 mt-3 overflow-hidden">
+                  <div className="h-1.5 rounded-full bg-gray-300 mt-3 overflow-hidden">
                     <div
                       className={`h-full rounded-full ${maxed ? 'bg-accent-500' : 'bg-sky-400'}`}
                       style={{ width: `${pct}%` }}
@@ -294,13 +294,13 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
         )}
 
         {quota?.libraries?.some((l) => l.monthly?.enabled) && (
-          <section className="card p-5 mt-8">
+          <section className="py-8 mt-8 border-t border-gray-200 text-black">
             <h2 className="font-extrabold text-xl mb-1">📅 Cupo mensual</h2>
             <p className="text-sm text-gray-500 mb-4">
               Límite de cuántas puedes pedir al mes — el tuyo si tienes uno particular, si no el general de la
               biblioteca. Cuentan aunque ya te las hayas visto.
             </p>
-            <div className="grid sm:grid-cols-2 gap-4">
+            <div className="divide-y divide-gray-200 border-t border-gray-200">
               {quota.libraries
                 .filter((l) => l.monthly?.enabled)
                 .map((l) => {
@@ -312,15 +312,15 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
                       key={l.libraryId}
                       onClick={() => setHistoryTarget({ lib: l })}
                       title="Ver qué has pedido este mes"
-                      className="text-left rounded-xl bg-bg-950/60 p-4 hover:brightness-110"
+                      className="w-full text-left py-4 active:opacity-60"
                     >
                       <div className="flex items-center justify-between gap-4">
                         <span className="font-semibold">{l.libraryName}</span>
-                        <div className={`text-2xl font-black tabular-nums ${maxed ? 'text-accent-400' : 'text-white'}`}>
+                        <div className={`text-2xl font-black tabular-nums ${maxed ? 'text-accent-500' : 'text-black'}`}>
                           {l.monthly.used}<span className="text-sm text-gray-500 font-bold">/{l.monthly.limit}</span>
                         </div>
                       </div>
-                      <div className="h-1.5 rounded-full bg-bg-800 mt-3 overflow-hidden">
+                      <div className="h-1.5 rounded-full bg-gray-300 mt-3 overflow-hidden">
                         <div
                           className={`h-full rounded-full ${maxed ? 'bg-accent-500' : 'bg-sky-400'}`}
                           style={{ width: `${pct}%` }}
@@ -339,7 +339,7 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
         )}
 
         {salvados.length > 0 && (
-          <section className="card p-5 mt-8">
+          <section id="salvadas" className="scroll-mt-24 py-8 mt-8 border-t border-gray-200 text-black">
             <h2 className="font-extrabold text-xl mb-1">💾 Salvadas para ver</h2>
             <p className="text-sm text-gray-500 mb-4">
               Películas que salvaste del borrado con el botón de Telegram. Cuando acabe la cuenta atrás, se borran.
@@ -349,7 +349,7 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
         )}
 
         {quota?.recentlyWatched?.length > 0 && (
-          <section className="card p-5 mt-8">
+          <section className="py-8 mt-8 border-t border-gray-200 text-black">
             <h2 className="font-extrabold text-xl mb-1">Vistas en los últimos 30 días</h2>
             <p className="text-sm text-gray-500 mb-4">Lo que has pedido y ya has visto recientemente.</p>
             <div className="flex flex-wrap gap-2">
@@ -360,13 +360,13 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
           </section>
         )}
 
-        <section id="avisos" className="card scroll-mt-24 p-5 mt-8 max-w-xl">
-          <div className="flex items-center gap-3 mb-4"><IconBell className="w-6 h-6 text-accent-400" /><h2 className="font-extrabold text-xl">Mis avisos</h2></div>
+        <section id="avisos" className="scroll-mt-24 py-8 mt-8 border-t border-gray-200 text-black max-w-xl">
+          <div className="flex items-center gap-3 mb-4"><span className="w-11 h-11 rounded-full bg-[#f3f3f3] flex items-center justify-center"><IconBell className="w-5 h-5 text-black" /></span><h2 className="font-extrabold text-xl">Mis avisos</h2></div>
 
           {link ? (
             <>
               <p className="text-sm text-gray-500 mb-4">
-                Avisos activados por Telegram{link.label ? <> · <span className="text-gray-300">{link.label}</span></> : null}.
+                Avisos activados por Telegram{link.label ? <> · <span className="text-gray-700">{link.label}</span></> : null}.
               </p>
               <button type="button" onClick={removeNotifications} className="btn btn-ghost">Desactivar</button>
             </>
@@ -374,7 +374,7 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
             <>
               <p className="text-sm text-gray-500 mb-4">Un click y te avisamos por Telegram de los cambios en tu cupo.</p>
               <div className="flex flex-wrap items-center gap-2">
-                <button type="button" onClick={connectTelegram} disabled={connecting} className="btn btn-primary">
+                <button type="button" onClick={connectTelegram} disabled={connecting} className="btn !bg-black !text-white">
                   {connecting ? 'Esperando confirmación en Telegram…' : 'Vincular con Telegram'}
                 </button>
                 {connecting && <button type="button" onClick={cancelConnect} className="btn btn-ghost">Cancelar</button>}
@@ -400,14 +400,14 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
           {message && <p aria-live="polite" className={`text-sm mt-3 ${message.startsWith('No ') ? 'text-accent-400' : 'text-green-400'}`}>{message}</p>}
         </section>
       </main>
-      <nav aria-label="Navegación del panel" className="sm:hidden fixed inset-x-0 bottom-0 z-40 h-[76px] border-t border-bg-700 bg-black px-2 py-1.5 flex items-stretch justify-around">
+      <nav aria-label="Navegación del panel" className="sm:hidden fixed inset-x-0 bottom-0 z-40 h-[76px] border-t border-gray-200 bg-white px-2 py-1.5 flex items-stretch justify-around">
         {[
           { href: '#resumen', label: 'Inicio', Icon: IconGauge },
           { href: '#bibliotecas', label: 'Cupo', Icon: IconFilm },
           ...(salvados.length > 0 ? [{ href: '#salvadas', label: 'Salvadas', Icon: IconSave }] : []),
           { href: '#avisos', label: 'Avisos', Icon: IconBell },
         ].map(({ href, label, Icon }) => (
-          <a key={href} href={href} className="min-w-[70px] flex flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-extrabold text-gray-400 active:bg-white active:text-black">
+          <a key={href} href={href} className="min-w-[70px] flex flex-col items-center justify-center gap-1 text-[10px] font-extrabold text-gray-500 active:text-black">
             <Icon className="w-5 h-5" />
             {label}
           </a>

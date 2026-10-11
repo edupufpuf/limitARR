@@ -82,10 +82,10 @@ function DashboardInner({ onLoggedOut }) {
   }
 
   return (
-    <div className="min-h-screen flex flex-col sm:flex-row bg-[#f3f3f3] text-gray-950">
+    <div className="min-h-screen flex flex-col sm:flex-row bg-white text-gray-950">
       {/* Navegación tipo app: barra inferior en móvil y lateral en escritorio. */}
       <nav
-        className="fixed inset-x-0 bottom-0 sm:sticky sm:inset-auto sm:top-0 z-40 sm:z-auto w-full sm:w-[232px] h-[76px] sm:h-screen overflow-x-auto sm:overflow-y-auto bg-black border-t sm:border-t-0 sm:border-r border-bg-700 px-2 sm:px-4 py-1.5 sm:py-6 flex sm:flex-col flex-shrink-0"
+        className="fixed inset-x-0 bottom-0 sm:sticky sm:inset-auto sm:top-0 z-40 sm:z-auto w-full sm:w-[232px] h-[76px] sm:h-screen overflow-x-auto sm:overflow-y-auto bg-white sm:bg-black border-t sm:border-t-0 sm:border-r border-gray-200 sm:border-bg-700 px-2 sm:px-4 py-1.5 sm:py-6 flex sm:flex-col flex-shrink-0"
       >
         <div className="hidden sm:flex mb-10 px-2 items-center justify-between">
           <Wordmark className="text-[30px]" />
@@ -111,8 +111,8 @@ function DashboardInner({ onLoggedOut }) {
               onClick={() => goTab(key)}
               className={`relative flex min-w-[72px] sm:min-w-0 sm:min-h-12 flex-col sm:flex-row items-center justify-center sm:justify-start gap-1 sm:gap-3 sm:w-full text-center sm:text-left px-2 sm:px-4 py-2 sm:py-3 rounded-xl text-[10px] sm:text-[15px] leading-none font-extrabold tracking-tight transition-all ${
                 tab === key
-                  ? 'bg-white text-black'
-                  : 'text-gray-300 hover:text-white hover:bg-bg-800'
+                  ? 'bg-[#f3f3f3] sm:bg-white text-black'
+                  : 'text-gray-500 sm:text-gray-300 hover:text-black sm:hover:text-white hover:bg-gray-100 sm:hover:bg-bg-800'
               }`}
             >
               <Icon className="w-5 h-5 flex-shrink-0" />
@@ -164,7 +164,7 @@ function DashboardInner({ onLoggedOut }) {
       </nav>
 
       {/* Cabecera mínima — la navegación vive abajo, como en una app nativa. */}
-      <header className="sm:hidden flex items-center justify-between px-5 h-[68px] bg-[#f3f3f3]/95 border-b border-black/10 flex-shrink-0 sticky top-0 z-30 backdrop-blur-xl">
+      <header className="sm:hidden flex items-center justify-between px-5 h-[68px] bg-white/95 border-b border-gray-200 flex-shrink-0 sticky top-0 z-30 backdrop-blur-xl">
         <Wordmark className="text-[23px]" dark />
         <span className="text-[13px] font-extrabold text-gray-500">{label}</span>
         <div className="flex items-center gap-1">
