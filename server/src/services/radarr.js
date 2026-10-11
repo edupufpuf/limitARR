@@ -47,13 +47,13 @@ export async function setRadarrMovieMonitored(tmdbId, monitored) {
   return movie.id;
 }
 
-export async function getRadarrWaitState(tmdbId) {
+export async function getRadarrWaitState(tmdbId, { checkReleases = true } = {}) {
   const movie = await movieByTmdbId(tmdbId);
   if (!movie) return { externalServiceId: null, downloaded: false, downloading: false, releaseAvailable: false };
   const queue = await call('/queue?page=1&pageSize=100');
   const downloading = (queue?.records || []).some((row) => Number(row.movieId) === Number(movie.id));
   let releaseAvailable = false;
-  if (!movie.hasFile && !downloading) {
+  if (checkReleases && !movie.hasFile && !downloading) {
     const releases = await call(`/release?movieId=${movie.id}`);
     releaseAvailable = Array.isArray(releases) && releases.some((release) => (release.rejections || []).length === 0);
   }

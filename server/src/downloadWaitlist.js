@@ -138,8 +138,8 @@ export async function reconcileApprovedWaitlist() {
   for (const row of rows) {
     const details = await getMediaDetails(row.media_type, row.tmdb_id, row.season_number);
     const waitState = row.media_type === 'movie'
-      ? await getRadarrWaitState(row.tmdb_id)
-      : await getSonarrWaitState(details.externalServiceId, row.season_number);
+      ? await getRadarrWaitState(row.tmdb_id, { checkReleases: false })
+      : await getSonarrWaitState(details.externalServiceId, row.season_number, { checkReleases: false });
     const unavailable = row.media_type === 'movie'
       ? !waitState.downloaded
       : (details.seasonStatuses?.[row.season_number] ?? 0) < 4;

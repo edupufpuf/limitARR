@@ -40,7 +40,7 @@ export async function setSonarrSeasonMonitored(seriesId, seasonNumber, monitored
   return series.id;
 }
 
-export async function getSonarrWaitState(seriesId, seasonNumber) {
+export async function getSonarrWaitState(seriesId, seasonNumber, { checkReleases = true } = {}) {
   if (seriesId == null) return { externalServiceId: null, downloaded: false, downloading: false, releaseAvailable: false };
   const series = await call(`/series/${seriesId}`);
   const season = series?.seasons?.find((row) => Number(row.seasonNumber) === Number(seasonNumber));
@@ -51,7 +51,7 @@ export async function getSonarrWaitState(seriesId, seasonNumber) {
     Number(row.seriesId) === Number(series.id) && Number(row.episode?.seasonNumber) === Number(seasonNumber)
   );
   let releaseAvailable = false;
-  if (!downloaded && !downloading) {
+  if (checkReleases && !downloaded && !downloading) {
     const releases = await call(`/release?seriesId=${series.id}&seasonNumber=${seasonNumber}`);
     releaseAvailable = Array.isArray(releases) && releases.some((release) => (release.rejections || []).length === 0);
   }
