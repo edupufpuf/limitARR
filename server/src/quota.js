@@ -1260,6 +1260,26 @@ async function lookupRatingKey({ title, mediaType, tmdbId, seasonNumber }) {
 // La pestaña Cupo lee de quota_cache, no calcula en vivo — cualquier cosa que
 // cambie el resultado de getBalance (override, reset, ...) tiene que llamar esto
 // para que el panel lo refleje al momento en vez de esperar al siguiente sondeo.
+export function applyWaitlistAccounting(limit, outstanding, pendingItems, waitRows) {
+  let effectiveOutstanding = outstanding;
+  for (const item of pendingItems) {
+    const wait = waitRows.find((row) =>
+      Number(row.request_id) === Number(item.requestId) &&
+      Number(row.season_number) === Number(item.seasonNumber ?? -1)
+    );
+    if (!wait || item.bypassed) continue;
+    const countedBySeerr = !item.unavailable;
+    const mustReserve = wait.state === 'activated';
+    if (countedBySeerr && !mustReserve) effectiveOutstanding -= 1;
+    if (!countedBySeerr && mustReserve) effectiveOutstanding += 1;
+  }
+  effectiveOutstanding = Math.max(0, effectiveOutstanding);
+  return {
+    outstanding: effectiveOutstanding,
+    balance: Math.max(0, limit - effectiveOutstanding),
+  };
+}
+
 export async function refreshQuotaCache(userId, libraryId) {
   // Issue #4: la caché de un miembro de grupo agregado es la del grupo — se
   // escribe bajo -group_id y se borran las filas individuales de los miembros,
@@ -1291,6 +1311,7 @@ export async function refreshQuotaCache(userId, libraryId) {
       else item.radarrLabel = 'Pendiente de cupo';
     }
   }
+  const effective = applyWaitlistAccounting(limit, outstanding, pendingItems, waitRows);
   for (const item of pendingItems) {
     item.ratingKey = await lookupRatingKey(item);
   }
@@ -1298,10 +1319,10 @@ export async function refreshQuotaCache(userId, libraryId) {
     for (const memberId of identity.memberIds) deleteQuotaCache.run(memberId, libraryId);
   }
   upsertQuotaCache.run(
-    identity.cacheId, libraryId, limit, outstanding, balance, JSON.stringify(pendingItems),
+    identity.cacheId, libraryId, limit, effective.outstanding, effective.balance, JSON.stringify(pendingItems),
     monthly.enabled ? 1 : 0, monthly.limit, monthly.used
   );
-  return { limit, outstanding, balance, pendingItems, monthly };
+  return { limit, ...effective, pendingItems, monthly };
 }
 
 // Issue #5: ver una película en Plex no dispara ningún evento hacia limitARR, así

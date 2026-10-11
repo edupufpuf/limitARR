@@ -27,6 +27,7 @@ import {
   deleteRoleOverride,
   refreshQuotaCache,
   shouldVoidApprovedRequest,
+  applyWaitlistAccounting,
 } from '../src/quota.js';
 import { setRawSetting, updateSettings } from '../src/settings.js';
 import { db } from '../src/db.js';
@@ -35,6 +36,20 @@ test('resolveLimit: el primer override no-null gana, en el orden dado', () => {
   assert.equal(resolveLimit([5, 3], 4), 5);
   assert.equal(resolveLimit([null, 3], 4), 3);
   assert.equal(resolveLimit([null, null], 4), 4);
+});
+
+test('waitlist: una espera no resta cupo y una descarga activada si reserva hueco', () => {
+  const falselyAvailable = [{ requestId: 10, seasonNumber: 3, unavailable: false, bypassed: false }];
+  assert.deepEqual(
+    applyWaitlistAccounting(2, 3, falselyAvailable, [{ request_id: 10, season_number: 3, state: 'waiting' }]),
+    { outstanding: 2, balance: 0 }
+  );
+
+  const unavailable = [{ requestId: 11, seasonNumber: null, unavailable: true, bypassed: false }];
+  assert.deepEqual(
+    applyWaitlistAccounting(2, 0, unavailable, [{ request_id: 11, season_number: -1, state: 'activated' }]),
+    { outstanding: 1, balance: 1 }
+  );
 });
 
 test('resolveLimit: 0 es un override válido, no "sin valor"', () => {

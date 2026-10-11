@@ -1,5 +1,5 @@
 import { db } from './db.js';
-import { getBalance, refreshQuotaCache } from './quota.js';
+import { applyWaitlistAccounting, getBalance, refreshQuotaCache } from './quota.js';
 import { getMediaDetails, getMovieAvailability } from './services/seerr.js';
 import { getRadarrWaitState, searchRadarrMovie, setRadarrMovieMonitored } from './services/radarr.js';
 import { getSonarrWaitState, searchSonarrSeason, setSonarrSeasonMonitored } from './services/sonarr.js';
@@ -220,17 +220,9 @@ export async function processDownloadWaitlist() {
     }
   }
 
-  // Las activaciones ya iniciadas reservan hueco aunque el archivo todavia no
-  // este en Plex. Sin esta reserva, dos ciclos simultaneos podrian excederlo.
   const liveRows = listRows.all();
-  const reserved = new Map();
-  for (const row of liveRows.filter((item) => item.state === 'activated')) {
-    const key = `${row.user_id}:${row.library_id}`;
-    reserved.set(key, (reserved.get(key) || 0) + 1);
-  }
 
   for (const row of liveRows.filter((item) => item.state === 'waiting' && isDue(item))) {
-    const key = `${row.user_id}:${row.library_id}`;
     let state;
     try {
       state = await stateFor(row);
@@ -246,19 +238,21 @@ export async function processDownloadWaitlist() {
     setReleaseReady.run(1, row.id);
 
     const quota = await getBalance(row.user_id, row.library_id);
-    if (quota.balance - (reserved.get(key) || 0) <= 0) {
+    const pairRows = listRows.all().filter((item) =>
+      item.user_id === row.user_id && item.library_id === row.library_id
+    );
+    const effective = applyWaitlistAccounting(quota.limit, quota.outstanding, quota.pendingItems, pairRows);
+    if (effective.balance <= 0) {
       postponeMinutes.run(QUOTA_RECHECK_MINUTES, row.id);
       continue;
     }
 
     // Reserva en SQLite antes de tocar Radarr/Sonarr.
     if (setActivated.run(row.id).changes !== 1) continue;
-    reserved.set(key, (reserved.get(key) || 0) + 1);
     try {
       const externalId = await activate({ ...row, external_service_id: state.externalServiceId ?? row.external_service_id });
       if (externalId != null) setExternalId.run(externalId, row.id);
     } catch (err) {
-      reserved.set(key, Math.max(0, (reserved.get(key) || 1) - 1));
       setWaiting.run(RETRY_HOURS, row.id);
       console.error('[waitlist] no se pudo activar la descarga:', err.message);
     }
