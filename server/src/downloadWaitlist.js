@@ -117,6 +117,21 @@ export async function enqueueApprovedDownload(base, details = {}) {
 // y permite desplegar la correccion sin cancelar ni volver a crear peticiones.
 export async function reconcileApprovedWaitlist() {
   pruneOrphans.run();
+  // La cache ya contiene exactamente los contenidos que siguen pendientes.
+  // Usarla como indice evita volver a consultar Seerr/Radarr por todo el
+  // historial de aprobaciones (incluidas cientos que ya se vieron) en cada
+  // ciclo.
+  const candidateKeys = new Set();
+  for (const cache of db.prepare('SELECT user_id,library_id,pending_items FROM quota_cache').all()) {
+    let items = [];
+    try { items = JSON.parse(cache.pending_items || '[]'); } catch { /* cache antigua/corrupta: se ignora */ }
+    for (const item of items) {
+      if (!item.unavailable && !(item.mediaStatus != null && Number(item.mediaStatus) < 4)) continue;
+      candidateKeys.add(`${cache.library_id}:${item.requestId}:${item.seasonNumber ?? -1}`);
+    }
+  }
+  if (candidateKeys.size === 0) return;
+
   const rows = db.prepare(`
     SELECT dl.request_id,dl.user_id,dl.username,dl.library_id,dl.media_type,dl.tmdb_id,dl.season_number
     FROM decisions_log dl
@@ -134,7 +149,9 @@ export async function reconcileApprovedWaitlist() {
           AND COALESCE(watched.season_number,-1)=COALESCE(dl.season_number,-1)
           AND watched.decision='watched'
       )
-  `).all();
+  `).all().filter((row) => candidateKeys.has(
+    `${row.library_id}:${row.request_id}:${row.season_number ?? -1}`
+  ));
   for (const row of rows) {
     const details = await getMediaDetails(row.media_type, row.tmdb_id, row.season_number);
     const waitState = row.media_type === 'movie'

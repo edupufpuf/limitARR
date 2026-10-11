@@ -1041,8 +1041,15 @@ function formatMediaTitle(mediaType, title, seasonNumber = null) {
 }
 
 export function startScheduler() {
-  runPollCycle().catch((err) => console.error('[scheduler] initial cycle failed:', err));
+  let running = null;
+  const launch = () => {
+    if (running) return;
+    running = runPollCycle()
+      .catch((err) => console.error('[scheduler] cycle failed:', err))
+      .finally(() => { running = null; });
+  };
+  launch();
   setInterval(() => {
-    runPollCycle().catch((err) => console.error('[scheduler] cycle failed:', err));
+    launch();
   }, config.pollIntervalMs);
 }
