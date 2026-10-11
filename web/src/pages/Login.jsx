@@ -56,7 +56,7 @@ export default function Login({ onLoggedIn }) {
   }
 
   return (
-    <div className="relative min-h-screen grid lg:grid-cols-2 bg-black">
+    <div className="relative min-h-screen grid lg:grid-cols-2 bg-[#f3f3f3]">
       <div className="hidden lg:flex flex-col justify-between p-14 border-r border-bg-700 bg-bg-900">
         <Wordmark className="text-[38px]" />
         <div className="max-w-md">
@@ -68,9 +68,9 @@ export default function Login({ onLoggedIn }) {
       <div className="flex items-center justify-center p-5 sm:p-10">
       <form onSubmit={submit} className="w-full max-w-sm">
         <div className="mb-10 lg:hidden">
-          <Wordmark className="text-[38px]" />
+          <Wordmark className="text-[38px]" dark />
         </div>
-        <h1 className="text-3xl font-black tracking-tight text-white mb-2">Entrar</h1>
+        <h1 className="text-3xl font-black tracking-tight text-black mb-2">Entrar</h1>
         <p className="text-gray-500 mb-8">Accede con tu cuenta de Plex o como administrador.</p>
         <input
           type="password"

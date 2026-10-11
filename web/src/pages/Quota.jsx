@@ -1033,7 +1033,7 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
   const worst = worstLib(user.libraries);
   const pending = totalOutstanding(user.libraries);
   return (
-    <article className={`rounded-3xl border overflow-hidden transition-all ${expanded ? 'bg-bg-800 border-bg-600' : 'bg-bg-800 border-bg-700 hover:border-bg-600'}`}>
+    <article className={`rounded-3xl border overflow-hidden text-white transition-all ${expanded ? 'bg-bg-800 border-bg-600' : 'bg-bg-800 border-bg-700 hover:border-bg-600'}`}>
       <button
         onClick={onToggle}
         className="w-full flex items-center gap-4 p-5 text-left transition-colors"
@@ -1604,7 +1604,7 @@ export default function Quota({ onNavigate }) {
 
   return (
     <div>
-      <div className="rounded-[2rem] border border-bg-700 bg-bg-800 p-6 sm:p-8 flex flex-wrap items-end justify-between gap-5 mb-8">
+      <div className="rounded-[2rem] border border-bg-700 bg-bg-800 text-white p-6 sm:p-8 flex flex-wrap items-end justify-between gap-5 mb-8">
         <div>
           <p className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-gray-600 mb-3">Administración</p>
           <h2 className="page-title">Cupo</h2>
@@ -1690,7 +1690,7 @@ export default function Quota({ onNavigate }) {
       <button
         type="button"
         onClick={() => onNavigate?.('movie-history')}
-        className="rounded-2xl border border-bg-700 bg-bg-800 w-full mb-6 p-5 flex items-center justify-between gap-4 text-left hover:border-white/40 transition-colors"
+        className="rounded-2xl border border-bg-700 bg-bg-800 text-white w-full mb-6 p-5 flex items-center justify-between gap-4 text-left hover:border-white/40 transition-colors"
       >
         <span>
           <span className="block font-black text-lg tracking-tight">Antigüedad de películas</span>

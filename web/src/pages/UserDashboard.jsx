@@ -193,7 +193,7 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
   }
 
   return (
-    <div className="min-h-screen bg-bg-950 text-gray-100">
+    <div className="min-h-screen bg-[#f3f3f3] text-gray-950">
       <header className="border-b border-bg-700 bg-black/95 sticky top-0 z-10 backdrop-blur-xl">
         <div className="max-w-6xl mx-auto h-[72px] px-5 sm:px-8 flex items-center justify-between">
           <Wordmark className="text-2xl" />

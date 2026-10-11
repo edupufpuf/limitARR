@@ -84,7 +84,7 @@ function DashboardInner({ onLoggedOut }) {
   }
 
   return (
-    <div className="min-h-screen flex flex-col sm:flex-row bg-bg-950 text-gray-100">
+    <div className="min-h-screen flex flex-col sm:flex-row bg-[#f3f3f3] text-gray-950">
       {/* Overlay — solo móvil, cierra el menú al tocar fuera */}
       {menuOpen && (
         <div

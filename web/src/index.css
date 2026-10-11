@@ -5,8 +5,7 @@
 @layer base {
   body {
     @apply text-[16px] font-medium antialiased;
-    background-color: theme('colors.bg.950');
-    color-scheme: dark;
+    background-color: #f3f3f3;
   }
 
   ::selection {
@@ -32,7 +31,7 @@
   }
 
   .card {
-    @apply bg-bg-800 border border-bg-700 rounded-3xl shadow-card;
+    @apply bg-bg-800 border border-bg-700 rounded-3xl shadow-card text-white;
   }
 
   .input {
@@ -43,7 +42,7 @@
   }
 
   .page-title {
-    @apply text-[34px] sm:text-[40px] leading-[1.05] font-black tracking-[-0.035em] text-white;
+    @apply text-[34px] sm:text-[40px] leading-[1.05] font-black tracking-[-0.035em] text-black;
   }
 
   .badge {

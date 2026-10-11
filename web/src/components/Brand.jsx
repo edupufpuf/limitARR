@@ -11,10 +11,10 @@ export function LogoMark({ className = 'w-8 h-8' }) {
   );
 }
 
-export function Wordmark({ className = 'text-xl' }) {
+export function Wordmark({ className = 'text-xl', dark = false }) {
   return (
-    <span className={`${className} font-black tracking-[-0.045em] text-white`}>
-      limit<span className="text-gray-400">ARR</span>
+    <span className={`${className} font-black tracking-[-0.045em] ${dark ? 'text-black' : 'text-white'}`}>
+      limit<span className={dark ? 'text-gray-500' : 'text-gray-400'}>ARR</span>
     </span>
   );
 }
