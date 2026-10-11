@@ -56,31 +56,42 @@ export default function Login({ onLoggedIn }) {
   }
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center p-4 overflow-hidden">
-      <div className="absolute w-[480px] h-[480px] rounded-full bg-accent-600/15 blur-3xl pointer-events-none" />
-      <form onSubmit={submit} className="relative card p-8 w-full max-w-sm">
-        <div className="flex flex-col items-center gap-4 mb-8">
-          <Wordmark className="text-[42px]" />
+    <div className="relative min-h-screen grid lg:grid-cols-2 bg-black">
+      <div className="hidden lg:flex flex-col justify-between p-14 border-r border-bg-700 bg-bg-900">
+        <Wordmark className="text-[38px]" />
+        <div className="max-w-md">
+          <p className="text-5xl font-black tracking-[-0.05em] leading-[1.02] text-white">Tu contenido.<br />Tu cupo.<br />Todo claro.</p>
+          <p className="mt-6 text-gray-400 text-lg">Consulta solicitudes, descargas y límites desde un único lugar.</p>
         </div>
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-gray-600">limitARR</p>
+      </div>
+      <div className="flex items-center justify-center p-5 sm:p-10">
+      <form onSubmit={submit} className="w-full max-w-sm">
+        <div className="mb-10 lg:hidden">
+          <Wordmark className="text-[38px]" />
+        </div>
+        <h1 className="text-3xl font-black tracking-tight text-white mb-2">Entrar</h1>
+        <p className="text-gray-500 mb-8">Accede con tu cuenta de Plex o como administrador.</p>
         <input
           type="password"
           autoFocus
           placeholder="Contraseña admin"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="input py-2 mb-4"
+          className="input mb-4"
         />
         {error && <p className="text-accent-400 text-sm mb-4">{error}</p>}
-        <button type="submit" disabled={loading} className="btn btn-primary w-full py-2">
+        <button type="submit" disabled={loading} className="btn btn-primary w-full">
           {loading ? 'Entrando…' : 'Entrar'}
         </button>
-        <div className="flex items-center gap-3 my-5 text-xs text-gray-600">
+        <div className="flex items-center gap-3 my-6 text-xs font-bold uppercase tracking-[0.14em] text-gray-600">
           <span className="h-px flex-1 bg-bg-600" />o<span className="h-px flex-1 bg-bg-600" />
         </div>
-        <button type="button" onClick={loginWithPlex} disabled={plexLoading} className="btn btn-ghost w-full py-2">
+        <button type="button" onClick={loginWithPlex} disabled={plexLoading} className="btn btn-ghost w-full">
           {plexLoading ? 'Esperando a Plex…' : 'Entrar con Plex'}
         </button>
       </form>
+      </div>
     </div>
   );
 }

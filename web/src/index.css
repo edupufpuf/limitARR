@@ -4,12 +4,17 @@
 
 @layer base {
   body {
-    @apply text-[16px] font-semibold;
+    @apply text-[16px] font-medium antialiased;
     background-color: theme('colors.bg.950');
-    background-image:
-      radial-gradient(ellipse 80% 42% at 15% -10%, rgba(239, 68, 68, 0.10), transparent),
-      radial-gradient(ellipse 55% 35% at 100% 100%, rgba(43, 54, 78, 0.22), transparent);
-    background-attachment: fixed;
+    color-scheme: dark;
+  }
+
+  ::selection {
+    @apply bg-white text-black;
+  }
+
+  * {
+    scrollbar-color: theme('colors.bg.600') theme('colors.bg.950');
   }
 }
 
@@ -17,28 +22,28 @@
   /* Vocabulario de componentes compartido — cambiar aquí re-estiliza todo el panel. */
 
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2 text-[15px] font-bold transition-all disabled:opacity-50 disabled:pointer-events-none;
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-full px-6 py-2.5 text-[15px] font-extrabold tracking-tight transition-all duration-150 disabled:opacity-50 disabled:pointer-events-none;
   }
   .btn-primary {
-    @apply bg-gradient-to-r from-accent-700 via-accent-600 to-accent-500 text-white hover:shadow-glow active:scale-[.98];
+    @apply bg-white text-black hover:bg-gray-200 active:scale-[.98];
   }
   .btn-ghost {
-    @apply bg-bg-800/80 hover:bg-bg-700/80 border border-bg-600/80 text-gray-200 active:scale-[.98];
+    @apply bg-bg-800 hover:bg-bg-700 border border-bg-700 text-white active:scale-[.98];
   }
 
   .card {
-    @apply bg-bg-800/75 border border-bg-700/80 rounded-xl shadow-card;
+    @apply bg-bg-800 border border-bg-700 rounded-3xl shadow-card;
   }
 
   .input {
-    @apply w-full bg-bg-950/60 border border-bg-600/80 rounded-xl px-3.5 py-2 text-[15px] font-semibold text-gray-100 placeholder-gray-600 transition-colors focus:outline-none focus:ring-2 focus:ring-accent-500/50 focus:border-accent-500/50;
+    @apply w-full min-h-12 bg-bg-800 border border-bg-600 rounded-xl px-4 py-2.5 text-[15px] font-semibold text-white placeholder-gray-500 transition-colors focus:outline-none focus:ring-2 focus:ring-white/80 focus:border-white/80;
   }
   .label {
-    @apply block text-sm font-bold text-gray-400 mb-1.5;
+    @apply block text-sm font-bold text-gray-300 mb-2;
   }
 
   .page-title {
-    @apply text-[32px] leading-tight font-extrabold tracking-tight text-white;
+    @apply text-[34px] sm:text-[40px] leading-[1.05] font-black tracking-[-0.035em] text-white;
   }
 
   .badge {
@@ -46,7 +51,7 @@
   }
 
   .th {
-    @apply py-2 pr-4 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-500;
+    @apply py-3 pr-4 text-left text-[11px] font-extrabold uppercase tracking-[0.14em] text-gray-500;
   }
 }
 

@@ -95,11 +95,11 @@ function DashboardInner({ onLoggedOut }) {
 
       {/* Sidebar — fija en desktop, cajón deslizante escondido en móvil */}
       <nav
-        className={`fixed sm:sticky inset-y-0 left-0 sm:top-0 z-30 sm:z-auto w-[240px] sm:w-[220px] h-screen overflow-y-auto bg-gradient-to-b from-bg-900 via-bg-900 to-bg-950 border-r border-bg-700/55 px-4 py-6 flex flex-col flex-shrink-0 shadow-[18px_0_48px_-32px_rgba(0,0,0,.85)] transition-transform duration-300 sm:transition-none ${
+        className={`fixed sm:sticky inset-y-0 left-0 sm:top-0 z-30 sm:z-auto w-[280px] sm:w-[232px] h-screen overflow-y-auto bg-bg-900 border-r border-bg-700 px-4 py-6 flex flex-col flex-shrink-0 transition-transform duration-300 sm:transition-none ${
           menuOpen ? 'translate-x-0' : '-translate-x-full sm:translate-x-0'
         }`}
       >
-        <div className="mb-8 flex items-center justify-between">
+        <div className="mb-10 px-2 flex items-center justify-between">
           <Wordmark className="text-[30px]" />
           <button onClick={() => setMenuOpen(false)} className="sm:hidden text-gray-400 p-1 -mr-1">
             <IconXCircle className="w-6 h-6" />
@@ -124,10 +124,10 @@ function DashboardInner({ onLoggedOut }) {
             <button
               key={key}
               onClick={() => goTab(key)}
-              className={`relative flex items-center gap-3 w-full text-left px-3 py-2.5 rounded-lg text-base leading-none font-bold tracking-tight transition-all ${
+              className={`relative flex min-h-12 items-center gap-3 w-full text-left px-4 py-3 rounded-xl text-[15px] leading-none font-extrabold tracking-tight transition-all ${
                 tab === key
-                  ? 'bg-gradient-to-r from-accent-700 via-accent-600 to-accent-500 text-white shadow-glow'
-                  : 'text-gray-100/90 hover:text-white hover:bg-bg-800/70'
+                  ? 'bg-white text-black'
+                  : 'text-gray-300 hover:text-white hover:bg-bg-800'
               }`}
             >
               <Icon className="w-5 h-5 flex-shrink-0" />
@@ -137,7 +137,7 @@ function DashboardInner({ onLoggedOut }) {
         </div>
         <button
           onClick={logout}
-          className="flex items-center gap-3 mt-auto text-left px-3 py-2 rounded-lg text-sm font-bold text-gray-400 hover:text-gray-100 hover:bg-bg-800 transition-colors"
+          className="flex min-h-11 items-center gap-3 mt-auto text-left px-4 py-2 rounded-xl text-sm font-bold text-gray-400 hover:text-white hover:bg-bg-800 transition-colors"
         >
           <IconLogout className="w-5 h-5 flex-shrink-0" />
           Cerrar sesión
@@ -179,17 +179,17 @@ function DashboardInner({ onLoggedOut }) {
       </nav>
 
       {/* Top bar — solo móvil */}
-      <header className="sm:hidden flex items-center justify-between px-4 h-16 bg-bg-900/95 border-b border-bg-700/60 flex-shrink-0 sticky top-0 z-10 backdrop-blur">
+      <header className="sm:hidden flex items-center justify-between px-5 h-[68px] bg-black/95 border-b border-bg-700 flex-shrink-0 sticky top-0 z-10 backdrop-blur-xl">
         <button onClick={() => setMenuOpen(true)} className="text-gray-300 p-1 -ml-1">
           <IconMenu className="w-6 h-6" />
         </button>
-        <span className="text-sm text-gray-400">{label}</span>
+        <span className="text-[15px] font-extrabold text-white">{label}</span>
         <button onClick={logout} className="text-gray-400 p-1 -mr-1">
           <IconLogout className="w-5 h-5" />
         </button>
       </header>
 
-      <main className="flex-1 p-4 sm:p-8 lg:p-10 pb-8 overflow-x-hidden">
+      <main className="flex-1 p-5 sm:p-8 lg:px-12 lg:py-10 pb-10 overflow-x-hidden">
         {paused && (
           <div className="mb-6 flex items-center gap-3 rounded-xl border border-accent-500 bg-accent-600/15 px-4 py-3 text-sm font-bold text-accent-300">
             <IconBan className="w-5 h-5 flex-shrink-0" />

@@ -9,19 +9,20 @@ import { downloadStatusLabel, downloadStatusBg, downloadStatusChipText } from '.
 function LibraryCard({ library, onDetail }) {
   const percent = library.limitApplied > 0 ? Math.max(0, Math.min(100, (library.balance / library.limitApplied) * 100)) : 0;
   return (
-    <section className="card p-5">
+    <section className="card p-6 sm:p-7 overflow-hidden">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h3 className="font-extrabold text-lg">{library.libraryName}</h3>
-          <p className="text-sm text-gray-400">{library.outstanding} pendiente{library.outstanding === 1 ? '' : 's'} de ver</p>
+          <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-gray-500">Biblioteca</p>
+          <h3 className="font-black tracking-tight text-xl mt-1">{library.libraryName}</h3>
+          <p className="text-sm text-gray-400 mt-1">{library.outstanding} pendiente{library.outstanding === 1 ? '' : 's'} de ver</p>
         </div>
         <div className="text-right">
-          <div className="text-3xl font-black text-white">{library.balance}</div>
-          <div className="text-xs text-gray-500">de {library.limitApplied} libres</div>
+          <div className="text-5xl leading-none font-black tracking-[-0.06em] text-white">{library.balance}</div>
+          <div className="text-xs font-bold text-gray-500 mt-1">de {library.limitApplied} libres</div>
         </div>
       </div>
-      <div className="h-2 rounded-full bg-bg-950 mt-4 overflow-hidden">
-        <div className="h-full rounded-full bg-accent-500" style={{ width: `${percent}%` }} />
+      <div className="h-1.5 rounded-full bg-bg-700 mt-6 overflow-hidden">
+        <div className="h-full rounded-full bg-white" style={{ width: `${percent}%` }} />
       </div>
       {library.pendingItems?.length > 0 && (
         <div className="grid grid-cols-3 sm:grid-cols-5 gap-3 mt-5">
@@ -31,7 +32,7 @@ function LibraryCard({ library, onDetail }) {
                 type="button"
                 onClick={() => onDetail(item)}
                 aria-label={`Ver detalle de ${item.title}`}
-                className="relative aspect-[2/3] w-full overflow-hidden rounded-lg bg-bg-950 text-left"
+                className="relative aspect-[2/3] w-full overflow-hidden rounded-xl bg-bg-950 text-left transition-transform active:scale-[.98]"
                 title={item.pendingApproval
                   ? item.sequentialQueue
                     ? `${item.title} — pendiente de aprobar cuando se vea la temporada ${item.previousSeasonNumber ?? 'anterior'}, no cuenta`
@@ -185,8 +186,8 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
 
   return (
     <div className="min-h-screen bg-bg-950 text-gray-100">
-      <header className="border-b border-bg-700/60 bg-bg-900/90 sticky top-0 z-10 backdrop-blur">
-        <div className="max-w-5xl mx-auto h-16 px-4 flex items-center justify-between">
+      <header className="border-b border-bg-700 bg-black/95 sticky top-0 z-10 backdrop-blur-xl">
+        <div className="max-w-6xl mx-auto h-[72px] px-5 sm:px-8 flex items-center justify-between">
           <Wordmark className="text-2xl" />
           <div className="flex items-center gap-3 text-sm text-gray-400">
             <span>{session?.username}</span>
@@ -203,9 +204,9 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
           Estás viendo el panel de <strong>{session?.username}</strong> como administrador.
         </div>
       )}
-      <main className="max-w-5xl mx-auto p-4 sm:p-8">
+      <main className="max-w-6xl mx-auto p-5 sm:p-8 lg:py-12">
         <h1 className="page-title">Mi cupo</h1>
-        <p className="text-sm text-gray-500 mt-1 mb-6">
+        <p className="text-base text-gray-500 mt-2 mb-8">
           {quota?.isGroup ? `Cupo compartido con ${quota.members?.join(', ')}` : 'Tu disponibilidad actual en Plex'}
         </p>
         {error && <div role="alert" className="card p-4 mb-5 text-accent-400">{error}</div>}
