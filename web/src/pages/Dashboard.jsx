@@ -189,7 +189,7 @@ function DashboardInner({ onLoggedOut }) {
         </button>
       </header>
 
-      <main className="flex-1 p-5 sm:p-8 lg:px-12 lg:py-10 pb-10 overflow-x-hidden">
+      <main className="flex-1 p-5 sm:p-8 lg:px-12 lg:py-10 pb-10 overflow-x-hidden max-w-[1680px] mx-auto w-full">
         {paused && (
           <div className="mb-6 flex items-center gap-3 rounded-xl border border-accent-500 bg-accent-600/15 px-4 py-3 text-sm font-bold text-accent-300">
             <IconBan className="w-5 h-5 flex-shrink-0" />

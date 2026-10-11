@@ -65,32 +65,32 @@ const STAT_TILES = {
   all: {
     label: 'usuarios',
     description: 'Usuarios de Plex y cuentas locales de Seerr con cupo calculado.',
-    tone: 'from-sky-500/25 via-sky-500/10 to-bg-800 border-sky-400/30 text-sky-100',
-    icon: 'bg-sky-400/20 text-sky-100',
+    tone: 'bg-bg-800 border-bg-700 text-white',
+    icon: 'bg-white/10 text-white',
   },
   pending: {
     label: 'sin ver',
     description: 'Cosas aprobadas que el usuario todavía no se ha visto (siguen ocupando cupo).',
-    tone: 'from-amber-400/25 via-amber-500/10 to-bg-800 border-amber-300/30 text-amber-100',
-    icon: 'bg-amber-300/20 text-amber-100',
+    tone: 'bg-bg-800 border-bg-700 text-white',
+    icon: 'bg-amber-400/15 text-amber-300',
   },
   blocked: {
     label: 'sin saldo',
     description: 'Usuarios que ahora mismo tienen el cupo a 0 en alguna biblioteca: la próxima solicitud se rechazaría.',
-    tone: 'from-accent-500/30 via-accent-500/10 to-bg-800 border-accent-400/40 text-red-100',
-    icon: 'bg-accent-400/20 text-red-100',
+    tone: 'bg-bg-800 border-bg-700 text-white',
+    icon: 'bg-accent-500/15 text-accent-300',
   },
   approved7d: {
     label: 'aprobadas · 7d',
     description: 'Solicitudes que limitARR aprobó automáticamente en los últimos 7 días.',
-    tone: 'from-emerald-400/25 via-emerald-500/10 to-bg-800 border-emerald-300/30 text-emerald-100',
-    icon: 'bg-emerald-300/20 text-emerald-100',
+    tone: 'bg-bg-800 border-bg-700 text-white',
+    icon: 'bg-emerald-400/15 text-emerald-300',
   },
   blocked7d: {
     label: 'sin cupo · 7d',
     description: 'Aprobaciones NO hechas en los últimos 7 días por falta de saldo (el usuario ya no tenía cupo cuando pidió esto).',
-    tone: 'from-fuchsia-400/25 via-fuchsia-500/10 to-bg-800 border-fuchsia-300/30 text-fuchsia-100',
-    icon: 'bg-fuchsia-300/20 text-fuchsia-100',
+    tone: 'bg-bg-800 border-bg-700 text-white',
+    icon: 'bg-fuchsia-400/15 text-fuchsia-300',
   },
 };
 
@@ -99,14 +99,16 @@ function StatTile({ label, value, Icon, tone, iconTone, active, onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className={`card px-4 py-3 flex items-center gap-3 min-w-0 text-left bg-gradient-to-br transition-all hover:-translate-y-0.5 hover:border-white/20 ${tone} ${active ? 'ring-2 ring-white/30' : ''}`}
+      className={`rounded-2xl border px-4 py-4 min-w-0 text-left transition-all active:scale-[.98] ${
+        active ? 'bg-white border-white text-black shadow-[0_12px_35px_-18px_rgba(255,255,255,.55)]' : `${tone} hover:border-bg-600`
+      }`}
     >
-      <span className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${iconTone}`}>
+      <span className={`w-10 h-10 rounded-full flex items-center justify-center mb-5 ${active ? 'bg-black text-white' : iconTone}`}>
         <Icon className="w-5 h-5" />
       </span>
-      <div className="min-w-0">
-        <div className="text-2xl font-bold tabular-nums leading-tight">{value}</div>
-        <div className="text-[11px] uppercase tracking-wider text-current/70 truncate">{label}</div>
+      <div className="min-w-0 flex items-end justify-between gap-2">
+        <div className="text-4xl font-black tracking-[-0.06em] tabular-nums leading-none">{value}</div>
+        <div className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-current/60 truncate pb-0.5">{label}</div>
       </div>
     </button>
   );
@@ -265,8 +267,8 @@ function BalanceRing({ balance, limit, children }) {
   const deg = balance <= 0 ? 360 : Math.round(frac * 360);
   return (
     <div
-      className="w-12 h-12 rounded-full p-[3px] flex-shrink-0"
-      style={{ background: `conic-gradient(${color} ${deg}deg, #2b364e ${deg}deg)` }}
+      className="w-14 h-14 sm:w-16 sm:h-16 rounded-full p-[3px] flex-shrink-0"
+      style={{ background: `conic-gradient(${color} ${deg}deg, #292929 ${deg}deg)` }}
     >
       <div className="w-full h-full rounded-full overflow-hidden bg-bg-800 flex items-center justify-center">
         {children}
@@ -870,12 +872,9 @@ function itemConsumesQuota(item) {
     item.waitlistState !== 'waiting_quota';
 }
 
-function DebtorBubble({ debtor, size, lead, open, onToggle }) {
+function DebtorBubble({ debtor, lead, open, onToggle }) {
   const [wobble, setWobble] = useState(false);
   const { user, owed, requested, ratio } = debtor;
-  const deg = Math.round(ratio * 360);
-  const showName = size >= 88;
-
   return (
     <button
       type="button"
@@ -883,28 +882,25 @@ function DebtorBubble({ debtor, size, lead, open, onToggle }) {
       onAnimationEnd={() => setWobble(false)}
       onClick={onToggle}
       title={`${user.username} debe ${owed} de ${requested} pedidas (${Math.round(ratio * 100)}%)`}
-      className={`rounded-full p-[4px] select-none transition-transform hover:scale-[1.03] active:scale-[0.97] ${lead ? 'shadow-glow' : ''} ${wobble ? 'animate-debtor-wobble' : ''} ${open ? 'ring-2 ring-accent-400 ring-offset-2 ring-offset-bg-900' : ''}`}
-      style={{
-        width: size,
-        height: size,
-        background: `conic-gradient(#ef4444 ${deg}deg, #34445f ${deg}deg)`,
-      }}
+      className={`min-w-[180px] flex-1 rounded-2xl border p-4 text-left select-none transition-all active:scale-[.98] ${lead ? 'bg-white text-black border-white' : 'bg-bg-800 border-bg-700 text-white'} ${wobble ? 'animate-debtor-wobble' : ''} ${open ? 'ring-2 ring-accent-400' : ''}`}
     >
-      <div className="w-full h-full rounded-full bg-bg-800 flex flex-col items-center justify-center gap-0.5 overflow-hidden px-1.5">
-        <span className="rounded-full overflow-hidden bg-bg-600 flex items-center justify-center" style={{ width: size * 0.38, height: size * 0.38 }}>
+      <div className="flex items-center gap-3">
+        <span className={`w-11 h-11 rounded-full overflow-hidden flex items-center justify-center flex-shrink-0 ${lead ? 'bg-black text-white' : 'bg-bg-600'}`}>
           {user.isGroup ? (
             <IconUsers className="w-1/2 h-1/2 text-gray-300" />
           ) : user.avatar ? (
             <img src={user.avatar} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
           ) : (
-            <span className={`${showName ? 'text-sm' : 'text-[10px]'} font-bold`}>{user.username.slice(0, 2).toUpperCase()}</span>
+            <span className="text-xs font-black">{user.username.slice(0, 2).toUpperCase()}</span>
           )}
         </span>
-        {showName && (
-          <span className="text-xs font-bold text-white leading-tight truncate max-w-full">{user.username}</span>
-        )}
-        <span className={`${showName ? 'text-[10px]' : 'text-[9px]'} text-accent-300 font-semibold tabular-nums leading-none`}>
-          debe {owed}
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-black leading-tight truncate">{user.username}</span>
+          <span className={`block text-[11px] mt-1 ${lead ? 'text-gray-600' : 'text-gray-500'}`}>{Math.round(ratio * 100)}% de lo pedido sin ver</span>
+        </span>
+        <span className="text-right">
+          <span className={`block text-3xl font-black tracking-[-0.06em] tabular-nums ${lead ? 'text-black' : 'text-accent-300'}`}>{owed}</span>
+          <span className={`block text-[9px] font-extrabold uppercase tracking-widest ${lead ? 'text-gray-500' : 'text-gray-600'}`}>debe</span>
         </span>
       </div>
     </button>
@@ -914,29 +910,28 @@ function DebtorBubble({ debtor, size, lead, open, onToggle }) {
 function DebtorBubbles({ debtors, onDetail }) {
   const [openId, setOpenId] = useState(null);
   const open = debtors.find((d) => d.user.userId === openId) ?? null;
-  const maxOwed = debtors[0].owed;
-
   return (
-    <div className="flex flex-col items-center mb-6">
-      <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-3 max-w-2xl">
+    <section className="mb-8">
+      <div className="flex items-end justify-between gap-4 mb-3">
+        <div>
+          <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-gray-600">Seguimiento</p>
+          <h3 className="text-xl font-black tracking-tight mt-1">Más contenido sin ver</h3>
+        </div>
+        <span className="text-xs text-gray-600">Toca para ver el detalle</span>
+      </div>
+      <div className="flex gap-3 overflow-x-auto pb-2">
         {debtors.map((d, i) => (
           <DebtorBubble
             key={d.user.userId}
             debtor={d}
             lead={i === 0}
-            // 56–160 px: el mayor deudor marca la escala, el resto en proporción.
-            size={Math.round(56 + (d.owed / maxOwed) * 104)}
             open={openId === d.user.userId}
             onToggle={() => setOpenId((id) => (id === d.user.userId ? null : d.user.userId))}
           />
         ))}
       </div>
-      <div className="text-[11px] text-gray-500 mt-2">
-        Mayor déficit: {debtors[0].user.username} · {debtors[0].owed} sin ver de {debtors[0].requested} pedidas · {Math.round(debtors[0].ratio * 100)}%
-      </div>
-
       {open && (
-        <div className="card w-full max-w-md mt-3 p-4">
+        <div className="card w-full mt-3 p-5">
           <div className="text-xs uppercase tracking-wider text-gray-500 mb-2">Lo que debe {open.user.username}</div>
           <div className="space-y-2">
             {open.user.libraries.flatMap((lib) =>
@@ -968,7 +963,7 @@ function DebtorBubbles({ debtors, onDetail }) {
           </div>
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -1038,10 +1033,10 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
   const worst = worstLib(user.libraries);
   const pending = totalOutstanding(user.libraries);
   return (
-    <div className="card overflow-hidden hover:border-bg-600/80 transition-colors">
+    <article className={`rounded-3xl border overflow-hidden transition-all ${expanded ? 'bg-bg-800 border-bg-600' : 'bg-bg-800 border-bg-700 hover:border-bg-600'}`}>
       <button
         onClick={onToggle}
-        className="w-full flex items-center gap-3 p-4 text-left hover:bg-bg-700/40 transition-colors"
+        className="w-full flex items-center gap-4 p-5 text-left transition-colors"
       >
         <BalanceRing balance={worst.balance} limit={worst.limitApplied}>
           {user.isGroup ? (
@@ -1052,8 +1047,8 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
             <span className="text-xs font-bold">{user.username.slice(0, 2).toUpperCase()}</span>
           )}
         </BalanceRing>
-        <div className="flex-1 min-w-0">
-          <div className="font-semibold truncate">
+        <div className="flex-1 min-w-0 self-stretch flex flex-col justify-center">
+          <div className="font-black text-lg tracking-tight truncate">
             {user.username}
             {user.isGroup && (
               <span className="ml-1.5 text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-accent-600/20 text-accent-300 ring-1 ring-accent-500/40 align-middle">
@@ -1066,13 +1061,16 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
               </span>
             )}
           </div>
-          <div className="text-xs text-gray-500 truncate">
+          <div className="text-xs text-gray-500 truncate mt-1">
             {user.isGroup && user.members?.length > 0
               ? user.members.join(', ')
               : `${pending === 0 ? 'sin pendientes' : `${pending} pendiente(s)`} · ${user.libraries.length} biblioteca(s)`}
           </div>
         </div>
-        <span className={`text-xl font-bold tabular-nums ${statusOf(worst.balance).text}`}>{worst.balance}</span>
+        <span className="text-right flex-shrink-0">
+          <span className={`block text-4xl leading-none font-black tracking-[-0.06em] tabular-nums ${statusOf(worst.balance).text}`}>{worst.balance}</span>
+          <span className="block text-[9px] font-extrabold uppercase tracking-[0.16em] text-gray-600 mt-1">libres</span>
+        </span>
         {/* Grupo agregado: sin cuenta Plex propia, no hay quién suplantar. */}
         {!user.isGroup && user.source !== 'seerr' && (
           <button
@@ -1084,11 +1082,11 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
             <IconEye className="w-4 h-4" />
           </button>
         )}
-        <span className="text-gray-500 text-xs">{expanded ? '▲' : '▼'}</span>
+        <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm transition-colors ${expanded ? 'bg-white text-black' : 'bg-bg-700 text-gray-400'}`}>{expanded ? '−' : '+'}</span>
       </button>
 
       {expanded && (
-        <div className="border-t border-bg-700 p-4 space-y-4 bg-bg-900/30">
+        <div className="border-t border-bg-700 p-5 space-y-6 bg-bg-900/50">
           {user.monthlyTotal?.enabled && (
             <button
               type="button"
@@ -1105,9 +1103,9 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
           {user.libraries.map((lib) => {
             const key = `${user.userId}-${lib.libraryId}`;
             return (
-              <div key={key}>
-                <div className="flex items-center gap-3 text-sm mb-1.5">
-                  <span className="flex-1 truncate font-medium">{lib.libraryName}</span>
+              <div key={key} className="rounded-2xl border border-bg-700 bg-bg-800 p-4">
+                <div className="flex flex-wrap items-center gap-3 text-sm mb-3">
+                  <span className="flex-1 truncate font-black text-base">{lib.libraryName}</span>
                   <span className="text-gray-400 tabular-nums">
                     <span className={`font-bold ${statusOf(lib.balance).text}`}>{lib.balance}</span>
                     {' '}/ {lib.limitApplied}
@@ -1140,7 +1138,7 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
                   </button>
                 )}
                 {lib.pendingItems?.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-3">
+                  <div className="flex flex-wrap gap-3 mt-4">
                     {lib.pendingItems.map((item, i) => (
                       <PendingPoster
                         key={`${item.tmdbId ?? 'x'}-${item.seasonNumber ?? 0}-${i}`}
@@ -1172,7 +1170,7 @@ function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss,
           )}
         </div>
       )}
-    </div>
+    </article>
   );
 }
 
@@ -1606,10 +1604,11 @@ export default function Quota({ onNavigate }) {
 
   return (
     <div>
-      <div className="flex flex-wrap items-end justify-between gap-3 mb-6">
+      <div className="rounded-[2rem] border border-bg-700 bg-bg-800 p-6 sm:p-8 flex flex-wrap items-end justify-between gap-5 mb-8">
         <div>
-          <h2 className="page-title">Cupo por usuario</h2>
-          <p className="text-sm text-gray-500 mt-1">
+          <p className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-gray-600 mb-3">Administración</p>
+          <h2 className="page-title">Cupo</h2>
+          <p className="text-sm text-gray-500 mt-2 max-w-xl">
             Saldo = límite − pendientes de ver. Se refresca solo cada minuto.
           </p>
         </div>
@@ -1630,7 +1629,7 @@ export default function Quota({ onNavigate }) {
 
       {stats && (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
             <StatTile
               label={STAT_TILES.all.label}
               value={stats.users}
@@ -1691,16 +1690,16 @@ export default function Quota({ onNavigate }) {
       <button
         type="button"
         onClick={() => onNavigate?.('movie-history')}
-        className="card w-full mb-5 p-4 flex items-center justify-between gap-4 text-left hover:border-accent-500/50 hover:bg-bg-800/70 transition-colors"
+        className="rounded-2xl border border-bg-700 bg-bg-800 w-full mb-6 p-5 flex items-center justify-between gap-4 text-left hover:border-white/40 transition-colors"
       >
         <span>
-          <span className="block font-semibold">🎬 Antigüedad de películas solicitadas</span>
+          <span className="block font-black text-lg tracking-tight">Antigüedad de películas</span>
           <span className="block text-xs text-gray-500 mt-1">Consulta todas las películas, su fecha de solicitud y su estado.</span>
         </span>
-        <span className="text-accent-300 font-semibold whitespace-nowrap">Ver listado →</span>
+        <span className="w-10 h-10 rounded-full bg-white text-black flex items-center justify-center font-black flex-shrink-0">→</span>
       </button>
 
-      <div className="flex flex-wrap items-center gap-3 mb-4">
+      <div className="rounded-2xl border border-bg-700 bg-bg-900 p-3 flex flex-wrap items-center gap-3 mb-5">
         <div className="relative max-w-xs">
           <IconSearch className="w-4 h-4 text-gray-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
@@ -1717,7 +1716,7 @@ export default function Quota({ onNavigate }) {
         </select>
       </div>
 
-      <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
         {visibleUsers.map((u) => (
           <UserCard
             key={u.userId}

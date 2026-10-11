@@ -104,6 +104,14 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
     () => new Map((quota?.libraries ?? []).map((l) => [l.libraryId, l.libraryName])),
     [quota]
   );
+  const totalFree = useMemo(
+    () => (quota?.libraries ?? []).reduce((sum, library) => sum + Math.max(0, library.balance ?? 0), 0),
+    [quota]
+  );
+  const totalPending = useMemo(
+    () => (quota?.libraries ?? []).reduce((sum, library) => sum + Math.max(0, library.outstanding ?? 0), 0),
+    [quota]
+  );
 
   useEffect(() => {
     Promise.all([api.myQuota(), api.myNotifications()])
@@ -205,11 +213,34 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
         </div>
       )}
       <main className="max-w-6xl mx-auto p-5 sm:p-8 lg:py-12">
-        <h1 className="page-title">Mi cupo</h1>
-        <p className="text-base text-gray-500 mt-2 mb-8">
-          {quota?.isGroup ? `Cupo compartido con ${quota.members?.join(', ')}` : 'Tu disponibilidad actual en Plex'}
-        </p>
+        <section className="relative overflow-hidden rounded-[2rem] bg-white text-black p-6 sm:p-9 mb-6">
+          <div className="relative z-[1] flex flex-col sm:flex-row sm:items-end justify-between gap-8">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">Tu espacio disponible</p>
+              <h1 className="text-4xl sm:text-5xl font-black tracking-[-0.055em] mt-3">Hola, {session?.username}</h1>
+              <p className="text-sm text-gray-600 mt-3 max-w-lg">
+                {quota?.isGroup ? `Cupo compartido con ${quota.members?.join(', ')}` : 'Todo lo que tienes disponible y pendiente, de un vistazo.'}
+              </p>
+            </div>
+            <div className="flex gap-8 flex-shrink-0">
+              <div>
+                <div className="text-5xl font-black tracking-[-0.07em] tabular-nums">{quota ? totalFree : '—'}</div>
+                <div className="text-[10px] font-black uppercase tracking-[0.16em] text-gray-500 mt-1">huecos libres</div>
+              </div>
+              <div>
+                <div className="text-5xl font-black tracking-[-0.07em] tabular-nums">{quota ? totalPending : '—'}</div>
+                <div className="text-[10px] font-black uppercase tracking-[0.16em] text-gray-500 mt-1">sin ver</div>
+              </div>
+            </div>
+          </div>
+        </section>
         {error && <div role="alert" className="card p-4 mb-5 text-accent-400">{error}</div>}
+        <div className="flex items-end justify-between gap-4 mb-4 mt-8">
+          <div>
+            <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-gray-600">Resumen</p>
+            <h2 className="text-2xl font-black tracking-tight mt-1">Mis bibliotecas</h2>
+          </div>
+        </div>
         <div className="grid md:grid-cols-2 gap-4">
           {quota?.libraries?.map((library) => (
             <LibraryCard
