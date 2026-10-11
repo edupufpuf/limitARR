@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Wordmark } from '../components/Brand.jsx';
-import { IconBell, IconLogout } from '../icons.jsx';
+import { IconBell, IconLogout, IconGauge, IconFilm, IconSave } from '../icons.jsx';
 import { PendingDetailModal, MonthlyHistoryModal, RecentlyWatchedPoster } from './Quota.jsx';
 import { SalvadosGrid } from '../components/Salvados.jsx';
 import { downloadStatusLabel, downloadStatusBg, downloadStatusChipText } from '../mediaStatus.js';
@@ -212,8 +212,8 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
           Estás viendo el panel de <strong>{session?.username}</strong> como administrador.
         </div>
       )}
-      <main className="max-w-6xl mx-auto p-5 sm:p-8 lg:py-12">
-        <section className="relative overflow-hidden rounded-[2rem] bg-white text-black p-6 sm:p-9 mb-6">
+      <main className="max-w-6xl mx-auto p-5 sm:p-8 lg:py-12 pb-28 sm:pb-8">
+        <section id="resumen" className="scroll-mt-24 relative overflow-hidden rounded-[2rem] bg-white text-black p-6 sm:p-9 mb-6">
           <div className="relative z-[1] flex flex-col sm:flex-row sm:items-end justify-between gap-8">
             <div>
               <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">Tu espacio disponible</p>
@@ -235,7 +235,7 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
           </div>
         </section>
         {error && <div role="alert" className="card p-4 mb-5 text-accent-400">{error}</div>}
-        <div className="flex items-end justify-between gap-4 mb-4 mt-8">
+        <div id="bibliotecas" className="scroll-mt-24 flex items-end justify-between gap-4 mb-4 mt-8">
           <div>
             <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-gray-600">Resumen</p>
             <h2 className="text-2xl font-black tracking-tight mt-1">Mis bibliotecas</h2>
@@ -253,7 +253,7 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
         {quota && quota.libraries?.length === 0 && <div className="card p-6 text-gray-400">Todavía no hay cupo calculado para tu cuenta.</div>}
 
         {quota?.monthlyTotal?.enabled && (
-          <section className="card p-5 mt-8">
+          <section id="salvadas" className="card scroll-mt-24 p-5 mt-8">
             <h2 className="font-extrabold text-xl mb-1">📅 Cupo mensual total</h2>
             <p className="text-sm text-gray-500 mb-4">
               Límite de cuántas puedes pedir al mes en total, sumando todas las bibliotecas
@@ -360,7 +360,7 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
           </section>
         )}
 
-        <section className="card p-5 mt-8 max-w-xl">
+        <section id="avisos" className="card scroll-mt-24 p-5 mt-8 max-w-xl">
           <div className="flex items-center gap-3 mb-4"><IconBell className="w-6 h-6 text-accent-400" /><h2 className="font-extrabold text-xl">Mis avisos</h2></div>
 
           {link ? (
@@ -400,6 +400,19 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
           {message && <p aria-live="polite" className={`text-sm mt-3 ${message.startsWith('No ') ? 'text-accent-400' : 'text-green-400'}`}>{message}</p>}
         </section>
       </main>
+      <nav aria-label="Navegación del panel" className="sm:hidden fixed inset-x-0 bottom-0 z-40 h-[76px] border-t border-bg-700 bg-black px-2 py-1.5 flex items-stretch justify-around">
+        {[
+          { href: '#resumen', label: 'Inicio', Icon: IconGauge },
+          { href: '#bibliotecas', label: 'Cupo', Icon: IconFilm },
+          ...(salvados.length > 0 ? [{ href: '#salvadas', label: 'Salvadas', Icon: IconSave }] : []),
+          { href: '#avisos', label: 'Avisos', Icon: IconBell },
+        ].map(({ href, label, Icon }) => (
+          <a key={href} href={href} className="min-w-[70px] flex flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-extrabold text-gray-400 active:bg-white active:text-black">
+            <Icon className="w-5 h-5" />
+            {label}
+          </a>
+        ))}
+      </nav>
       {detailTarget && (
         <PendingDetailModal
           user={{ userId: session?.id, username: session?.username }}

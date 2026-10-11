@@ -10,7 +10,7 @@ import Notifications from './Notifications.jsx';
 import MovieHistory from './MovieHistory.jsx';
 import WhatsNewModal from '../components/WhatsNewModal.jsx';
 import { Wordmark } from '../components/Brand.jsx';
-import { IconGauge, IconSave, IconFilm, IconUsers, IconClock, IconBell, IconGear, IconLogout, IconMenu, IconXCircle, IconBan } from '../icons.jsx';
+import { IconGauge, IconSave, IconFilm, IconUsers, IconClock, IconBell, IconGear, IconLogout, IconBan } from '../icons.jsx';
 import { DirtyGuardProvider, useAnyDirty } from '../DirtyGuard.jsx';
 
 const UNSAVED_WARNING = 'Hay cambios sin guardar en esta pestaña. ¿Salir igualmente?';
@@ -45,7 +45,6 @@ function tabFromHash() {
 function DashboardInner({ onLoggedOut }) {
   const [tab, setTab] = useState(tabFromHash);
   const [version, setVersion] = useState(null);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [paused, setPaused] = useState(false);
   const [pauseBusy, setPauseBusy] = useState(false);
   const { Component, label } = TABS[tab];
@@ -74,7 +73,6 @@ function DashboardInner({ onLoggedOut }) {
     // replaceState (no pushState): cambiar de pestaña no debe crear una
     // entrada de historial — el botón "atrás" del navegador no es para esto.
     window.history.replaceState(null, '', `#${key}`);
-    setMenuOpen(false);
   }
 
   async function logout() {
@@ -85,31 +83,18 @@ function DashboardInner({ onLoggedOut }) {
 
   return (
     <div className="min-h-screen flex flex-col sm:flex-row bg-[#f3f3f3] text-gray-950">
-      {/* Overlay — solo móvil, cierra el menú al tocar fuera */}
-      {menuOpen && (
-        <div
-          onClick={() => setMenuOpen(false)}
-          className="sm:hidden fixed inset-0 bg-black/60 z-20 backdrop-blur-sm"
-        />
-      )}
-
-      {/* Sidebar — fija en desktop, cajón deslizante escondido en móvil */}
+      {/* Navegación tipo app: barra inferior en móvil y lateral en escritorio. */}
       <nav
-        className={`fixed sm:sticky inset-y-0 left-0 sm:top-0 z-30 sm:z-auto w-[280px] sm:w-[232px] h-screen overflow-y-auto bg-bg-900 border-r border-bg-700 px-4 py-6 flex flex-col flex-shrink-0 transition-transform duration-300 sm:transition-none ${
-          menuOpen ? 'translate-x-0' : '-translate-x-full sm:translate-x-0'
-        }`}
+        className="fixed inset-x-0 bottom-0 sm:sticky sm:inset-auto sm:top-0 z-40 sm:z-auto w-full sm:w-[232px] h-[76px] sm:h-screen overflow-x-auto sm:overflow-y-auto bg-black border-t sm:border-t-0 sm:border-r border-bg-700 px-2 sm:px-4 py-1.5 sm:py-6 flex sm:flex-col flex-shrink-0"
       >
-        <div className="mb-10 px-2 flex items-center justify-between">
+        <div className="hidden sm:flex mb-10 px-2 items-center justify-between">
           <Wordmark className="text-[30px]" />
-          <button onClick={() => setMenuOpen(false)} className="sm:hidden text-gray-400 p-1 -mr-1">
-            <IconXCircle className="w-6 h-6" />
-          </button>
         </div>
         <button
           onClick={togglePause}
           disabled={pauseBusy}
           title="Mientras está activo, ninguna solicitud nueva se aprueba: se queda en espera hasta que lo reactives."
-          className={`flex items-center gap-2 w-full mb-5 px-3 py-2 rounded-lg text-xs font-bold text-left transition-colors border ${
+          className={`hidden sm:flex items-center gap-2 w-full mb-5 px-3 py-2 rounded-lg text-xs font-bold text-left transition-colors border ${
             paused
               ? 'bg-accent-600/20 border-accent-500 text-accent-300 animate-pulse'
               : 'bg-bg-800/60 border-bg-600 text-gray-300 hover:text-white hover:bg-bg-800'
@@ -119,12 +104,12 @@ function DashboardInner({ onLoggedOut }) {
           {paused ? 'Pausa global ACTIVA — tocar para reanudar' : 'Pausar todas las solicitudes'}
         </button>
 
-        <div className="space-y-1">
+        <div className="flex sm:block sm:space-y-1 gap-1 min-w-max sm:min-w-0 w-full">
           {Object.entries(TABS).filter(([, item]) => !item.hidden).map(([key, { label, Icon }]) => (
             <button
               key={key}
               onClick={() => goTab(key)}
-              className={`relative flex min-h-12 items-center gap-3 w-full text-left px-4 py-3 rounded-xl text-[15px] leading-none font-extrabold tracking-tight transition-all ${
+              className={`relative flex min-w-[72px] sm:min-w-0 sm:min-h-12 flex-col sm:flex-row items-center justify-center sm:justify-start gap-1 sm:gap-3 sm:w-full text-center sm:text-left px-2 sm:px-4 py-2 sm:py-3 rounded-xl text-[10px] sm:text-[15px] leading-none font-extrabold tracking-tight transition-all ${
                 tab === key
                   ? 'bg-white text-black'
                   : 'text-gray-300 hover:text-white hover:bg-bg-800'
@@ -137,13 +122,13 @@ function DashboardInner({ onLoggedOut }) {
         </div>
         <button
           onClick={logout}
-          className="flex min-h-11 items-center gap-3 mt-auto text-left px-4 py-2 rounded-xl text-sm font-bold text-gray-400 hover:text-white hover:bg-bg-800 transition-colors"
+          className="hidden sm:flex min-h-11 items-center gap-3 mt-auto text-left px-4 py-2 rounded-xl text-sm font-bold text-gray-400 hover:text-white hover:bg-bg-800 transition-colors"
         >
           <IconLogout className="w-5 h-5 flex-shrink-0" />
           Cerrar sesión
         </button>
         {version && (
-          <div className="mt-3 rounded-lg border border-bg-600/90 bg-bg-950/45 px-3 py-3 text-sm text-gray-300 shadow-card">
+          <div className="hidden sm:block mt-3 rounded-lg border border-bg-600/90 bg-bg-950/45 px-3 py-3 text-sm text-gray-300 shadow-card">
             <div className="flex items-center gap-3">
               <span
                 className={`inline-flex w-8 h-8 rounded-md border items-center justify-center ${
@@ -178,18 +163,21 @@ function DashboardInner({ onLoggedOut }) {
         )}
       </nav>
 
-      {/* Top bar — solo móvil */}
-      <header className="sm:hidden flex items-center justify-between px-5 h-[68px] bg-black/95 border-b border-bg-700 flex-shrink-0 sticky top-0 z-10 backdrop-blur-xl">
-        <button onClick={() => setMenuOpen(true)} className="text-gray-300 p-1 -ml-1">
-          <IconMenu className="w-6 h-6" />
-        </button>
-        <span className="text-[15px] font-extrabold text-white">{label}</span>
-        <button onClick={logout} className="text-gray-400 p-1 -mr-1">
-          <IconLogout className="w-5 h-5" />
-        </button>
+      {/* Cabecera mínima — la navegación vive abajo, como en una app nativa. */}
+      <header className="sm:hidden flex items-center justify-between px-5 h-[68px] bg-[#f3f3f3]/95 border-b border-black/10 flex-shrink-0 sticky top-0 z-30 backdrop-blur-xl">
+        <Wordmark className="text-[23px]" dark />
+        <span className="text-[13px] font-extrabold text-gray-500">{label}</span>
+        <div className="flex items-center gap-1">
+          <button onClick={togglePause} disabled={pauseBusy} aria-label={paused ? 'Reanudar solicitudes' : 'Pausar solicitudes'} className={`p-2 rounded-full ${paused ? 'bg-accent-500 text-white' : 'text-gray-500'}`}>
+            <IconBan className="w-5 h-5" />
+          </button>
+          <button onClick={logout} aria-label="Cerrar sesión" className="text-gray-500 p-2 -mr-2">
+            <IconLogout className="w-5 h-5" />
+          </button>
+        </div>
       </header>
 
-      <main className="flex-1 p-5 sm:p-8 lg:px-12 lg:py-10 pb-10 overflow-x-hidden max-w-[1680px] mx-auto w-full">
+      <main className="flex-1 p-5 sm:p-8 lg:px-12 lg:py-10 pb-28 sm:pb-10 overflow-x-hidden max-w-[1680px] mx-auto w-full">
         {paused && (
           <div className="mb-6 flex items-center gap-3 rounded-xl border border-accent-500 bg-accent-600/15 px-4 py-3 text-sm font-bold text-accent-300">
             <IconBan className="w-5 h-5 flex-shrink-0" />
