@@ -862,6 +862,14 @@ function PendingApprovals({ items, onAction }) {
 // marca la escala). El anillo marca el déficit (pendiente / pedido histórico).
 // Tiemblan sutilmente al tocarlas y al pulsar una se despliega el detalle de lo
 // que debe; cada línea abre la ventana de detalle normal.
+function itemConsumesQuota(item) {
+  return !item.unavailable &&
+    !item.pendingApproval &&
+    !item.bypassed &&
+    item.waitlistState !== 'waiting_release' &&
+    item.waitlistState !== 'waiting_quota';
+}
+
 function DebtorBubble({ debtor, size, lead, open, onToggle }) {
   const [wobble, setWobble] = useState(false);
   const { user, owed, requested, ratio } = debtor;
@@ -933,8 +941,10 @@ function DebtorBubbles({ debtors, onDetail }) {
           <div className="space-y-2">
             {open.user.libraries.flatMap((lib) =>
               (lib.pendingItems ?? [])
-                // Un pendiente de aprobación (issue #16) aún no es deuda.
-                .filter((item) => !item.unavailable && !item.pendingApproval)
+                // Esta lista debe coincidir con el numero del circulo: solo
+                // contenido que realmente ocupa cupo. Las solicitudes en la
+                // lista de espera siguen visibles en la ficha del usuario.
+                .filter(itemConsumesQuota)
                 .map((item, i) => (
                   <button
                     key={`${lib.libraryId}-${item.tmdbId ?? 'x'}-${item.seasonNumber ?? 0}-${i}`}
