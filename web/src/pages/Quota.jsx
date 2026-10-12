@@ -127,14 +127,14 @@ const MOVIE_HISTORY_STATUS = {
   no_library_config: ['Sin biblioteca', 'text-accent-300 bg-accent-500/10'],
 };
 
-export function MoviesByAge({ movies, initialVisible = 2 }) {
+export function ContentByAge({ items, initialVisible = 2 }) {
   const [sort, setSort] = useState('oldest');
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [visibleCount, setVisibleCount] = useState(initialVisible);
 
   const allRows = useMemo(() => {
     const now = new Date();
-    return movies.map((item) => {
+    return items.map((item) => {
       const dateMs = requestDateMs(item.requestedAt);
       return {
         item,
@@ -143,7 +143,7 @@ export function MoviesByAge({ movies, initialVisible = 2 }) {
         overdue: isOlderThanTwoMonths(dateMs, now),
       };
     });
-  }, [movies]);
+  }, [items]);
 
   const sortedRows = useMemo(() => {
     const filtered = overdueOnly ? allRows.filter((row) => row.overdue) : [...allRows];
@@ -166,7 +166,7 @@ export function MoviesByAge({ movies, initialVisible = 2 }) {
     <section className="card mb-5 overflow-hidden">
       <div className="p-4 border-b border-bg-700 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="font-semibold">🎬 Películas solicitadas por antigüedad</h3>
+          <h3 className="font-semibold">🎬 Contenido solicitado por antigüedad</h3>
           <p className="text-xs text-gray-500 mt-1">
             {allRows.length} solicitud{allRows.length === 1 ? '' : 'es'} de cualquier estado · <span className={overdue > 0 ? 'text-accent-400 font-semibold' : ''}>{overdue} con más de 2 meses</span>
           </p>
@@ -189,14 +189,40 @@ export function MoviesByAge({ movies, initialVisible = 2 }) {
 
       {rows.length === 0 ? (
         <p className="p-4 text-sm text-gray-500">
-          {overdueOnly ? 'No hay películas solicitadas desde hace más de dos meses.' : 'No hay películas solicitadas registradas.'}
+          {overdueOnly ? 'No hay contenidos solicitados desde hace más de dos meses.' : 'No hay contenidos solicitados registrados.'}
         </p>
       ) : (
-        <div className="overflow-x-auto">
+        <>
+          <div className="md:hidden divide-y divide-bg-700/70">
+            {rows.map(({ item, dateMs, days, overdue: isOverdue }, index) => {
+              const [statusLabel, statusTone] = MOVIE_HISTORY_STATUS[item.status] ?? [item.status, 'text-gray-300 bg-gray-500/10'];
+              return (
+                <article key={`${item.userId}-${item.requestId}-${item.seasonNumber ?? 0}-${index}`} className={`p-4 flex gap-3 ${isOverdue ? 'bg-accent-500/5' : ''}`}>
+                  <div className="w-14 h-20 rounded-xl bg-bg-700 overflow-hidden flex-shrink-0 shadow-card">
+                    {item.posterUrl ? <img src={item.posterUrl} alt="" className="w-full h-full object-cover" /> : <span className="w-full h-full flex items-center justify-center">{item.mediaType === 'tv' ? '📺' : '🎬'}</span>}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="font-semibold leading-snug">{item.title}</div>
+                      <span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-bold whitespace-nowrap ${statusTone}`}>{statusLabel}</span>
+                    </div>
+                    <div className="mt-1 text-xs text-gray-500">{item.mediaType === 'tv' ? `Serie · Temporada ${item.seasonNumber ?? '—'}` : 'Película'} · {item.username}</div>
+                    <div className="mt-3 flex items-center justify-between gap-2 text-xs">
+                      <span className="text-gray-400 tabular-nums">{formatRequestDate(dateMs)}</span>
+                      {days == null ? <span className="text-gray-600">—</span> : (
+                        <span className={isOverdue ? 'font-bold text-accent-300' : 'text-gray-400'}>{days} días{isOverdue ? ' · +2 meses' : ''}</span>
+                      )}
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+          <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-[11px] uppercase tracking-wider text-gray-500 bg-bg-900/40">
               <tr>
-                <th className="text-left font-medium px-4 py-2">Película</th>
+                <th className="text-left font-medium px-4 py-2">Contenido</th>
                 <th className="text-left font-medium px-3 py-2">Usuario</th>
                 <th className="text-left font-medium px-3 py-2 hidden md:table-cell">Biblioteca</th>
                 <th className="text-left font-medium px-3 py-2">Estado</th>
@@ -209,15 +235,18 @@ export function MoviesByAge({ movies, initialVisible = 2 }) {
                 const [statusLabel, statusTone] = MOVIE_HISTORY_STATUS[item.status] ?? [item.status, 'text-gray-300 bg-gray-500/10'];
                 return (
                 <tr
-                  key={`${item.userId}-${item.requestId}-${index}`}
+                  key={`${item.userId}-${item.requestId}-${item.seasonNumber ?? 0}-${index}`}
                   className={isOverdue ? 'bg-accent-500/5' : ''}
                 >
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2 min-w-[190px]">
                       <div className="w-8 h-12 rounded bg-bg-700 overflow-hidden flex-shrink-0">
-                        {item.posterUrl ? <img src={item.posterUrl} alt="" className="w-full h-full object-cover" /> : <span className="w-full h-full flex items-center justify-center">🎬</span>}
+                        {item.posterUrl ? <img src={item.posterUrl} alt="" className="w-full h-full object-cover" /> : <span className="w-full h-full flex items-center justify-center">{item.mediaType === 'tv' ? '📺' : '🎬'}</span>}
                       </div>
-                      <div className="font-medium">{item.title}</div>
+                      <div>
+                        <div className="font-medium">{item.title}</div>
+                        <div className="text-[11px] text-gray-500">{item.mediaType === 'tv' ? `Serie · Temporada ${item.seasonNumber ?? '—'}` : 'Película'}</div>
+                      </div>
                     </div>
                   </td>
                   <td className="px-3 py-2.5 text-gray-300">{item.username}</td>
@@ -238,6 +267,7 @@ export function MoviesByAge({ movies, initialVisible = 2 }) {
               })}
             </tbody>
           </table>
+          </div>
           {visibleCount < sortedRows.length && (
             <div className="p-4 border-t border-bg-700 flex flex-wrap items-center justify-center gap-3">
               <span className="text-xs text-gray-500">Mostrando {rows.length} de {sortedRows.length}</span>
@@ -250,7 +280,7 @@ export function MoviesByAge({ movies, initialVisible = 2 }) {
               </button>
             </div>
           )}
-        </div>
+        </>
       )}
     </section>
   );
@@ -1373,7 +1403,7 @@ function ManualChargeModal({ username, sectionType, onClose, onSubmit }) {
   );
 }
 
-export default function Quota({ onNavigate }) {
+export default function Quota() {
   const [users, setUsers] = useState([]);
   const [stats, setStats] = useState(null);
   const [pendingApprovals, setPendingApprovals] = useState([]);
@@ -1687,18 +1717,6 @@ export default function Quota({ onNavigate }) {
           </div>
         </>
       )}
-
-      <button
-        type="button"
-        onClick={() => onNavigate?.('movie-history')}
-        className="card w-full mb-5 p-4 flex items-center justify-between gap-4 text-left hover:border-accent-500/50 hover:bg-bg-800/70 transition-colors"
-      >
-        <span>
-          <span className="block font-semibold">🎬 Antigüedad de películas solicitadas</span>
-          <span className="block text-xs text-gray-500 mt-1">Consulta todas las películas, su fecha de solicitud y su estado.</span>
-        </span>
-        <span className="text-accent-300 font-semibold whitespace-nowrap">Ver listado →</span>
-      </button>
 
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="relative max-w-xs">

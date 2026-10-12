@@ -61,3 +61,25 @@
 .animate-debtor-wobble {
   animation: debtor-wobble 0.5s ease;
 }
+
+/* En móvil, el mismo tema rojo se presenta con medidas y ritmo de app nativa. */
+@media (max-width: 639px) {
+  body {
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+  }
+
+  .page-title {
+    font-size: 1.55rem;
+    line-height: 1.15;
+  }
+
+  .btn,
+  .input {
+    min-height: 44px;
+  }
+
+  .card {
+    border-radius: 1rem;
+  }
+}

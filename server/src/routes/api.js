@@ -1112,12 +1112,25 @@ router.get('/quota', ah(async (req, res) => {
   res.json(await buildQuotaByUser());
 }));
 
-// Historial completo de películas solicitadas. No parte de quota_cache porque
-// esa caché, por definición, solo conserva lo que todavía ocupa cupo.
-async function keepMoviesStillInPlex(history) {
+// Historial completo de películas y temporadas solicitadas. No parte de
+// quota_cache porque esa caché, por definición, solo conserva lo que todavía
+// ocupa cupo.
+function historyContentKey(item) {
+  const mediaKey = item.tmdbId != null ? `tmdb:${item.tmdbId}` : `title:${normalize(item.title)}`;
+  return `${item.mediaType}:${mediaKey}:${item.mediaType === 'tv' ? item.seasonNumber ?? '' : ''}`;
+}
+
+function showTitleFromHistory(item) {
+  if (item.mediaType !== 'tv') return item.title;
+  return String(item.title || '')
+    .replace(/\s*[-–—:]\s*(?:temporada|season)\s*\d+\s*$/i, '')
+    .trim();
+}
+
+async function keepRequestedContentStillInPlex(history) {
   const representatives = new Map();
   for (const item of history) {
-    const key = item.tmdbId != null ? `tmdb:${item.tmdbId}` : `title:${normalize(item.title)}`;
+    const key = historyContentKey(item);
     if (!representatives.has(key)) representatives.set(key, item);
   }
 
@@ -1129,19 +1142,25 @@ async function keepMoviesStillInPlex(history) {
   for (let index = 0; index < entries.length; index += 6) {
     const chunk = entries.slice(index, index + 6);
     const results = await Promise.all(chunk.map(async ([key, item]) => {
-      const { movies } = await searchMedia(item.title);
+      const searchTitle = showTitleFromHistory(item);
+      const { movies, seasons } = await searchMedia(searchTitle);
       const tmdbGuid = item.tmdbId != null ? `tmdb://${item.tmdbId}` : null;
-      const wantedTitle = normalize(item.title);
-      const found = movies.some((movie) =>
-        (tmdbGuid && movie.guids.includes(tmdbGuid)) || normalize(movie.title) === wantedTitle
-      );
+      const wantedTitle = normalize(searchTitle);
+      const found = item.mediaType === 'tv'
+        ? seasons.some((season) =>
+          Number(season.seasonNumber) === Number(item.seasonNumber)
+          && ((tmdbGuid && season.guids.includes(tmdbGuid)) || normalize(season.parentTitle) === wantedTitle)
+        )
+        : movies.some((movie) =>
+          (tmdbGuid && movie.guids.includes(tmdbGuid)) || normalize(movie.title) === wantedTitle
+        );
       return [key, found];
     }));
     for (const [key, found] of results) present.set(key, found);
   }
 
   return history.filter((item) => {
-    const key = item.tmdbId != null ? `tmdb:${item.tmdbId}` : `title:${normalize(item.title)}`;
+    const key = historyContentKey(item);
     return present.get(key) === true;
   });
 }
@@ -1151,7 +1170,7 @@ router.get('/quota/movie-history', ah(async (req, res) => {
     SELECT dl.*, l.name AS library_name
     FROM decisions_log dl
     LEFT JOIN libraries l ON l.id = dl.library_id
-    WHERE dl.media_type = 'movie'
+    WHERE dl.media_type IN ('movie', 'tv')
       AND dl.decision IN (
         'approved', 'approved_outside_limitarr', 'watched', 'expired',
         'no_quota', 'no_monthly_quota', 'held', 'paused',
@@ -1164,14 +1183,18 @@ router.get('/quota/movie-history', ah(async (req, res) => {
   for (const row of rows) {
     // request_id identifica una petición real de Seerr. Los cargos/importes
     // manuales usan ids negativos, pero también son solicitudes distintas.
-    const key = `${row.user_id ?? 'unknown'}:${row.request_id}`;
+    // Una única solicitud de Seerr puede contener varias temporadas. Cada una
+    // conserva su antigüedad y estado como contenido independiente.
+    const key = `${row.user_id ?? 'unknown'}:${row.request_id}:${row.media_type}:${row.season_number ?? ''}`;
     const current = requests.get(key) ?? {
       requestId: row.request_id,
       userId: row.user_id,
       username: row.username ?? 'unknown',
       libraryId: row.library_id,
       libraryName: row.library_name ?? null,
-      title: row.media_title ?? 'Película',
+      title: row.media_title ?? (row.media_type === 'tv' ? 'Serie' : 'Película'),
+      mediaType: row.media_type,
+      seasonNumber: row.season_number,
       tmdbId: row.tmdb_id,
       posterUrl: row.poster_url ?? null,
       requestedAt: row.created_at,
@@ -1209,7 +1232,7 @@ router.get('/quota/movie-history', ah(async (req, res) => {
     return { ...publicItem, status };
   }).sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt)));
 
-  res.json(await keepMoviesStillInPlex(history));
+  res.json(await keepRequestedContentStillInPlex(history));
 }));
 
 // Rellena decisions_log con solicitudes aprobadas en Seerr que limitARR no vio

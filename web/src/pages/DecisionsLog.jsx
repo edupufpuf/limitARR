@@ -76,7 +76,7 @@ function formatDate(createdAt) {
   });
 }
 
-export default function DecisionsLog() {
+export default function DecisionsLog({ onNavigate }) {
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [decision, setDecision] = useState('');
@@ -141,20 +141,32 @@ export default function DecisionsLog() {
         <span className="text-xs text-gray-500">{total} en total</span>
       </div>
 
-      <div className="flex flex-wrap gap-2 mb-4">
-        <div className="relative">
+      <button
+        type="button"
+        onClick={() => onNavigate?.('movie-history')}
+        className="card w-full mb-5 p-4 flex items-center justify-between gap-4 text-left hover:border-accent-500/50 hover:bg-bg-800/70 transition-colors"
+      >
+        <span>
+          <span className="block font-semibold">🎬 Antigüedad de películas y temporadas</span>
+          <span className="block text-xs text-gray-500 mt-1">Consulta qué se pidió, cuándo se pidió y si sigue en Plex.</span>
+        </span>
+        <span className="text-accent-300 font-semibold whitespace-nowrap">Ver listado →</span>
+      </button>
+
+      <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 mb-4">
+        <div className="relative sm:w-auto">
           <IconSearch className="w-4 h-4 text-gray-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Usuario o título…"
-            className="input w-48 pl-8"
+            className="input w-full sm:w-48 pl-8"
           />
         </div>
         <select
           value={decision}
           onChange={(e) => setDecision(e.target.value)}
-          className="input w-auto"
+          className="input w-full sm:w-auto"
         >
           <option value="">todas las decisiones</option>
           {Object.entries(decisionLabel).map(([value, label]) => (
@@ -163,7 +175,51 @@ export default function DecisionsLog() {
         </select>
       </div>
 
-      <div className="card overflow-x-auto px-4">
+      <div className="md:hidden space-y-3">
+        {rows.map((r) => (
+          <article key={`mobile-${r.decision}-${r.id}`} className="card p-4">
+            <div className="flex gap-3">
+              {r.poster_url ? (
+                <img src={r.poster_url} alt="" loading="lazy" className="w-12 h-[72px] object-cover rounded-xl flex-shrink-0" />
+              ) : (
+                <div className="w-12 h-[72px] rounded-xl bg-bg-700 flex items-center justify-center flex-shrink-0">🎬</div>
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="font-semibold leading-snug">{r.media_title ?? 'Sin título'}</div>
+                  <span className={`badge text-[10px] ${decisionBadge[r.decision] ?? 'bg-bg-700/60 text-gray-400 ring-bg-600'}`}>
+                    {decisionLabel[r.decision] ?? r.decision}
+                  </span>
+                </div>
+                <div className="mt-1 text-xs text-gray-400">{r.username}</div>
+                {r.note && <div className="mt-1 text-xs text-gray-500">📝 {r.note}</div>}
+                <div className="mt-3 flex items-center justify-between gap-2 text-xs text-gray-500">
+                  <span>{formatDate(r.created_at)}</span>
+                  {(r.balance_before != null || r.limit_applied != null) && <span>Saldo {r.balance_before ?? '—'} / {r.limit_applied ?? '—'}</span>}
+                </div>
+              </div>
+            </div>
+            {Boolean(r.undoable) && (
+              <div className="mt-3 border-t border-bg-700 pt-3 text-right">
+                {r.undone_at ? (
+                  <span className="text-xs text-gray-600">deshecho</span>
+                ) : (
+                  <button type="button" onClick={() => undo(r)} disabled={undoing[r.id]} className="min-h-11 px-3 text-sm font-bold text-accent-400 disabled:opacity-50">
+                    {undoing[r.id] ? 'deshaciendo…' : 'deshacer'}
+                  </button>
+                )}
+              </div>
+            )}
+          </article>
+        ))}
+        {rows.length === 0 && (
+          <div className="card p-6 text-center text-sm text-gray-500">
+            {decision || q ? 'Nada coincide con los filtros.' : 'Sin decisiones registradas todavía.'}
+          </div>
+        )}
+      </div>
+
+      <div className="hidden md:block card overflow-x-auto px-4">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-bg-700">

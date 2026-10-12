@@ -17,7 +17,7 @@ const UNSAVED_WARNING = 'Hay cambios sin guardar en esta pestaña. ¿Salir igual
 
 const TABS = {
   quota: { label: 'Cupo', Icon: IconGauge, Component: Quota },
-  'movie-history': { label: 'Antigüedad de películas', Icon: IconFilm, Component: MovieHistory, hidden: true },
+  'movie-history': { label: 'Antigüedad del contenido', Icon: IconFilm, Component: MovieHistory, hidden: true },
   salvadas: { label: 'Salvadas', Icon: IconSave, Component: Salvadas },
   libraries: { label: 'Bibliotecas', Icon: IconFilm, Component: Libraries },
   users: { label: 'Usuarios', Icon: IconUsers, Component: Users },
@@ -25,6 +25,9 @@ const TABS = {
   notifications: { label: 'Avisos', Icon: IconBell, Component: Notifications },
   settings: { label: 'Ajustes', Icon: IconGear, Component: Settings },
 };
+
+const MOBILE_TABS = ['quota', 'log', 'notifications', 'users'];
+const MOBILE_MORE_TABS = ['salvadas', 'libraries', 'settings'];
 
 export default function Dashboard({ onLoggedOut }) {
   return (
@@ -50,6 +53,8 @@ function DashboardInner({ onLoggedOut }) {
   const [pauseBusy, setPauseBusy] = useState(false);
   const { Component, label } = TABS[tab];
   const anyDirty = useAnyDirty();
+  const mobileActiveTab = tab === 'movie-history' ? 'log' : tab;
+  const mobileMoreActive = !MOBILE_TABS.includes(mobileActiveTab);
 
   useEffect(() => {
     api.version().then(setVersion).catch(() => {});
@@ -85,25 +90,20 @@ function DashboardInner({ onLoggedOut }) {
 
   return (
     <div className="min-h-screen flex flex-col sm:flex-row bg-bg-950 text-gray-100">
-      {/* Overlay — solo móvil, cierra el menú al tocar fuera */}
+      {/* Fondo de la hoja inferior móvil. */}
       {menuOpen && (
-        <div
+        <button
+          type="button"
+          aria-label="Cerrar menú"
           onClick={() => setMenuOpen(false)}
-          className="sm:hidden fixed inset-0 bg-black/60 z-20 backdrop-blur-sm"
+          className="sm:hidden fixed inset-0 bg-black/65 z-40 backdrop-blur-sm"
         />
       )}
 
-      {/* Sidebar — fija en desktop, cajón deslizante escondido en móvil */}
-      <nav
-        className={`fixed sm:sticky inset-y-0 left-0 sm:top-0 z-30 sm:z-auto w-[240px] sm:w-[220px] h-screen overflow-y-auto bg-gradient-to-b from-bg-900 via-bg-900 to-bg-950 border-r border-bg-700/55 px-4 py-6 flex flex-col flex-shrink-0 shadow-[18px_0_48px_-32px_rgba(0,0,0,.85)] transition-transform duration-300 sm:transition-none ${
-          menuOpen ? 'translate-x-0' : '-translate-x-full sm:translate-x-0'
-        }`}
-      >
+      {/* Sidebar original: solo escritorio. */}
+      <nav className="hidden sm:flex sticky top-0 z-auto w-[220px] h-screen overflow-y-auto bg-gradient-to-b from-bg-900 via-bg-900 to-bg-950 border-r border-bg-700/55 px-4 py-6 flex-col flex-shrink-0 shadow-[18px_0_48px_-32px_rgba(0,0,0,.85)]">
         <div className="mb-8 flex items-center justify-between">
           <Wordmark className="text-[30px]" />
-          <button onClick={() => setMenuOpen(false)} className="sm:hidden text-gray-400 p-1 -mr-1">
-            <IconXCircle className="w-6 h-6" />
-          </button>
         </div>
         <button
           onClick={togglePause}
@@ -178,18 +178,60 @@ function DashboardInner({ onLoggedOut }) {
         )}
       </nav>
 
-      {/* Top bar — solo móvil */}
-      <header className="sm:hidden flex items-center justify-between px-4 h-16 bg-bg-900/95 border-b border-bg-700/60 flex-shrink-0 sticky top-0 z-10 backdrop-blur">
-        <button onClick={() => setMenuOpen(true)} className="text-gray-300 p-1 -ml-1">
-          <IconMenu className="w-6 h-6" />
-        </button>
-        <span className="text-sm text-gray-400">{label}</span>
-        <button onClick={logout} className="text-gray-400 p-1 -mr-1">
-          <IconLogout className="w-5 h-5" />
-        </button>
+      {/* Cabecera compacta tipo app — solo móvil. */}
+      <header className="sm:hidden flex items-center justify-between px-4 h-16 bg-bg-900/90 border-b border-bg-700/60 flex-shrink-0 sticky top-0 z-30 backdrop-blur-xl">
+        <Wordmark className="text-[23px]" />
+        <div className="flex items-center gap-2 min-w-0">
+          {paused && <span className="w-2 h-2 rounded-full bg-accent-400 animate-pulse" title="Pausa global activa" />}
+          <span className="text-sm font-bold text-gray-300 truncate max-w-[170px]">{label}</span>
+        </div>
       </header>
 
-      <main className="flex-1 p-4 sm:p-8 lg:p-10 pb-8 overflow-x-hidden">
+      {/* Menú secundario móvil en una hoja inferior, como una app nativa. */}
+      {menuOpen && (
+        <section
+          role="dialog"
+          aria-modal="true"
+          aria-label="Más secciones"
+          className="sm:hidden fixed inset-x-0 bottom-0 z-50 rounded-t-[28px] border-t border-bg-600 bg-bg-900 px-4 pt-3 shadow-[0_-20px_60px_rgba(0,0,0,.55)]"
+          style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+        >
+          <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-bg-600" />
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <div className="text-lg font-extrabold">Más</div>
+              <div className="text-xs text-gray-500">Administración de limitARR</div>
+            </div>
+            <button type="button" onClick={() => setMenuOpen(false)} aria-label="Cerrar" className="w-11 h-11 rounded-full bg-bg-800 flex items-center justify-center text-gray-300">
+              <IconXCircle className="w-6 h-6" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            {MOBILE_MORE_TABS.map((key) => {
+              const { label: itemLabel, Icon } = TABS[key];
+              return (
+                <button key={key} type="button" onClick={() => goTab(key)} className={`min-h-[82px] rounded-2xl border flex flex-col items-center justify-center gap-2 text-xs font-bold ${tab === key ? 'border-accent-500 bg-accent-600/20 text-white' : 'border-bg-700 bg-bg-800/75 text-gray-300'}`}>
+                  <Icon className="w-6 h-6" />
+                  {itemLabel}
+                </button>
+              );
+            })}
+          </div>
+
+          <button type="button" onClick={togglePause} disabled={pauseBusy} className={`mt-3 w-full min-h-12 rounded-2xl border px-4 flex items-center gap-3 text-left text-sm font-bold ${paused ? 'border-accent-500 bg-accent-600/20 text-accent-300' : 'border-bg-700 bg-bg-800/75 text-gray-300'}`}>
+            <IconBan className="w-5 h-5" />
+            {paused ? 'Reanudar solicitudes' : 'Pausar todas las solicitudes'}
+          </button>
+          <button type="button" onClick={logout} className="mt-2 w-full min-h-12 rounded-2xl px-4 flex items-center gap-3 text-left text-sm font-bold text-gray-400">
+            <IconLogout className="w-5 h-5" />
+            Cerrar sesión
+          </button>
+          {version && <div className="pt-2 text-center text-[11px] text-gray-600">limitARR {version.version} · {version.sha ?? 'dev'}</div>}
+        </section>
+      )}
+
+      <main className="flex-1 px-3 pt-5 pb-28 sm:p-8 lg:p-10 overflow-x-hidden">
         {paused && (
           <div className="mb-6 flex items-center gap-3 rounded-xl border border-accent-500 bg-accent-600/15 px-4 py-3 text-sm font-bold text-accent-300">
             <IconBan className="w-5 h-5 flex-shrink-0" />
@@ -198,6 +240,28 @@ function DashboardInner({ onLoggedOut }) {
         )}
         <Component onNavigate={goTab} />
       </main>
+
+      {/* Navegación principal persistente en móvil. */}
+      <nav
+        aria-label="Navegación principal"
+        className="sm:hidden fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-bg-600/80 bg-bg-900/95 px-1 pt-1.5 backdrop-blur-xl shadow-[0_-12px_35px_rgba(0,0,0,.35)]"
+        style={{ paddingBottom: 'max(.45rem, env(safe-area-inset-bottom))' }}
+      >
+        {MOBILE_TABS.map((key) => {
+          const { label: itemLabel, Icon } = TABS[key];
+          const active = mobileActiveTab === key;
+          return (
+            <button key={key} type="button" onClick={() => goTab(key)} aria-current={active ? 'page' : undefined} className={`min-h-[54px] rounded-xl flex flex-col items-center justify-center gap-1 text-[10px] font-bold transition-colors ${active ? 'bg-accent-600/15 text-accent-300' : 'text-gray-500'}`}>
+              <Icon className="w-[22px] h-[22px]" />
+              {itemLabel}
+            </button>
+          );
+        })}
+        <button type="button" onClick={() => setMenuOpen(true)} aria-expanded={menuOpen} className={`min-h-[54px] rounded-xl flex flex-col items-center justify-center gap-1 text-[10px] font-bold transition-colors ${mobileMoreActive || menuOpen ? 'bg-accent-600/15 text-accent-300' : 'text-gray-500'}`}>
+          <IconMenu className="w-[22px] h-[22px]" />
+          Más
+        </button>
+      </nav>
 
       <WhatsNewModal />
     </div>
