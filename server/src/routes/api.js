@@ -1120,6 +1120,23 @@ function historyContentKey(item) {
   return `${item.mediaType}:${mediaKey}:${item.mediaType === 'tv' ? item.seasonNumber ?? '' : ''}`;
 }
 
+// Si un contenido se borró y más adelante se volvió a pedir, Plex solo nos
+// dice que existe AHORA; no distingue aquella copia antigua de la actual. Por
+// eso, dentro de cada biblioteca conservamos únicamente la solicitud más
+// reciente de la película o temporada. Así no revive la fecha de la primera
+// vez que estuvo en Plex.
+function keepLatestLibraryRequest(history) {
+  const latest = new Map();
+  for (const item of history) {
+    const key = `${item.libraryId ?? 'unknown'}:${historyContentKey(item)}`;
+    const current = latest.get(key);
+    if (!current || String(item.requestedAt).localeCompare(String(current.requestedAt)) >= 0) {
+      latest.set(key, item);
+    }
+  }
+  return [...latest.values()].sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt)));
+}
+
 function showTitleFromHistory(item) {
   if (item.mediaType !== 'tv') return item.title;
   return String(item.title || '')
@@ -1232,7 +1249,7 @@ router.get('/quota/movie-history', ah(async (req, res) => {
     return { ...publicItem, status };
   }).sort((a, b) => String(a.requestedAt).localeCompare(String(b.requestedAt)));
 
-  res.json(await keepRequestedContentStillInPlex(history));
+  res.json(await keepRequestedContentStillInPlex(keepLatestLibraryRequest(history)));
 }));
 
 // Rellena decisions_log con solicitudes aprobadas en Seerr que limitARR no vio

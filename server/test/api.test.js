@@ -788,7 +788,7 @@ test('GET /quota: recentlyWatched trae lo visto en los últimos 30 días, no lo 
   }
 });
 
-test('GET /quota/movie-history incluye películas y temporadas que todavía siguen en Plex', async () => {
+test('GET /quota/movie-history usa la petición más reciente si una película o temporada se volvió a añadir', async () => {
   const upsertSetting = db.prepare(`
     INSERT INTO settings (key, value) VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
@@ -804,17 +804,19 @@ test('GET /quota/movie-history incluye películas y temporadas que todavía sigu
       (request_id, user_id, username, library_id, media_title, media_type, tmdb_id, poster_url, decision, created_at, voided_at)
     VALUES (?, 2991, 'historia', 2991, ?, 'movie', ?, ?, ?, ?, ?)
   `);
-  insert.run(99101, 'Pendiente antigua', 99101, '/poster-1.jpg', 'approved', '2026-01-01 10:00:00', null);
+  insert.run(99101, 'Pendiente antigua', 99101, '/poster-1.jpg', 'approved', '2026-01-01 10:00:00', '2026-03-01 10:00:00');
   insert.run(99102, 'Ya vista', 99102, '/poster-2.jpg', 'approved', '2026-02-01 10:00:00', null);
   insert.run(99102, 'Ya vista', 99102, '/poster-2.jpg', 'watched', '2026-02-10 10:00:00', null);
   insert.run(99103, 'Retirada', 99103, null, 'approved', '2026-03-01 10:00:00', '2026-03-05 10:00:00');
+  insert.run(99106, 'Pendiente antigua', 99101, '/poster-new.jpg', 'approved', '2026-04-01 10:00:00', null);
   const insertSeason = db.prepare(`
     INSERT INTO decisions_log
       (request_id, user_id, username, library_id, media_title, media_type, tmdb_id, season_number, poster_url, decision, created_at, voided_at)
-    VALUES (?, 2991, 'historia', 2991, ?, 'tv', 88001, ?, ?, 'approved', ?, null)
+    VALUES (?, 2991, 'historia', 2991, ?, 'tv', 88001, ?, ?, 'approved', ?, ?)
   `);
-  insertSeason.run(99104, 'Serie antigua - Temporada 2', 2, '/season-2.jpg', '2026-01-15 10:00:00');
-  insertSeason.run(99105, 'Serie antigua - Temporada 3', 3, '/season-3.jpg', '2026-01-16 10:00:00');
+  insertSeason.run(99104, 'Serie antigua - Temporada 2', 2, '/season-2.jpg', '2026-01-15 10:00:00', '2026-03-02 10:00:00');
+  insertSeason.run(99105, 'Serie antigua - Temporada 3', 3, '/season-3.jpg', '2026-01-16 10:00:00', null);
+  insertSeason.run(99107, 'Serie antigua - Temporada 2', 2, '/season-2-new.jpg', '2026-04-02 10:00:00', null);
 
   const originalFetch = global.fetch;
   global.fetch = async (input) => {
@@ -838,19 +840,21 @@ test('GET /quota/movie-history incluye películas y temporadas que todavía sigu
 
   try {
     const res = await agent.get('/api/quota/movie-history').expect(200);
-    const ours = res.body.filter((item) => [99101, 99102, 99103, 99104, 99105].includes(item.requestId));
+    const ours = res.body.filter((item) => [99101, 99102, 99103, 99104, 99105, 99106, 99107].includes(item.requestId));
     assert.deepEqual(ours.map((item) => [item.requestId, item.status]), [
-      [99101, 'pending'],
-      [99104, 'pending'],
       [99102, 'watched'],
+      [99106, 'pending'],
+      [99107, 'pending'],
     ]);
-    assert.equal(ours[0].requestedAt, '2026-01-01 10:00:00');
-    assert.equal(ours[0].libraryName, 'Películas historial');
-    assert.equal(ours[1].mediaType, 'tv');
-    assert.equal(ours[1].seasonNumber, 2);
+    assert.equal(ours[1].requestedAt, '2026-04-01 10:00:00');
+    assert.equal(ours[1].posterUrl, '/poster-new.jpg');
+    assert.equal(ours[1].libraryName, 'Películas historial');
+    assert.equal(ours[2].mediaType, 'tv');
+    assert.equal(ours[2].seasonNumber, 2);
+    assert.equal(ours[2].requestedAt, '2026-04-02 10:00:00');
   } finally {
     global.fetch = originalFetch;
-    db.prepare('DELETE FROM decisions_log WHERE request_id BETWEEN 99101 AND 99105').run();
+    db.prepare('DELETE FROM decisions_log WHERE request_id BETWEEN 99101 AND 99107').run();
     db.prepare('DELETE FROM libraries WHERE id = 2991').run();
     db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key')").run();
   }
