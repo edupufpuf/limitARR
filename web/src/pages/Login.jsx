@@ -56,31 +56,34 @@ export default function Login({ onLoggedIn }) {
   }
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center p-4 overflow-hidden">
-      <div className="absolute w-[480px] h-[480px] rounded-full bg-accent-600/15 blur-3xl pointer-events-none" />
-      <form onSubmit={submit} className="relative card p-8 w-full max-w-sm">
-        <div className="flex flex-col items-center gap-4 mb-8">
-          <Wordmark className="text-[42px]" />
-        </div>
-        <input
-          type="password"
-          autoFocus
-          placeholder="Contraseña admin"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="input py-2 mb-4"
-        />
-        {error && <p className="text-accent-400 text-sm mb-4">{error}</p>}
-        <button type="submit" disabled={loading} className="btn btn-primary w-full py-2">
-          {loading ? 'Entrando…' : 'Entrar'}
-        </button>
-        <div className="flex items-center gap-3 my-5 text-xs text-gray-600">
-          <span className="h-px flex-1 bg-bg-600" />o<span className="h-px flex-1 bg-bg-600" />
-        </div>
-        <button type="button" onClick={loginWithPlex} disabled={plexLoading} className="btn btn-ghost w-full py-2">
+    <div className="min-h-screen bg-white flex flex-col">
+      <main className="flex-1 w-full max-w-sm mx-auto px-6 flex flex-col justify-center">
+        <Wordmark className="text-[44px]" />
+        <p className="mt-2 mb-10 text-lg text-gray-500">Tu cupo de Plex, de un vistazo.</p>
+
+        <button type="button" onClick={loginWithPlex} disabled={plexLoading} className="btn btn-dark w-full">
           {plexLoading ? 'Esperando a Plex…' : 'Entrar con Plex'}
         </button>
-      </form>
+
+        <div className="flex items-center gap-3 my-6 text-sm text-gray-500">
+          <span className="h-px flex-1 bg-bg-700" />o<span className="h-px flex-1 bg-bg-700" />
+        </div>
+
+        <form onSubmit={submit} className="space-y-3">
+          <input
+            type="password"
+            aria-label="Contraseña de administrador"
+            placeholder="Contraseña de administrador"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="input"
+          />
+          <button type="submit" disabled={loading || !password} className="btn btn-ghost w-full">
+            {loading ? 'Entrando…' : 'Entrar como admin'}
+          </button>
+        </form>
+        {error && <p role="alert" className="mt-4 text-sm text-accent-400">{error}</p>}
+      </main>
     </div>
   );
 }

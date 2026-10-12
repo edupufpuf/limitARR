@@ -151,3 +151,45 @@ export function IconMenu({ className }) {
     </svg>
   );
 }
+
+export function IconChevronRight({ className }) {
+  return (
+    <svg {...base} className={className}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="m9 5 7 7-7 7" />
+    </svg>
+  );
+}
+
+export function IconX({ className }) {
+  return (
+    <svg {...base} className={className}>
+      <path strokeLinecap="round" d="M6 6l12 12M18 6 6 18" />
+    </svg>
+  );
+}
+
+export function IconCalendar({ className }) {
+  return (
+    <svg {...base} className={className}>
+      <rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />
+      <path strokeLinecap="round" d="M3.5 10h17M8 3v4M16 3v4" />
+    </svg>
+  );
+}
+
+export function IconQuestion({ className }) {
+  return (
+    <svg {...base} className={className}>
+      <circle cx="12" cy="12" r="9" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5v.4M12 17h.01" />
+    </svg>
+  );
+}
+
+export function IconDots({ className }) {
+  return (
+    <svg {...base} className={className}>
+      <path strokeLinecap="round" strokeWidth="2.6" d="M5.5 12h.01M12 12h.01M18.5 12h.01" />
+    </svg>
+  );
+}

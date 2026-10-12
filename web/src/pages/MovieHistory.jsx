@@ -18,8 +18,7 @@ export default function MovieHistory({ onNavigate }) {
     <div>
       <div className="flex flex-wrap items-end justify-between gap-3 mb-6">
         <div>
-          <h2 className="page-title">Antigüedad del contenido</h2>
-          <p className="text-sm text-gray-500 mt-1">Películas y temporadas solicitadas que todavía siguen en Plex, sea cual sea su estado.</p>
+          <h2 className="page-title">Antigüedad</h2>
         </div>
         <button type="button" onClick={() => onNavigate?.('log')} className="btn btn-ghost">← Volver al Registro</button>
       </div>

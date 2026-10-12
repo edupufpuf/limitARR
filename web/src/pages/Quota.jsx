@@ -1,6 +1,7 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
-import { IconSearch, IconUsers, IconEye, IconBan, IconCheckCircle, IconXCircle } from '../icons.jsx';
+import { IconSearch, IconUsers, IconEye, IconClock, IconChevronRight, IconDots } from '../icons.jsx';
+import Sheet from '../components/Sheet.jsx';
 import { SalvadosGrid } from '../components/Salvados.jsx';
 import QuotaHelp from '../components/QuotaHelp.jsx';
 import { downloadStatusLabel, downloadStatusColor, downloadStatusBg, downloadStatusChipText } from '../mediaStatus.js';
@@ -39,9 +40,9 @@ function formatRequestDate(dateMs) {
 }
 
 const STATUS = {
-  danger: { text: 'text-accent-400', bar: 'bg-accent-500', ring: '#f87171' },
-  warn: { text: 'text-yellow-400', bar: 'bg-yellow-400', ring: '#facc15' },
-  ok: { text: 'text-green-400', bar: 'bg-green-400', ring: '#4ade80' },
+  danger: { text: 'text-accent-400', bar: 'bg-accent-500', ring: '#dc2626' },
+  warn: { text: 'text-yellow-400', bar: 'bg-yellow-400', ring: '#ca8a04' },
+  ok: { text: 'text-green-400', bar: 'bg-green-400', ring: '#16a34a' },
 };
 
 function statusOf(balance) {
@@ -64,51 +65,38 @@ function isBlocked(user) {
 
 const STAT_TILES = {
   all: {
-    label: 'usuarios',
+    label: 'Todos',
     description: 'Usuarios de Plex y cuentas locales de Seerr con cupo calculado.',
-    tone: 'from-sky-500/25 via-sky-500/10 to-bg-800 border-sky-400/30 text-sky-100',
-    icon: 'bg-sky-400/20 text-sky-100',
   },
   pending: {
-    label: 'sin ver',
+    label: 'Sin ver',
     description: 'Cosas aprobadas que el usuario todavía no se ha visto (siguen ocupando cupo).',
-    tone: 'from-amber-400/25 via-amber-500/10 to-bg-800 border-amber-300/30 text-amber-100',
-    icon: 'bg-amber-300/20 text-amber-100',
   },
   blocked: {
-    label: 'sin saldo',
+    label: 'Sin saldo',
     description: 'Usuarios que ahora mismo tienen el cupo a 0 en alguna biblioteca: la próxima solicitud se rechazaría.',
-    tone: 'from-accent-500/30 via-accent-500/10 to-bg-800 border-accent-400/40 text-red-100',
-    icon: 'bg-accent-400/20 text-red-100',
   },
   approved7d: {
-    label: 'aprobadas · 7d',
+    label: 'Aprobadas 7d',
     description: 'Solicitudes que limitARR aprobó automáticamente en los últimos 7 días.',
-    tone: 'from-emerald-400/25 via-emerald-500/10 to-bg-800 border-emerald-300/30 text-emerald-100',
-    icon: 'bg-emerald-300/20 text-emerald-100',
   },
   blocked7d: {
-    label: 'sin cupo · 7d',
+    label: 'Sin cupo 7d',
     description: 'Aprobaciones NO hechas en los últimos 7 días por falta de saldo (el usuario ya no tenía cupo cuando pidió esto).',
-    tone: 'from-fuchsia-400/25 via-fuchsia-500/10 to-bg-800 border-fuchsia-300/30 text-fuchsia-100',
-    icon: 'bg-fuchsia-300/20 text-fuchsia-100',
   },
 };
 
-function StatTile({ label, value, Icon, tone, iconTone, active, onClick }) {
+function FilterChip({ label, value, active, title, onClick }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`card px-4 py-3 flex items-center gap-3 min-w-0 text-left bg-gradient-to-br transition-all hover:-translate-y-0.5 hover:border-white/20 ${tone} ${active ? 'ring-2 ring-white/30' : ''}`}
+      title={title}
+      aria-pressed={active}
+      className={`chip ${active ? '!bg-gray-50 !text-white' : ''}`}
     >
-      <span className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${iconTone}`}>
-        <Icon className="w-5 h-5" />
-      </span>
-      <div className="min-w-0">
-        <div className="text-2xl font-bold tabular-nums leading-tight">{value}</div>
-        <div className="text-[11px] uppercase tracking-wider text-current/70 truncate">{label}</div>
-      </div>
+      {label}
+      {value != null && <span className={`tabular-nums ${active ? 'text-white/70' : 'text-gray-500'}`}>{value}</span>}
     </button>
   );
 }
@@ -324,7 +312,7 @@ function BalanceRing({ balance, limit, children }) {
   return (
     <div
       className="w-12 h-12 rounded-full p-[3px] flex-shrink-0"
-      style={{ background: `conic-gradient(${color} ${deg}deg, #2b364e ${deg}deg)` }}
+      style={{ background: `conic-gradient(${color} ${deg}deg, #ebebeb ${deg}deg)` }}
     >
       <div className="w-full h-full rounded-full overflow-hidden bg-bg-800 flex items-center justify-center">
         {children}
@@ -358,7 +346,7 @@ function WatchProgressRing({ percent }) {
       className="absolute top-1 right-1 w-6 h-6 rounded-full p-[2px] pointer-events-none group-hover:opacity-0 transition-opacity"
       style={{ background: `conic-gradient(${color} ${deg}deg, rgba(15,20,32,.7) ${deg}deg)` }}
     >
-      <span className="w-full h-full rounded-full bg-black/80 flex items-center justify-center text-[8px] font-bold tabular-nums text-gray-100">
+      <span className="w-full h-full rounded-full bg-black/80 flex items-center justify-center text-[8px] font-bold tabular-nums text-white">
         {percent}
       </span>
     </span>
@@ -427,12 +415,12 @@ function PendingPoster({ item, onDetail, onDismiss }) {
       )}
       {/* Issue #8: episodios vistos/totales de la temporada, bajo la rueda. */}
       {!item.unavailable && item.mediaType === 'tv' && item.episodesTotal != null && (
-        <span className="absolute top-8 right-1 rounded bg-black/75 px-1 py-0.5 text-[8px] font-semibold tabular-nums text-gray-200 pointer-events-none group-hover:opacity-0 transition-opacity">
+        <span className="absolute top-8 right-1 rounded bg-black/75 px-1 py-0.5 text-[8px] font-semibold tabular-nums text-white pointer-events-none group-hover:opacity-0 transition-opacity">
           {item.episodesWatched ?? 0}/{item.episodesTotal}
         </span>
       )}
       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent pt-6 pb-1 px-1.5 pointer-events-none">
-        <span className="block text-[9px] leading-tight text-gray-100 font-medium line-clamp-2">
+        <span className="block text-[9px] leading-tight text-white font-medium line-clamp-2">
           {item.title ?? '—'}
         </span>
       </div>
@@ -443,7 +431,7 @@ function PendingPoster({ item, onDetail, onDismiss }) {
             e.stopPropagation();
             onDismiss(item);
           }}
-          className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/70 text-gray-200 hover:bg-accent-500 hover:text-white text-[11px] leading-none hidden group-hover:flex items-center justify-center"
+          className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/70 text-white hover:bg-accent-500 hover:text-white text-[11px] leading-none hidden group-hover:flex items-center justify-center"
           title="Quitar del cupo"
         >
           ✕
@@ -470,12 +458,12 @@ export function RecentlyWatchedPoster({ item }) {
       {/* Issue #21 (jesusgarrigues): en un grupo, quién de la familia la vio —
           sin esto un cupo compartido no dice qué miembro lo liberó. */}
       {item.watchedBy && (
-        <span className="absolute top-1 left-1 right-1 line-clamp-1 rounded bg-black/75 px-1 py-0.5 text-[7px] leading-tight font-semibold text-gray-200 pointer-events-none">
+        <span className="absolute top-1 left-1 right-1 line-clamp-1 rounded bg-black/75 px-1 py-0.5 text-[7px] leading-tight font-semibold text-white pointer-events-none">
           {item.watchedBy}
         </span>
       )}
       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent pt-6 pb-1 px-1.5 pointer-events-none">
-        <span className="block text-[9px] leading-tight text-gray-300 font-medium line-clamp-2">
+        <span className="block text-[9px] leading-tight text-white/90 font-medium line-clamp-2">
           {item.title ?? '—'}
         </span>
       </div>
@@ -577,7 +565,7 @@ export function PendingDetailModal({
   return (
     // dvh y no vh: en Android/iOS la barra de URL del navegador come parte del
     // viewport y con 90vh el pie del modal (botones) quedaba cortado.
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
       <div
         className="card w-full max-w-lg max-h-[85vh] overflow-y-auto p-4 sm:p-5"
         style={{ maxHeight: '85dvh' }}
@@ -847,21 +835,17 @@ function PendingApprovals({ items, onAction }) {
   }
 
   return (
-    <div className="card p-4 mb-6 border-amber-400/30">
-      <h3 className="font-semibold mb-1">Pendientes de aprobación</h3>
-      <p className="text-xs text-gray-500 mb-3">
-        Solicitudes esperando en Seerr sin usuario reconocido — las de usuarios conocidos salen en su tarjeta.
-      </p>
+    <div>
       {[...byLibrary.entries()].map(([libraryName, libItems]) => (
-        <div key={libraryName} className="mb-3 last:mb-0">
-          <div className="text-xs uppercase tracking-wider text-gray-500 mb-2">{libraryName}</div>
-          <div className="space-y-2">
+        <div key={libraryName} className="mb-5 last:mb-0">
+          <div className="text-sm font-semibold text-gray-500 mb-2">{libraryName}</div>
+          <div>
             {libItems.map((item) => (
-              <div key={item.requestId ?? `queue-${item.queueId}`} className="flex items-center gap-3 text-sm">
+              <div key={item.requestId ?? `queue-${item.queueId}`} className="flex flex-wrap items-center gap-3 text-sm py-3 border-b border-bg-700 last:border-b-0">
                 <span className="w-8 h-12 rounded overflow-hidden bg-bg-600 flex-shrink-0">
                   {item.posterUrl && <img src={item.posterUrl} alt="" loading="lazy" className="w-full h-full object-cover" />}
                 </span>
-                <div className="flex-1 min-w-0">
+                <div className="flex-1 min-w-[10rem]">
                   <div className="truncate font-medium">{item.title ?? `solicitud #${item.requestId}`}</div>
                   <div className="text-xs text-gray-500 truncate">
                     {item.username}
@@ -945,7 +929,7 @@ function DebtorBubble({ debtor, size, lead, open, onToggle }) {
       style={{
         width: size,
         height: size,
-        background: `conic-gradient(#ef4444 ${deg}deg, #34445f ${deg}deg)`,
+        background: `conic-gradient(#e5251b ${deg}deg, #ebebeb ${deg}deg)`,
       }}
     >
       <div className="w-full h-full rounded-full bg-bg-800 flex flex-col items-center justify-center gap-0.5 overflow-hidden px-1.5">
@@ -959,7 +943,7 @@ function DebtorBubble({ debtor, size, lead, open, onToggle }) {
           )}
         </span>
         {showName && (
-          <span className="text-xs font-bold text-white leading-tight truncate max-w-full">{user.username}</span>
+          <span className="text-xs font-bold text-gray-50 leading-tight truncate max-w-full">{user.username}</span>
         )}
         <span className={`${showName ? 'text-[10px]' : 'text-[9px]'} text-accent-300 font-semibold tabular-nums leading-none`}>
           debe {owed}
@@ -1050,7 +1034,7 @@ export function MonthlyHistoryModal({ user, lib, libraryNameById, onClose, loadH
   }, [user.userId, lib?.libraryId, loadHistory]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
       <div
         className="card w-full max-w-md max-h-[80vh] overflow-y-auto p-4 sm:p-5"
         style={{ maxHeight: '80dvh' }}
@@ -1092,145 +1076,148 @@ export function MonthlyHistoryModal({ user, lib, libraryNameById, onClose, loadH
   );
 }
 
-function UserCard({ user, salvados = [], expanded, onToggle, onReset, onDismiss, onManualCharge, onDetail, onMonthlyHistory, resetting, charging }) {
-  const worst = worstLib(user.libraries);
-  const pending = totalOutstanding(user.libraries);
-  return (
-    <div className="card overflow-hidden hover:border-bg-600/80 transition-colors">
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center gap-3 p-4 text-left hover:bg-bg-700/40 transition-colors"
-      >
-        <BalanceRing balance={worst.balance} limit={worst.limitApplied}>
-          {user.isGroup ? (
-            <IconUsers className="w-5 h-5 text-gray-300" />
-          ) : user.avatar ? (
-            <img src={user.avatar} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-          ) : (
-            <span className="text-xs font-bold">{user.username.slice(0, 2).toUpperCase()}</span>
-          )}
-        </BalanceRing>
-        <div className="flex-1 min-w-0">
-          <div className="font-semibold truncate">
-            {user.username}
-            {user.isGroup && (
-              <span className="ml-1.5 text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-accent-600/20 text-accent-300 ring-1 ring-accent-500/40 align-middle">
-                grupo
-              </span>
-            )}
-            {user.source === 'seerr' && (
-              <span className="ml-1.5 text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 ring-1 ring-sky-500/30 align-middle">
-                Seerr local
-              </span>
-            )}
-          </div>
-          <div className="text-xs text-gray-500 truncate">
-            {user.isGroup && user.members?.length > 0
-              ? user.members.join(', ')
-              : `${pending === 0 ? 'sin pendientes' : `${pending} pendiente(s)`} · ${user.libraries.length} biblioteca(s)`}
-          </div>
-        </div>
-        <span className={`text-xl font-bold tabular-nums ${statusOf(worst.balance).text}`}>{worst.balance}</span>
-        {/* Grupo agregado: sin cuenta Plex propia, no hay quién suplantar. */}
-        {!user.isGroup && user.source !== 'seerr' && (
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); impersonate(user.userId, user.username); }}
-            title={`Ver el panel como ${user.username}`}
-            className="p-1.5 rounded-lg text-gray-500 hover:text-accent-300 hover:bg-bg-700/60"
-          >
-            <IconEye className="w-4 h-4" />
-          </button>
-        )}
-        <span className="text-gray-500 text-xs">{expanded ? '▲' : '▼'}</span>
-      </button>
+function UserAvatar({ user }) {
+  if (user.isGroup) return <IconUsers className="w-5 h-5 text-gray-300" />;
+  if (user.avatar) return <img src={user.avatar} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />;
+  return <span className="text-xs font-bold">{user.username.slice(0, 2).toUpperCase()}</span>;
+}
 
-      {expanded && (
-        <div className="border-t border-bg-700 p-4 space-y-4 bg-bg-900/30">
-          {user.monthlyTotal?.enabled && (
-            <button
-              type="button"
-              onClick={() => onMonthlyHistory(user, null)}
-              title="Cupo mensual total: cosas aprobadas este mes en cualquier biblioteca — click para ver historial"
-              className={`w-full flex items-center justify-between text-xs rounded-lg px-2.5 py-1.5 hover:brightness-110 ${
-                user.monthlyTotal.used >= user.monthlyTotal.limit ? 'text-accent-400 bg-accent-500/10' : 'text-gray-400 bg-bg-700/40'
-              }`}
-            >
-              <span>📅 cupo mensual total</span>
-              <span className="font-bold tabular-nums">{user.monthlyTotal.used}/{user.monthlyTotal.limit}</span>
-            </button>
-          )}
-          {user.libraries.map((lib) => {
-            const key = `${user.userId}-${lib.libraryId}`;
-            return (
-              <div key={key}>
-                <div className="flex items-center gap-3 text-sm mb-1.5">
-                  <span className="flex-1 truncate font-medium">{lib.libraryName}</span>
-                  <span className="text-gray-400 tabular-nums">
-                    <span className={`font-bold ${statusOf(lib.balance).text}`}>{lib.balance}</span>
-                    {' '}/ {lib.limitApplied}
-                  </span>
-                  <button
-                    onClick={() => onManualCharge(user.userId, lib.libraryId, user.username, lib.sectionType)}
-                    disabled={charging[key]}
-                    title="Restar un hueco de cupo a mano (contenido bajado/visto fuera de Seerr)"
-                    className="text-gray-400 hover:text-gray-200 text-xs disabled:opacity-50"
-                  >
-                    {charging[key] ? 'cargando…' : 'cargo manual'}
-                  </button>
-                  <button
-                    onClick={() => onReset(user.userId, lib.libraryId, user.username)}
-                    disabled={resetting[key]}
-                    className="text-accent-400 hover:text-accent-300 text-xs disabled:opacity-50"
-                  >
-                    {resetting[key] ? 'reseteando…' : 'resetear'}
-                  </button>
-                </div>
-                <QuotaBar balance={lib.balance} limit={lib.limitApplied} />
+function userSubtitle(user) {
+  if (user.isGroup && user.members?.length > 0) return user.members.join(', ');
+  const pending = totalOutstanding(user.libraries);
+  const parts = [pending === 0 ? 'Al día' : `${pending} sin ver`];
+  if (user.source === 'seerr') parts.push('Seerr local');
+  return parts.join(' · ');
+}
+
+function awaitingApproval(user) {
+  return user.libraries.reduce((n, l) => n + (l.pendingItems ?? []).filter((i) => i.pendingApproval).length, 0);
+}
+
+// Fila de la lista (estilo Uber): solo anillo, nombre y el peor saldo. Todo
+// el detalle y las acciones viven en UserSheet.
+function UserRow({ user, onOpen }) {
+  const worst = worstLib(user.libraries);
+  const awaiting = awaitingApproval(user);
+  return (
+    <button type="button" onClick={onOpen} className="row">
+      <BalanceRing balance={worst.balance} limit={worst.limitApplied}>
+        <UserAvatar user={user} />
+      </BalanceRing>
+      <span className="flex-1 min-w-0">
+        <span className="block font-semibold truncate">{user.username}</span>
+        <span className="block text-sm text-gray-500 truncate">
+          {userSubtitle(user)}
+          {awaiting > 0 && <span className="text-gray-100 font-semibold"> · {awaiting} por aprobar</span>}
+        </span>
+      </span>
+      <span className={`text-xl font-bold tabular-nums ${statusOf(worst.balance).text}`}>{worst.balance}</span>
+      <IconChevronRight className="w-5 h-5 flex-shrink-0 text-gray-600" />
+    </button>
+  );
+}
+
+function UserSheet({ user, salvados = [], onClose, onReset, onDismiss, onManualCharge, onDetail, onMonthlyHistory, resetting, charging }) {
+  const canImpersonate = !user.isGroup && user.source !== 'seerr';
+  return (
+    <Sheet title={user.username} subtitle={userSubtitle(user)} onClose={onClose}>
+      {/* Grupo agregado o cuenta local de Seerr: sin cuenta Plex propia, no hay quién suplantar. */}
+      {canImpersonate && (
+        <button type="button" onClick={() => impersonate(user.userId, user.username)} className="btn btn-ghost w-full mb-2">
+          <IconEye className="w-4 h-4" />
+          Ver su panel
+        </button>
+      )}
+
+      {user.monthlyTotal?.enabled && (
+        <button
+          type="button"
+          onClick={() => onMonthlyHistory(user, null)}
+          title="Cupo mensual total: cosas aprobadas este mes en cualquier biblioteca"
+          className="row"
+        >
+          <span className="flex-1 text-sm font-semibold">Mensual total</span>
+          <span className={`text-sm font-semibold tabular-nums ${user.monthlyTotal.used >= user.monthlyTotal.limit ? 'text-accent-400' : 'text-gray-50'}`}>
+            {user.monthlyTotal.used}/{user.monthlyTotal.limit}
+          </span>
+          <IconChevronRight className="w-4 h-4 text-gray-600" />
+        </button>
+      )}
+
+      {user.libraries.map((lib) => {
+        const key = `${user.userId}-${lib.libraryId}`;
+        return (
+          <section key={key} className="py-5 border-b border-bg-700 last:border-b-0">
+            <div className="flex items-end justify-between gap-3 mb-2">
+              <div className="min-w-0">
+                <h3 className="font-semibold truncate">{lib.libraryName}</h3>
                 {lib.monthly?.enabled && (
                   <button
                     type="button"
                     onClick={() => onMonthlyHistory(user, lib)}
-                    className={`block text-[11px] mt-1 tabular-nums hover:underline ${lib.monthly.used >= lib.monthly.limit ? 'text-accent-400' : 'text-gray-500'}`}
-                    title="Cupo mensual: cosas aprobadas este mes, aunque se vean — click para ver historial"
+                    className={`text-xs tabular-nums hover:underline ${lib.monthly.used >= lib.monthly.limit ? 'text-accent-400' : 'text-gray-500'}`}
+                    title="Cupo mensual: cosas aprobadas este mes, aunque se vean"
                   >
-                    mensual {lib.monthly.used}/{lib.monthly.limit}
+                    Este mes {lib.monthly.used}/{lib.monthly.limit}
                   </button>
                 )}
-                {lib.pendingItems?.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-3">
-                    {lib.pendingItems.map((item, i) => (
-                      <PendingPoster
-                        key={`${item.tmdbId ?? 'x'}-${item.seasonNumber ?? 0}-${i}`}
-                        item={item}
-                        onDetail={(it) => onDetail(user, lib, it)}
-                        onDismiss={(it) => onDismiss(user.userId, lib.libraryId, it, user.username)}
-                      />
-                    ))}
-                  </div>
-                )}
               </div>
-            );
-          })}
-          {salvados.length > 0 && (
-            <div>
-              <div className="text-sm font-medium mb-1.5">💾 Salvadas del borrado</div>
-              <SalvadosGrid items={salvados} compact />
+              <div className="text-right tabular-nums">
+                <span className={`text-3xl font-bold leading-none ${statusOf(lib.balance).text}`}>{lib.balance}</span>
+                <span className="text-sm text-gray-500"> / {lib.limitApplied}</span>
+              </div>
             </div>
-          )}
-          {user.recentlyWatched?.length > 0 && (
-            <div>
-              <div className="text-xs uppercase tracking-wider text-gray-500 mb-1.5">Vistas en los últimos 30 días</div>
-              <div className="flex flex-wrap gap-2">
-                {user.recentlyWatched.map((item, i) => (
-                  <RecentlyWatchedPoster key={`${item.tmdbId ?? 'x'}-${item.seasonNumber ?? 0}-${i}`} item={item} />
+            <QuotaBar balance={lib.balance} limit={lib.limitApplied} />
+            {lib.pendingItems?.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-4">
+                {lib.pendingItems.map((item, i) => (
+                  <PendingPoster
+                    key={`${item.tmdbId ?? 'x'}-${item.seasonNumber ?? 0}-${i}`}
+                    item={item}
+                    onDetail={(it) => onDetail(user, lib, it)}
+                    onDismiss={(it) => onDismiss(user.userId, lib.libraryId, it, user.username)}
+                  />
                 ))}
               </div>
+            )}
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={() => onManualCharge(user.userId, lib.libraryId, user.username, lib.sectionType)}
+                disabled={charging[key]}
+                title="Restar un hueco de cupo a mano (contenido bajado/visto fuera de Seerr)"
+                className="btn btn-ghost flex-1 py-2 text-sm"
+              >
+                {charging[key] ? 'Cargando…' : 'Cargo manual'}
+              </button>
+              <button
+                onClick={() => onReset(user.userId, lib.libraryId, user.username)}
+                disabled={resetting[key]}
+                className="btn btn-ghost flex-1 py-2 text-sm text-accent-400"
+              >
+                {resetting[key] ? 'Reseteando…' : 'Resetear'}
+              </button>
             </div>
-          )}
-        </div>
+          </section>
+        );
+      })}
+
+      {salvados.length > 0 && (
+        <section className="py-5 border-t border-bg-700">
+          <h3 className="text-sm font-semibold text-gray-500 mb-3">Salvadas del borrado</h3>
+          <SalvadosGrid items={salvados} compact />
+        </section>
       )}
-    </div>
+      {user.recentlyWatched?.length > 0 && (
+        <section className="py-5 border-t border-bg-700">
+          <h3 className="text-sm font-semibold text-gray-500 mb-3">Vistas en los últimos 30 días</h3>
+          <div className="flex flex-wrap gap-2">
+            {user.recentlyWatched.map((item, i) => (
+              <RecentlyWatchedPoster key={`${item.tmdbId ?? 'x'}-${item.seasonNumber ?? 0}-${i}`} item={item} />
+            ))}
+          </div>
+        </section>
+      )}
+    </Sheet>
   );
 }
 
@@ -1254,7 +1241,7 @@ function PenaltyModal({ username, title, monthlyAvailable, onClose, onSubmit }) 
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
       <div className="card w-full max-w-sm p-4 sm:p-5" onClick={(e) => e.stopPropagation()}>
         <h3 className="font-bold text-lg mb-1">¿Penalizar a {username}?</h3>
         <p className="text-xs text-gray-400 mb-4">
@@ -1356,7 +1343,7 @@ function ManualChargeModal({ username, sectionType, onClose, onSubmit }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
       <div
         className="card w-full max-w-md max-h-[85vh] overflow-y-auto p-4 sm:p-5"
         style={{ maxHeight: '85dvh' }}
@@ -1442,7 +1429,12 @@ export default function Quota() {
   const [importResult, setImportResult] = useState(null);
   const [resetting, setResetting] = useState({});
   const [charging, setCharging] = useState({});
-  const [expanded, setExpanded] = useState(new Set());
+  // Ficha de usuario abierta (hoja inferior) y hoja secundaria abierta:
+  // 'actions' | 'approvals' | 'debtors' | null.
+  const [openUserId, setOpenUserId] = useState(null);
+  const [panel, setPanel] = useState(null);
+  const closeUser = useCallback(() => setOpenUserId(null), []);
+  const closePanel = useCallback(() => setPanel(null), []);
   const [activeFilter, setActiveFilter] = useState('all');
   // Orden de la lista (pedido de Edu, 3 ago 2026): 'busiest' (por defecto, el
   // de siempre) = peor saldo primero; 'quietest' = al revés; 'name' = A-Z.
@@ -1654,136 +1646,124 @@ export default function Quota() {
     load();
   }
 
-  function toggle(userId) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      next.has(userId) ? next.delete(userId) : next.add(userId);
-      return next;
-    });
-  }
+  const openUser = openUserId == null ? null : mergedUsers.find((u) => u.userId === openUserId);
+  const filterKeys = [
+    ['all', stats?.users],
+    ['pending', stats?.outstanding],
+    ['blocked', stats?.usersBlocked],
+    ['approved7d', stats?.approved7d],
+    ['blocked7d', stats?.blocked7d],
+  ];
 
   return (
-    <div>
-      <div className="flex flex-wrap items-end justify-between gap-3 mb-6">
-        <div>
-          <div className="flex items-center gap-3">
-            <h2 className="page-title">Cupo por usuario</h2>
-            <QuotaHelp />
-          </div>
-          <p className="text-sm text-gray-500 mt-1">
-            Saldo = límite − pendientes de ver. Se refresca solo cada minuto.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          {importResult && <span className="text-xs text-gray-500">{importResult}</span>}
-          <button onClick={importHistory} disabled={importing} className="btn btn-ghost">
-            {importing ? 'Importando…' : 'Importar historial de Seerr'}
-          </button>
-          <button onClick={recalculate} disabled={recalculating} className="btn btn-ghost">
-            {recalculating ? 'Recalculando…' : 'Recalcular todos'}
-          </button>
-        </div>
+    <div className="max-w-3xl">
+      <div className="flex items-center gap-3 mb-5">
+        <h2 className="page-title">Cupo</h2>
+        <QuotaHelp />
+        <button
+          type="button"
+          onClick={() => setPanel('actions')}
+          aria-label="Acciones de cupo"
+          className="ml-auto flex h-10 w-10 items-center justify-center rounded-full bg-bg-800 text-gray-100 hover:bg-bg-700"
+        >
+          <IconDots className="w-5 h-5" />
+        </button>
       </div>
 
-      {debtors.length > 0 && <DebtorBubbles debtors={debtors} onDetail={(user, lib, item) => setDetailTarget({ user, lib, item })} />}
-
-      <PendingApprovals items={unmatchedApprovals} onAction={load} />
-
-      {stats && (
-        <>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-3">
-            <StatTile
-              label={STAT_TILES.all.label}
-              value={stats.users}
-              Icon={IconUsers}
-              tone={STAT_TILES.all.tone}
-              iconTone={STAT_TILES.all.icon}
-              active={activeFilter === 'all'}
-              onClick={() => selectFilter('all')}
-            />
-            <StatTile
-              label={STAT_TILES.pending.label}
-              value={stats.outstanding}
-              Icon={IconEye}
-              tone={STAT_TILES.pending.tone}
-              iconTone={STAT_TILES.pending.icon}
-              active={activeFilter === 'pending'}
-              onClick={() => selectFilter('pending')}
-            />
-            <StatTile
-              label={STAT_TILES.blocked.label}
-              value={stats.usersBlocked}
-              Icon={IconBan}
-              tone={STAT_TILES.blocked.tone}
-              iconTone={STAT_TILES.blocked.icon}
-              active={activeFilter === 'blocked'}
-              onClick={() => selectFilter('blocked')}
-            />
-            <StatTile
-              label={STAT_TILES.approved7d.label}
-              value={stats.approved7d}
-              Icon={IconCheckCircle}
-              tone={STAT_TILES.approved7d.tone}
-              iconTone={STAT_TILES.approved7d.icon}
-              active={activeFilter === 'approved7d'}
-              onClick={() => selectFilter('approved7d')}
-            />
-            <StatTile
-              label={STAT_TILES.blocked7d.label}
-              value={stats.blocked7d}
-              Icon={IconXCircle}
-              tone={STAT_TILES.blocked7d.tone}
-              iconTone={STAT_TILES.blocked7d.icon}
-              active={activeFilter === 'blocked7d'}
-              onClick={() => selectFilter('blocked7d')}
-            />
-          </div>
-          <div className="mb-4 text-xs text-gray-500">
-            {STAT_TILES[activeFilter].description}
-            {activeFilter !== 'all' && (
-              <button onClick={() => setActiveFilter('all')} className="ml-2 text-gray-400 hover:text-gray-200 underline">
-                quitar filtro
-              </button>
-            )}
-          </div>
-        </>
+      {unmatchedApprovals.length > 0 && (
+        <button type="button" onClick={() => setPanel('approvals')} className="w-full mb-4 flex items-center gap-3 rounded-2xl bg-gray-50 px-4 py-3.5 text-left text-white">
+          <IconClock className="w-5 h-5 flex-shrink-0" />
+          <span className="flex-1 text-sm font-semibold">
+            {unmatchedApprovals.length} {unmatchedApprovals.length === 1 ? 'solicitud espera' : 'solicitudes esperan'} aprobación
+          </span>
+          <IconChevronRight className="w-5 h-5 text-white/60" />
+        </button>
       )}
 
-      <div className="flex flex-wrap items-center gap-3 mb-4">
-        <div className="relative max-w-xs">
-          <IconSearch className="w-4 h-4 text-gray-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+      <div className="-mx-4 px-4 sm:mx-0 sm:px-0 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none]">
+        {filterKeys.map(([key, value]) => (
+          <FilterChip
+            key={key}
+            label={STAT_TILES[key].label}
+            value={value}
+            title={STAT_TILES[key].description}
+            active={activeFilter === key}
+            onClick={() => selectFilter(key)}
+          />
+        ))}
+        {debtors.length > 0 && (
+          <FilterChip label="Deudores" value={debtors.length} title="Quién tiene más cosas pedidas sin ver" active={false} onClick={() => setPanel('debtors')} />
+        )}
+      </div>
+
+      <div className="flex items-center gap-2 mt-4">
+        <div className="relative flex-1">
+          <IconSearch className="w-4 h-4 text-gray-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar usuario…"
-            className="input pl-8"
+            placeholder="Buscar usuario"
+            aria-label="Buscar usuario"
+            className="input pl-10"
           />
         </div>
-        <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="input w-auto py-1.5">
-          <option value="busiest">Más ocupados primero</option>
-          <option value="quietest">Menos ocupados primero</option>
-          <option value="name">Nombre (A-Z)</option>
+        <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} aria-label="Ordenar" className="input w-auto max-w-[9.5rem] pr-8 text-sm">
+          <option value="busiest">Ocupados</option>
+          <option value="quietest">Más libres</option>
+          <option value="name">A-Z</option>
         </select>
       </div>
 
-      <div className="flex flex-col gap-3">
+      <div className="mt-2">
         {visibleUsers.map((u) => (
-          <UserCard
-            key={u.userId}
-            user={u}
-            salvados={salvadosByUser.get(u.userId) ?? []}
-            expanded={expanded.has(u.userId)}
-            onToggle={() => toggle(u.userId)}
-            onReset={reset}
-            onDismiss={dismiss}
-            onManualCharge={manualCharge}
-            onDetail={(user, lib, item) => setDetailTarget({ user, lib, item })}
-            onMonthlyHistory={(user, lib) => setMonthlyHistoryTarget({ user, lib })}
-            resetting={resetting}
-            charging={charging}
-          />
+          <UserRow key={u.userId} user={u} onOpen={() => setOpenUserId(u.userId)} />
         ))}
       </div>
+
+      {openUser && (
+        <UserSheet
+          user={openUser}
+          salvados={salvadosByUser.get(openUser.userId) ?? []}
+          onClose={closeUser}
+          onReset={reset}
+          onDismiss={dismiss}
+          onManualCharge={manualCharge}
+          onDetail={(user, lib, item) => setDetailTarget({ user, lib, item })}
+          onMonthlyHistory={(user, lib) => setMonthlyHistoryTarget({ user, lib })}
+          resetting={resetting}
+          charging={charging}
+        />
+      )}
+
+      {panel === 'actions' && (
+        <Sheet title="Acciones" subtitle="Saldo = límite − pendientes de ver. Se refresca solo cada minuto." onClose={closePanel}>
+          <button onClick={recalculate} disabled={recalculating} className="row">
+            <span className="flex-1">
+              <span className="block font-semibold">{recalculating ? 'Recalculando…' : 'Recalcular todos'}</span>
+              <span className="block text-sm text-gray-500">Vuelve a calcular el saldo de cada usuario.</span>
+            </span>
+          </button>
+          <button onClick={importHistory} disabled={importing} className="row">
+            <span className="flex-1">
+              <span className="block font-semibold">{importing ? 'Importando…' : 'Importar historial de Seerr'}</span>
+              <span className="block text-sm text-gray-500">Cuenta las solicitudes aprobadas antes de instalar limitARR.</span>
+            </span>
+          </button>
+          {importResult && <p className="mt-3 text-sm text-gray-500">{importResult}</p>}
+        </Sheet>
+      )}
+
+      {panel === 'approvals' && (
+        <Sheet title="Esperando aprobación" subtitle="Sin usuario reconocido — las de usuarios conocidos salen en su ficha." onClose={closePanel}>
+          <PendingApprovals items={unmatchedApprovals} onAction={load} />
+        </Sheet>
+      )}
+
+      {panel === 'debtors' && debtors.length > 0 && (
+        <Sheet title="Deudores" subtitle="Quién tiene más cosas pedidas sin ver." onClose={closePanel}>
+          <DebtorBubbles debtors={debtors} onDetail={(user, lib, item) => setDetailTarget({ user, lib, item })} />
+        </Sheet>
+      )}
 
       {monthlyHistoryTarget && (
         <MonthlyHistoryModal

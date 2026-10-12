@@ -79,7 +79,7 @@ export function SalvadosGrid({ items, compact = false }) {
             {item.poster_url ? (
               <img src={item.poster_url} alt="" loading="lazy" className="h-full w-full object-cover" />
             ) : <div className="h-full w-full bg-gradient-to-br from-bg-600 to-bg-800" />}
-            <span className="absolute left-1 top-1 rounded bg-black/80 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-green-300">
+            <span className="absolute left-1 top-1 rounded bg-black/80 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
               {salvadoDaysLeft(item)} días
             </span>
           </div>

@@ -169,10 +169,8 @@ export default function Settings() {
 
   return (
     <div className="max-w-xl">
-      <h2 className="page-title mb-1">Configuración</h2>
-      <p className="text-xs text-gray-500 mb-6">
-        Conexión a Seerr, Tautulli y Plex. Deja las claves en blanco para conservar las guardadas.
-      </p>
+      <h2 className="page-title mb-1">Ajustes</h2>
+      <p className="text-sm text-gray-500 mb-6">Deja las claves en blanco para conservar las guardadas.</p>
 
       <form onSubmit={save} className="card p-5 space-y-5">
         <fieldset>

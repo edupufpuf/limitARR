@@ -137,7 +137,7 @@ export default function DecisionsLog({ onNavigate }) {
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-        <h2 className="page-title">Registro de decisiones</h2>
+        <h2 className="page-title">Registro</h2>
         <span className="text-xs text-gray-500">{total} en total</span>
       </div>
 

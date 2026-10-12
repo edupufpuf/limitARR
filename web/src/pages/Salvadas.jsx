@@ -285,10 +285,7 @@ export default function Salvadas() {
     <div>
       <div className="flex flex-wrap items-end justify-between gap-3 mb-6">
         <div>
-          <h2 className="page-title">Salvadas por usuario</h2>
-          <p className="text-sm text-gray-500 mt-1">
-            Películas rescatadas del borrado de Maintainerr con 💾 Salvar en Telegram. Se refresca solo cada minuto.
-          </p>
+          <h2 className="page-title" title="Películas rescatadas del borrado de Maintainerr con 💾 Salvar en Telegram. Se refresca solo cada minuto.">Salvadas</h2>
         </div>
       </div>
 
@@ -317,10 +314,7 @@ export default function Salvadas() {
         <p className="text-gray-500 text-sm py-6 text-center">Ningún usuario coincide con "{query}".</p>
       )}
 
-      <h2 className="page-title mt-8 mb-1">Últimos 30 días</h2>
-      <p className="text-sm text-gray-500 mb-4">
-        Todo lo salvado en el último mes, se haya borrado ya o no, con si cada uno la ha visto.
-      </p>
+      <h2 className="mt-10 mb-3 text-xl font-bold text-gray-50">Últimos 30 días</h2>
       <SalvadosHistoryList items={history} />
 
       <div className="flex items-center gap-2 mt-10 mb-1">

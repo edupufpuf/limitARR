@@ -291,10 +291,7 @@ export default function Notifications() {
 
   return (
     <div className="max-w-3xl">
-      <h2 className="page-title mb-1">Avisos</h2>
-      <p className="text-sm text-gray-500 mb-7">
-        Configura el agente Telegram y abre únicamente el tipo de notificación que quieras editar.
-      </p>
+      <h2 className="page-title mb-6">Avisos</h2>
 
       <form onSubmit={saveSettings} className="space-y-3">
         <AccordionSection

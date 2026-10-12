@@ -13,7 +13,7 @@ export function LogoMark({ className = 'w-8 h-8' }) {
 
 export function Wordmark({ className = 'text-xl' }) {
   return (
-    <span className={`${className} font-extrabold tracking-tight text-white`}>
+    <span className={`${className} font-extrabold tracking-tight text-gray-50`}>
       limit<span className="text-accent-500">ARR</span>
     </span>
   );

@@ -33,13 +33,10 @@ export default function Setup({ onDone }) {
   }
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center p-4 overflow-hidden">
-      <div className="absolute w-[480px] h-[480px] rounded-full bg-accent-600/15 blur-3xl pointer-events-none" />
-      <form onSubmit={submit} className="relative card p-8 w-full max-w-sm">
-        <div className="flex flex-col items-center gap-4 mb-2">
-          <Wordmark className="text-[42px]" />
-        </div>
-        <p className="text-sm text-gray-400 mb-6 text-center">
+    <div className="min-h-screen bg-white flex flex-col">
+      <form onSubmit={submit} className="flex-1 w-full max-w-sm mx-auto px-6 flex flex-col justify-center">
+        <Wordmark className="text-[44px]" />
+        <p className="mt-2 mb-10 text-lg text-gray-500">
           Primer acceso — define la contraseña de admin.
         </p>
         <input
@@ -48,17 +45,17 @@ export default function Setup({ onDone }) {
           placeholder="Contraseña nueva (mín. 8)"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="input py-2 mb-3"
+          className="input mb-3"
         />
         <input
           type="password"
           placeholder="Repite la contraseña"
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
-          className="input py-2 mb-4"
+          className="input mb-4"
         />
         {error && <p className="text-accent-400 text-sm mb-4">{error}</p>}
-        <button type="submit" disabled={loading} className="btn btn-primary w-full py-2">
+        <button type="submit" disabled={loading} className="btn btn-dark w-full">
           {loading ? 'Guardando…' : 'Definir contraseña'}
         </button>
       </form>
