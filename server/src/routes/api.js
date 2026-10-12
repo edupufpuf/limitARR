@@ -1023,9 +1023,23 @@ async function buildQuotaByUser() {
   // de todos los miembros — withWatcher añade el username de quién exactamente
   // lo vio, solo para grupos (un usuario normal ya sabe que ha sido él).
   function recentlyWatchedFor(memberIds, { withWatcher = false } = {}) {
+    const seen = new Set();
     return memberIds
       .flatMap((uid) => (watchedByUser.get(uid) ?? []).map((r) => ({ ...r, _uid: uid })))
       .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+      // El scheduler puede haber registrado más de un evento de visionado para
+      // la misma unidad (p. ej. una temporada recalculada o solicitada otra
+      // vez). La lista es de contenidos, no de eventos: conservamos el último
+      // por usuario + película/temporada. En grupos, dos miembros distintos sí
+      // siguen saliendo por separado para no perder quién la vio.
+      .filter((r) => {
+        const unit = mediaUnitKey(r);
+        if (!unit) return true;
+        const key = `${r._uid}:${unit}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
       .map((r) => ({
         title: r.media_title,
         mediaType: r.media_type,

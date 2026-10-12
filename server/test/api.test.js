@@ -737,7 +737,7 @@ test('cupo mensual total: lo aún no descargado tampoco cuenta para el total', a
   }
 });
 
-test('GET /quota: recentlyWatched trae lo visto en los últimos 30 días, no lo más viejo', async () => {
+test('GET /quota: recentlyWatched trae los últimos 30 días sin duplicar películas o temporadas', async () => {
   const upsertSetting = db.prepare(`
     INSERT INTO settings (key, value) VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value=excluded.value
@@ -759,6 +759,13 @@ test('GET /quota: recentlyWatched trae lo visto en los últimos 30 días, no lo 
     INSERT INTO decisions_log (request_id, user_id, library_id, media_title, decision, created_at)
     VALUES (-9102, 1892, 1782, 'Vista hace 40 días', 'watched', datetime('now', '-40 days'))
   `).run();
+  const insertWatchedSeason = db.prepare(`
+    INSERT INTO decisions_log
+      (request_id, user_id, library_id, media_title, media_type, tmdb_id, season_number, poster_url, decision, created_at)
+    VALUES (?, 1892, 1782, 'División Palermo - Temporada 2', 'tv', 100910, 2, '/division-palermo.jpg', 'watched', datetime('now', ?))
+  `);
+  insertWatchedSeason.run(-9103, '-4 days');
+  insertWatchedSeason.run(-9104, '-1 day');
 
   const originalFetch = global.fetch;
   global.fetch = async (input) => {
@@ -777,8 +784,9 @@ test('GET /quota: recentlyWatched trae lo visto en los últimos 30 días, no lo 
   try {
     const quota = (await agent.get('/api/quota').expect(200)).body;
     const user = quota.find((u) => u.userId === 1892);
-    assert.deepEqual(user.recentlyWatched.map((r) => r.title), ['Vista hace poco']);
-    assert.equal(user.recentlyWatched[0].posterUrl, 'https://image.tmdb.org/x.jpg');
+    assert.deepEqual(user.recentlyWatched.map((r) => r.title), ['División Palermo - Temporada 2', 'Vista hace poco']);
+    assert.equal(user.recentlyWatched.filter((r) => r.title === 'División Palermo - Temporada 2').length, 1);
+    assert.equal(user.recentlyWatched[1].posterUrl, 'https://image.tmdb.org/x.jpg');
   } finally {
     global.fetch = originalFetch;
     db.prepare('DELETE FROM decisions_log WHERE library_id = 1782').run();
