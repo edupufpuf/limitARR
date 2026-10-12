@@ -4,7 +4,7 @@ import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { db } from '../src/db.js';
 import { getWebhookSecret } from '../src/auth.js';
-import { getSalvadosByUser, getAllSalvados, getSalvadosHistory, pollMaintainerrCollections, processSalvados } from '../src/services/maintainerr.js';
+import { buildTvGracePeriodButtons, getSalvadosByUser, getAllSalvados, getSalvadosHistory, pollMaintainerrCollections, processSalvados } from '../src/services/maintainerr.js';
 
 // Tests del módulo Maintainerr con la DB en memoria y global.fetch mockeado
 // (estilo eliminarr.test.js: nada de red real, ni Maintainerr ni Telegram).
@@ -54,6 +54,17 @@ const COLLECTIONS = [
 
 const realFetch = global.fetch;
 let fetchCalls;
+
+test('selector de plazo para series ofrece 1 semana, 2 semanas y 1 mes', () => {
+  assert.deepEqual(
+    buildTvGracePeriodButtons((days) => `save:8501:2:5:${days}`),
+    [
+      { text: '1 semana', callback_data: 'save:8501:2:5:7' },
+      { text: '2 semanas', callback_data: 'save:8501:2:5:14' },
+      { text: '1 mes', callback_data: 'save:8501:2:5:30' },
+    ]
+  );
+});
 
 function mockFetch() {
   fetchCalls = [];
@@ -237,7 +248,7 @@ test('webhook: colección de series nombra serie y temporada explícitas contra 
     assert.equal(
       payload.reply_markup.inline_keyboard[0][0].callback_data,
       'chooseperiod:8501:2:5',
-      'las temporadas deben abrir el selector de 1 o 2 semanas'
+      'las temporadas deben abrir el selector de plazo'
     );
   } finally {
     db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key')").run();

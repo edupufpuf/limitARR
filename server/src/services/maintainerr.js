@@ -35,6 +35,19 @@ const DEFAULT_SAVED_MESSAGE = '✅ Salvada por {usuario}{dias}.';
 const DEFAULT_DELETE_MESSAGE = '🎬 {titulo} se borrará{dias}.\nSi quieres salvarla, pulsa 💾 Salvar y estará {diasSalvado} días más.';
 const DEFAULT_DELETE_MESSAGE_TV = '📺 {titulo} se borrará{dias}.\nSi quieres salvarla, pulsa 💾 Salvar y estará {diasSalvado} días más.';
 const DEFAULT_SALVADO_GRACE_DAYS = 5;
+const TV_GRACE_PERIODS = [
+  { label: '1 semana', days: 7 },
+  { label: '2 semanas', days: 14 },
+  { label: '1 mes', days: 30 },
+];
+const VALID_TV_GRACE_DAYS = new Set(TV_GRACE_PERIODS.map(({ days }) => String(days)));
+
+export function buildTvGracePeriodButtons(callbackData) {
+  return TV_GRACE_PERIODS.map(({ label, days }) => ({
+    text: label,
+    callback_data: callbackData(days),
+  }));
+}
 
 function parsePairs(raw) {
   if (!raw) return [];
@@ -316,7 +329,7 @@ async function notifyDeletionCandidate(source, target, item, { fallbackTitle = n
         // override de la biblioteca, ver getFallbackDeadlineMs) y hay que mostrar esa.
         .replace(
           /{diasSalvado}/g,
-          isSeason ? '7 o 14' : String(getSalvadoGraceDays(source.libraryId != null ? Number(source.libraryId) : null))
+          isSeason ? '7, 14 o 30' : String(getSalvadoGraceDays(source.libraryId != null ? Number(source.libraryId) : null))
         )
     : `🎬 ${tituloTexto} se borrará${diasTexto}.\n\n⚠️ Sin colección de salvados configurada para "${source.title}" — no se puede salvar.`;
   // "Salvar" pide confirmación antes de mover nada (asksave: cambia el
@@ -647,7 +660,7 @@ async function appendSavedNote(mediaServerId, target, from, keepButton) {
 // a Sí/Cancelar. El save: real (handleSaveCallback) solo llega si confirman.
 async function handleAskSaveCallback(query) {
   const [, mediaServerId, sourceId, targetId, graceDays] = query.data.split(':');
-  const saveData = ['7', '14'].includes(graceDays)
+  const saveData = VALID_TV_GRACE_DAYS.has(graceDays)
     ? `save:${mediaServerId}:${sourceId}:${targetId}:${graceDays}`
     : `save:${mediaServerId}:${sourceId}:${targetId}`;
   const confirmMarkup = {
@@ -679,10 +692,7 @@ async function handleChoosePeriodCallback(query) {
     message_id: query.message.message_id,
     reply_markup: {
       inline_keyboard: [
-        [
-          { text: '1 semana', callback_data: `save:${mediaServerId}:${sourceId}:${targetId}:7` },
-          { text: '2 semanas', callback_data: `save:${mediaServerId}:${sourceId}:${targetId}:14` },
-        ],
+        buildTvGracePeriodButtons((days) => `save:${mediaServerId}:${sourceId}:${targetId}:${days}`),
         [{ text: '✖️ Cancelar', callback_data: `cancelperiod:${mediaServerId}:${sourceId}:${targetId}` }],
       ],
     },
@@ -709,10 +719,7 @@ async function handleChooseAddPeriodCallback(query) {
     message_id: query.message.message_id,
     reply_markup: {
       inline_keyboard: [
-        [
-          { text: '1 semana', callback_data: `${ADD_SAVE_CALLBACK_PREFIX}${mediaServerId}:7` },
-          { text: '2 semanas', callback_data: `${ADD_SAVE_CALLBACK_PREFIX}${mediaServerId}:14` },
-        ],
+        buildTvGracePeriodButtons((days) => `${ADD_SAVE_CALLBACK_PREFIX}${mediaServerId}:${days}`),
         [{ text: '✖️ Cancelar', callback_data: `canceladdperiod:${mediaServerId}` }],
       ],
     },
@@ -798,7 +805,7 @@ async function handleSaveCallback(query) {
       posterUrl: cached.posterUrl ?? liveMedia?.image_path ?? null,
       libraryId: cached.libraryId ?? (sourceCollection?.libraryId != null ? Number(sourceCollection.libraryId) : null),
     };
-    const graceDays = sourceCollection?.type !== 'movie' && ['7', '14'].includes(requestedGraceDays)
+    const graceDays = sourceCollection?.type !== 'movie' && VALID_TV_GRACE_DAYS.has(requestedGraceDays)
       ? Number(requestedGraceDays)
       : null;
     const initialDeadline = Date.now() + (graceDays ?? getSalvadoGraceDays(meta.libraryId)) * 86_400_000;
@@ -860,7 +867,7 @@ async function handleAddSaveCallback(query) {
       return;
     }
     const ref = existing[0];
-    const graceDays = isTvLibrary(ref.library_id) && ['7', '14'].includes(requestedGraceDays)
+    const graceDays = isTvLibrary(ref.library_id) && VALID_TV_GRACE_DAYS.has(requestedGraceDays)
       ? Number(requestedGraceDays)
       : null;
     const initialDeadline = Date.now() + (graceDays ?? getSalvadoGraceDays(ref.library_id)) * 86_400_000;
