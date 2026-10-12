@@ -131,6 +131,7 @@ const MOVIE_HISTORY_STATUS = {
 export function ContentByAge({ items, initialVisible = 2 }) {
   const [sort, setSort] = useState('oldest');
   const [overdueOnly, setOverdueOnly] = useState(false);
+  const [libraryId, setLibraryId] = useState('');
   const [visibleCount, setVisibleCount] = useState(initialVisible);
 
   const allRows = useMemo(() => {
@@ -146,8 +147,23 @@ export function ContentByAge({ items, initialVisible = 2 }) {
     });
   }, [items]);
 
+  const libraryOptions = useMemo(() => {
+    const libraries = new Map();
+    for (const item of items) {
+      if (item.libraryId != null) libraries.set(String(item.libraryId), item.libraryName || `Biblioteca #${item.libraryId}`);
+    }
+    return [...libraries.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  }, [items]);
+
+  const scopedRows = useMemo(
+    () => libraryId ? allRows.filter((row) => String(row.item.libraryId) === libraryId) : allRows,
+    [allRows, libraryId]
+  );
+
   const sortedRows = useMemo(() => {
-    const filtered = overdueOnly ? allRows.filter((row) => row.overdue) : [...allRows];
+    const filtered = overdueOnly ? scopedRows.filter((row) => row.overdue) : [...scopedRows];
     return filtered.sort((a, b) => {
       if (sort === 'user') {
         return a.item.username.localeCompare(b.item.username, 'es') || (a.dateMs ?? Infinity) - (b.dateMs ?? Infinity);
@@ -156,12 +172,12 @@ export function ContentByAge({ items, initialVisible = 2 }) {
       if (b.dateMs == null) return -1;
       return sort === 'newest' ? b.dateMs - a.dateMs : a.dateMs - b.dateMs;
     });
-  }, [allRows, sort, overdueOnly]);
+  }, [scopedRows, sort, overdueOnly]);
   const rows = sortedRows.slice(0, visibleCount);
 
-  useEffect(() => setVisibleCount(initialVisible), [sort, overdueOnly, initialVisible]);
+  useEffect(() => setVisibleCount(initialVisible), [sort, overdueOnly, libraryId, initialVisible]);
 
-  const overdue = allRows.filter((row) => row.overdue).length;
+  const overdue = scopedRows.filter((row) => row.overdue).length;
 
   return (
     <section className="card mb-5 overflow-hidden">
@@ -169,7 +185,7 @@ export function ContentByAge({ items, initialVisible = 2 }) {
         <div>
           <h3 className="font-semibold">🎬 Contenido solicitado por antigüedad</h3>
           <p className="text-xs text-gray-500 mt-1">
-            {allRows.length} solicitud{allRows.length === 1 ? '' : 'es'} de cualquier estado · <span className={overdue > 0 ? 'text-accent-400 font-semibold' : ''}>{overdue} con más de 2 meses</span>
+            {scopedRows.length} solicitud{scopedRows.length === 1 ? '' : 'es'} de cualquier estado · <span className={overdue > 0 ? 'text-accent-400 font-semibold' : ''}>{overdue} con más de 2 meses</span>
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -180,6 +196,17 @@ export function ContentByAge({ items, initialVisible = 2 }) {
           >
             {overdueOnly ? 'Mostrando +2 meses' : 'Solo +2 meses'}
           </button>
+          <select
+            value={libraryId}
+            onChange={(event) => setLibraryId(event.target.value)}
+            aria-label="Filtrar por biblioteca"
+            className="input w-full sm:w-auto py-1.5 text-xs"
+          >
+            <option value="">Todas las bibliotecas</option>
+            {libraryOptions.map((library) => (
+              <option key={library.id} value={library.id}>{library.name}</option>
+            ))}
+          </select>
           <select value={sort} onChange={(event) => setSort(event.target.value)} className="input w-auto py-1.5 text-xs">
             <option value="oldest">Más antiguas primero</option>
             <option value="newest">Más recientes primero</option>
@@ -190,7 +217,7 @@ export function ContentByAge({ items, initialVisible = 2 }) {
 
       {rows.length === 0 ? (
         <p className="p-4 text-sm text-gray-500">
-          {overdueOnly ? 'No hay contenidos solicitados desde hace más de dos meses.' : 'No hay contenidos solicitados registrados.'}
+          {overdueOnly || libraryId ? 'No hay contenidos que coincidan con estos filtros.' : 'No hay contenidos solicitados registrados.'}
         </p>
       ) : (
         <>
