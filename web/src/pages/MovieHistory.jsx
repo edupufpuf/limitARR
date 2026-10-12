@@ -29,7 +29,7 @@ export default function MovieHistory({ onNavigate }) {
       ) : error ? (
         <div className="card p-6 text-sm text-accent-300">No se ha podido comprobar ahora qué contenidos siguen en Plex.</div>
       ) : (
-        <ContentByAge items={items} initialVisible={2} />
+        <ContentByAge items={items} pageSize={25} />
       )}
     </div>
   );

@@ -128,11 +128,11 @@ const MOVIE_HISTORY_STATUS = {
   no_library_config: ['Sin biblioteca', 'text-accent-300 bg-accent-500/10'],
 };
 
-export function ContentByAge({ items, initialVisible = 2 }) {
+export function ContentByAge({ items, pageSize = 25 }) {
   const [sort, setSort] = useState('oldest');
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [libraryId, setLibraryId] = useState('');
-  const [visibleCount, setVisibleCount] = useState(initialVisible);
+  const [visibleCount, setVisibleCount] = useState(pageSize);
 
   const allRows = useMemo(() => {
     const now = new Date();
@@ -175,7 +175,7 @@ export function ContentByAge({ items, initialVisible = 2 }) {
   }, [scopedRows, sort, overdueOnly]);
   const rows = sortedRows.slice(0, visibleCount);
 
-  useEffect(() => setVisibleCount(initialVisible), [sort, overdueOnly, libraryId, initialVisible]);
+  useEffect(() => setVisibleCount(pageSize), [sort, overdueOnly, libraryId, pageSize]);
 
   const overdue = scopedRows.filter((row) => row.overdue).length;
 
@@ -301,7 +301,7 @@ export function ContentByAge({ items, initialVisible = 2 }) {
               <span className="text-xs text-gray-500">Mostrando {rows.length} de {sortedRows.length}</span>
               <button
                 type="button"
-                onClick={() => setVisibleCount((count) => Math.min(count + 2, sortedRows.length))}
+                onClick={() => setVisibleCount((count) => Math.min(count + pageSize, sortedRows.length))}
                 className="btn btn-ghost"
               >
                 Cargar más
