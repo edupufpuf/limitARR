@@ -4,6 +4,7 @@ import { Wordmark } from '../components/Brand.jsx';
 import { IconBell, IconLogout } from '../icons.jsx';
 import { PendingDetailModal, MonthlyHistoryModal, RecentlyWatchedPoster } from './Quota.jsx';
 import { SalvadosGrid } from '../components/Salvados.jsx';
+import QuotaHelp from '../components/QuotaHelp.jsx';
 import { downloadStatusLabel, downloadStatusBg, downloadStatusChipText } from '../mediaStatus.js';
 
 function LibraryCard({ library, onDetail }) {
@@ -204,7 +205,10 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
         </div>
       )}
       <main className="max-w-5xl mx-auto p-4 sm:p-8">
-        <h1 className="page-title">Mi cupo</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="page-title">Mi cupo</h1>
+          <QuotaHelp />
+        </div>
         <p className="text-sm text-gray-500 mt-1 mb-6">
           {quota?.isGroup ? `Cupo compartido con ${quota.members?.join(', ')}` : 'Tu disponibilidad actual en Plex'}
         </p>

@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { IconSearch, IconUsers, IconEye, IconBan, IconCheckCircle, IconXCircle } from '../icons.jsx';
 import { SalvadosGrid } from '../components/Salvados.jsx';
+import QuotaHelp from '../components/QuotaHelp.jsx';
 import { downloadStatusLabel, downloadStatusColor, downloadStatusBg, downloadStatusChipText } from '../mediaStatus.js';
 
 // Recarga entera tras suplantar: la sesión (cookie) ya quedó en role='user' en
@@ -1638,7 +1639,10 @@ export default function Quota() {
     <div>
       <div className="flex flex-wrap items-end justify-between gap-3 mb-6">
         <div>
-          <h2 className="page-title">Cupo por usuario</h2>
+          <div className="flex items-center gap-3">
+            <h2 className="page-title">Cupo por usuario</h2>
+            <QuotaHelp />
+          </div>
           <p className="text-sm text-gray-500 mt-1">
             Saldo = límite − pendientes de ver. Se refresca solo cada minuto.
           </p>
