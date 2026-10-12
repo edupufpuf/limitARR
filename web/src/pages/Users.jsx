@@ -214,8 +214,8 @@ function RuleSetSheet({ kind, set, users, libraries, onChanged, onClose }) {
               Cuenta como un solo usuario: todos gastan y liberan el mismo cupo. Los overrides individuales dejan de aplicar.
             </span>
           </span>
-          <span className={`relative h-7 w-12 flex-shrink-0 rounded-full transition-colors ${set.aggregated ? 'bg-gray-50' : 'bg-bg-600'}`}>
-            <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-all ${set.aggregated ? 'left-[22px]' : 'left-0.5'}`} />
+          <span className={`relative h-7 w-12 flex-shrink-0 rounded-full transition-colors ${set.aggregated ? 'bg-ink' : 'bg-bg-600'}`}>
+            <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-bg-950 shadow transition-all ${set.aggregated ? 'left-[22px]' : 'left-0.5'}`} />
           </span>
         </button>
       )}
@@ -231,7 +231,7 @@ function RuleSetSheet({ kind, set, users, libraries, onChanged, onClose }) {
               onClick={() => toggleMember(u.id)}
               aria-pressed={member}
               className={`rounded-full px-3.5 py-1.5 text-sm transition-colors ${
-                member ? 'bg-gray-50 text-white font-semibold' : 'bg-bg-800 text-gray-400 hover:bg-bg-700'
+                member ? 'bg-ink text-on-ink font-semibold' : 'bg-bg-800 text-gray-400 hover:bg-bg-700'
               }`}
             >
               {u.username}
@@ -486,7 +486,7 @@ function UserFichaModal({ user, group, role, allGroups, allRoles, overrides, mon
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-2 sm:p-4" onClick={requestClose}>
+    <div className="fixed inset-0 z-50 bg-black/40 dark:bg-black/70 flex items-center justify-center p-2 sm:p-4" onClick={requestClose}>
       <div
         className="card w-full max-w-4xl max-h-[90vh] overflow-y-auto p-4 sm:p-6"
         style={{ maxHeight: '90dvh' }}
@@ -607,7 +607,7 @@ function UserFichaModal({ user, group, role, allGroups, allRoles, overrides, mon
                     </button>
                   </div>
                   <div className="h-2 rounded-full bg-bg-600/70 overflow-hidden">
-                    <div className="h-full rounded-full bg-gray-50" style={{ width: `${pct}%` }} />
+                    <div className="h-full rounded-full bg-ink" style={{ width: `${pct}%` }} />
                   </div>
                   {lib.monthly?.enabled && (
                     <div className="text-[11px] text-gray-500 mt-1">mensual {lib.monthly.used}/{lib.monthly.limit}</div>
@@ -943,7 +943,7 @@ export default function Users() {
             aria-selected={subtab === t.key}
             onClick={() => setSubtab(t.key)}
             className={`rounded-lg py-2 text-sm transition-colors ${
-              subtab === t.key ? 'bg-white text-gray-50 font-semibold shadow-sm' : 'text-gray-500 hover:text-gray-100'
+              subtab === t.key ? 'bg-bg-950 dark:bg-bg-600 text-gray-50 font-semibold shadow-sm' : 'text-gray-500 hover:text-gray-100'
             }`}
           >
             {t.label}

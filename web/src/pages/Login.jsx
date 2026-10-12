@@ -56,7 +56,7 @@ export default function Login({ onLoggedIn }) {
   }
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-screen bg-bg-950 flex flex-col">
       <main className="flex-1 w-full max-w-sm mx-auto px-6 flex flex-col justify-center">
         <Wordmark className="text-[44px]" />
         <p className="mt-2 mb-10 text-lg text-gray-500">Tu cupo de Plex, de un vistazo.</p>

@@ -6,6 +6,7 @@ import { PendingDetailModal, MonthlyHistoryModal, RecentlyWatchedPoster } from '
 import { SalvadosGrid } from '../components/Salvados.jsx';
 import { QuotaHelpSheet } from '../components/QuotaHelp.jsx';
 import Sheet from '../components/Sheet.jsx';
+import ThemeSwitch from '../components/ThemeSwitch.jsx';
 import { downloadStatusLabel } from '../mediaStatus.js';
 
 // Panel del usuario con estética de app de consumo (tipo Uber): la pantalla
@@ -20,7 +21,7 @@ function plural(n, one, many) {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-function Bar({ percent, tone = 'bg-gray-50' }) {
+function Bar({ percent, tone = 'bg-ink' }) {
   return (
     <div className="h-1 rounded-full bg-bg-700 overflow-hidden">
       <div className={`h-full rounded-full ${tone}`} style={{ width: `${percent}%` }} />
@@ -45,7 +46,7 @@ function PosterTile({ item, onClick }) {
           ? <img src={item.posterUrl} alt="" loading="lazy" className={`h-full w-full object-cover transition-transform group-active:scale-[.97] ${muted ? 'grayscale opacity-50' : ''}`} />
           : <div className="h-full w-full bg-bg-700" />}
         {note && (
-          <span className="absolute left-1.5 bottom-1.5 right-1.5 line-clamp-2 rounded-md bg-white/95 px-1.5 py-1 text-[10px] font-semibold leading-tight text-gray-100">
+          <span className="absolute left-1.5 bottom-1.5 right-1.5 line-clamp-2 rounded-md bg-bg-900/95 px-1.5 py-1 text-[10px] font-semibold leading-tight text-gray-100">
             {note}
           </span>
         )}
@@ -89,7 +90,7 @@ function LibrarySheet({ library, onClose, onDetail, onMonthly }) {
         </div>
         {empty && <span className="rounded-full bg-accent-600 px-3 py-1 text-xs font-semibold text-white">Sin cupo</span>}
       </div>
-      <div className="mt-4"><Bar percent={pct(library.balance, library.limitApplied)} tone={empty ? 'bg-accent-500' : 'bg-gray-50'} /></div>
+      <div className="mt-4"><Bar percent={pct(library.balance, library.limitApplied)} tone={empty ? 'bg-accent-500' : 'bg-ink'} /></div>
 
       {library.monthly?.enabled && (
         <button type="button" onClick={onMonthly} className="row mt-4 border-t border-bg-700">
@@ -122,7 +123,7 @@ function MonthlyRow({ label, used, limit, daysUntilReset, onClick }) {
     <button type="button" onClick={onClick} className="row">
       <span className="flex-1 min-w-0">
         <span className="block font-semibold truncate">{label}</span>
-        <span className="block mt-2"><Bar percent={pct(used, limit)} tone={maxed ? 'bg-accent-500' : 'bg-gray-50'} /></span>
+        <span className="block mt-2"><Bar percent={pct(used, limit)} tone={maxed ? 'bg-accent-500' : 'bg-ink'} /></span>
         {maxed && <span className="block mt-1.5 text-xs text-accent-400">Agotado · vuelve en {plural(daysUntilReset, 'día', 'días')}</span>}
       </span>
       <span className={`text-xl font-bold tabular-nums ${maxed ? 'text-accent-400' : 'text-gray-50'}`}>
@@ -265,6 +266,8 @@ function NotificationsSheet({ session, onClose }) {
 function AccountSheet({ session, quota, impersonating, onClose, onLogout, onStopImpersonating }) {
   return (
     <Sheet title={session?.username ?? 'Cuenta'} subtitle={quota?.isGroup ? `Cupo compartido con ${quota.members?.join(', ')}` : 'Cuenta de Plex'} onClose={onClose}>
+      <h3 className="mb-2 text-sm font-semibold text-gray-500">Apariencia</h3>
+      <ThemeSwitch className="mb-6" />
       {impersonating ? (
         <button type="button" onClick={onStopImpersonating} className="btn btn-dark w-full">Volver a admin</button>
       ) : (
@@ -329,14 +332,14 @@ export default function UserDashboard({ session, impersonating, onLoggedOut }) {
   const initial = (session?.username ?? '?').slice(0, 1).toUpperCase();
 
   return (
-    <div className="min-h-screen bg-white text-gray-100">
+    <div className="min-h-screen bg-bg-950 text-gray-100">
       {impersonating && (
-        <div className="bg-gray-50 text-white text-xs sm:text-sm px-4 py-2 flex items-center justify-center gap-3">
+        <div className="bg-ink text-on-ink text-xs sm:text-sm px-4 py-2 flex items-center justify-center gap-3">
           <span>Viendo como <strong>{session?.username}</strong></span>
           <button type="button" onClick={stopImpersonating} className="underline font-semibold">Volver a admin</button>
         </div>
       )}
-      <header className="sticky top-0 z-10 bg-white/90 backdrop-blur">
+      <header className="sticky top-0 z-10 bg-bg-950/90 backdrop-blur">
         <div className="max-w-xl mx-auto h-16 px-5 flex items-center justify-between">
           <Wordmark className="text-2xl" />
           <button

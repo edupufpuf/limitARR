@@ -20,12 +20,12 @@ export default function Sheet({ title, subtitle, onClose, children, footer }) {
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center sm:p-6">
-      <button type="button" aria-label="Cerrar" onClick={onClose} className="absolute inset-0 bg-black/40 animate-fade-in" />
+      <button type="button" aria-label="Cerrar" onClick={onClose} className="absolute inset-0 bg-black/40 dark:bg-black/70 animate-fade-in" />
       <section
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="relative w-full max-w-lg max-h-[88vh] flex flex-col rounded-t-3xl sm:rounded-3xl bg-white shadow-sheet animate-sheet-up sm:animate-fade-in"
+        className="relative w-full max-w-lg max-h-[88vh] flex flex-col rounded-t-3xl sm:rounded-3xl bg-bg-900 shadow-sheet animate-sheet-up sm:animate-fade-in"
       >
         <div className="mx-auto mt-2.5 h-1 w-9 rounded-full bg-bg-600 sm:hidden" />
         <header className="flex items-start justify-between gap-4 px-5 pt-4 pb-3 sm:px-6 sm:pt-6">

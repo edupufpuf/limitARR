@@ -93,10 +93,10 @@ function FilterChip({ label, value, active, title, onClick }) {
       onClick={onClick}
       title={title}
       aria-pressed={active}
-      className={`chip ${active ? '!bg-gray-50 !text-white' : ''}`}
+      className={`chip ${active ? '!bg-ink !text-on-ink' : ''}`}
     >
       {label}
-      {value != null && <span className={`tabular-nums ${active ? 'text-white/70' : 'text-gray-500'}`}>{value}</span>}
+      {value != null && <span className={`tabular-nums ${active ? 'text-on-ink/70' : 'text-gray-500'}`}>{value}</span>}
     </button>
   );
 }
@@ -312,7 +312,7 @@ function BalanceRing({ balance, limit, children }) {
   return (
     <div
       className="w-12 h-12 rounded-full p-[3px] flex-shrink-0"
-      style={{ background: `conic-gradient(${color} ${deg}deg, #ebebeb ${deg}deg)` }}
+      style={{ background: `conic-gradient(${color} ${deg}deg, rgb(var(--c-bg-700)) ${deg}deg)` }}
     >
       <div className="w-full h-full rounded-full overflow-hidden bg-bg-800 flex items-center justify-center">
         {children}
@@ -565,7 +565,7 @@ export function PendingDetailModal({
   return (
     // dvh y no vh: en Android/iOS la barra de URL del navegador come parte del
     // viewport y con 90vh el pie del modal (botones) quedaba cortado.
-    <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[70] bg-black/40 dark:bg-black/70 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
       <div
         className="card w-full max-w-lg max-h-[85vh] overflow-y-auto p-4 sm:p-5"
         style={{ maxHeight: '85dvh' }}
@@ -929,7 +929,7 @@ function DebtorBubble({ debtor, size, lead, open, onToggle }) {
       style={{
         width: size,
         height: size,
-        background: `conic-gradient(#e5251b ${deg}deg, #ebebeb ${deg}deg)`,
+        background: `conic-gradient(rgb(var(--c-accent-500)) ${deg}deg, rgb(var(--c-bg-700)) ${deg}deg)`,
       }}
     >
       <div className="w-full h-full rounded-full bg-bg-800 flex flex-col items-center justify-center gap-0.5 overflow-hidden px-1.5">
@@ -1034,7 +1034,7 @@ export function MonthlyHistoryModal({ user, lib, libraryNameById, onClose, loadH
   }, [user.userId, lib?.libraryId, loadHistory]);
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[70] bg-black/40 dark:bg-black/70 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
       <div
         className="card w-full max-w-md max-h-[80vh] overflow-y-auto p-4 sm:p-5"
         style={{ maxHeight: '80dvh' }}
@@ -1241,7 +1241,7 @@ function PenaltyModal({ username, title, monthlyAvailable, onClose, onSubmit }) 
   }
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[70] bg-black/40 dark:bg-black/70 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
       <div className="card w-full max-w-sm p-4 sm:p-5" onClick={(e) => e.stopPropagation()}>
         <h3 className="font-bold text-lg mb-1">¿Penalizar a {username}?</h3>
         <p className="text-xs text-gray-400 mb-4">
@@ -1343,7 +1343,7 @@ function ManualChargeModal({ username, sectionType, onClose, onSubmit }) {
   }
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[70] bg-black/40 dark:bg-black/70 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
       <div
         className="card w-full max-w-md max-h-[85vh] overflow-y-auto p-4 sm:p-5"
         style={{ maxHeight: '85dvh' }}
@@ -1671,12 +1671,12 @@ export default function Quota() {
       </div>
 
       {unmatchedApprovals.length > 0 && (
-        <button type="button" onClick={() => setPanel('approvals')} className="w-full mb-4 flex items-center gap-3 rounded-2xl bg-gray-50 px-4 py-3.5 text-left text-white">
+        <button type="button" onClick={() => setPanel('approvals')} className="w-full mb-4 flex items-center gap-3 rounded-2xl bg-ink px-4 py-3.5 text-left text-on-ink">
           <IconClock className="w-5 h-5 flex-shrink-0" />
           <span className="flex-1 text-sm font-semibold">
             {unmatchedApprovals.length} {unmatchedApprovals.length === 1 ? 'solicitud espera' : 'solicitudes esperan'} aprobación
           </span>
-          <IconChevronRight className="w-5 h-5 text-white/60" />
+          <IconChevronRight className="w-5 h-5 text-on-ink/60" />
         </button>
       )}
 

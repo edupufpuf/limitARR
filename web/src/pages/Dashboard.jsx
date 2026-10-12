@@ -11,6 +11,7 @@ import MovieHistory from './MovieHistory.jsx';
 import WhatsNewModal from '../components/WhatsNewModal.jsx';
 import { Wordmark } from '../components/Brand.jsx';
 import Sheet from '../components/Sheet.jsx';
+import ThemeSwitch from '../components/ThemeSwitch.jsx';
 import { IconGauge, IconSave, IconFilm, IconUsers, IconClock, IconBell, IconGear, IconLogout, IconMenu, IconBan, IconChevronRight } from '../icons.jsx';
 import { DirtyGuardProvider, useAnyDirty } from '../DirtyGuard.jsx';
 
@@ -91,9 +92,9 @@ function DashboardInner({ onLoggedOut }) {
   }
 
   return (
-    <div className="min-h-screen flex flex-col sm:flex-row bg-white text-gray-100">
+    <div className="min-h-screen flex flex-col sm:flex-row bg-bg-950 text-gray-100">
       {/* Sidebar: solo escritorio. */}
-      <nav className="hidden sm:flex sticky top-0 w-[232px] h-screen overflow-y-auto bg-white border-r border-bg-700 px-3 py-6 flex-col flex-shrink-0">
+      <nav className="hidden sm:flex sticky top-0 w-[232px] h-screen overflow-y-auto bg-bg-950 border-r border-bg-700 px-3 py-6 flex-col flex-shrink-0">
         <div className="mb-8 px-3">
           <Wordmark className="text-[28px]" />
         </div>
@@ -118,6 +119,7 @@ function DashboardInner({ onLoggedOut }) {
         </div>
 
         <div className="mt-auto space-y-0.5">
+          <ThemeSwitch className="mb-3" />
           <button
             onClick={togglePause}
             disabled={pauseBusy}
@@ -157,7 +159,7 @@ function DashboardInner({ onLoggedOut }) {
       </nav>
 
       {/* Cabecera compacta — solo móvil. */}
-      <header className="sm:hidden flex items-center justify-between px-5 h-14 bg-white/90 flex-shrink-0 sticky top-0 z-30 backdrop-blur">
+      <header className="sm:hidden flex items-center justify-between px-5 h-14 bg-bg-950/90 flex-shrink-0 sticky top-0 z-30 backdrop-blur">
         <Wordmark className="text-[22px]" />
       </header>
 
@@ -174,7 +176,8 @@ function DashboardInner({ onLoggedOut }) {
               </button>
             );
           })}
-          <button type="button" onClick={togglePause} disabled={pauseBusy} className={`btn w-full mt-4 ${paused ? 'btn-primary' : 'btn-ghost'}`}>
+          <ThemeSwitch className="mt-4" />
+          <button type="button" onClick={togglePause} disabled={pauseBusy} className={`btn w-full mt-3 ${paused ? 'btn-primary' : 'btn-ghost'}`}>
             <IconBan className="w-5 h-5" />
             {paused ? 'Reanudar solicitudes' : 'Pausar todas las solicitudes'}
           </button>
@@ -200,7 +203,7 @@ function DashboardInner({ onLoggedOut }) {
       {/* Navegación principal persistente en móvil. */}
       <nav
         aria-label="Navegación principal"
-        className="sm:hidden fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-bg-700 bg-white/95 backdrop-blur px-1 pt-1"
+        className="sm:hidden fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-bg-700 bg-bg-950/95 backdrop-blur px-1 pt-1"
         style={{ paddingBottom: 'max(.4rem, env(safe-area-inset-bottom))' }}
       >
         {MOBILE_TABS.map((key) => {

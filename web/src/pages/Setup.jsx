@@ -33,7 +33,7 @@ export default function Setup({ onDone }) {
   }
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-screen bg-bg-950 flex flex-col">
       <form onSubmit={submit} className="flex-1 w-full max-w-sm mx-auto px-6 flex flex-col justify-center">
         <Wordmark className="text-[44px]" />
         <p className="mt-2 mb-10 text-lg text-gray-500">

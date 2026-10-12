@@ -19,7 +19,7 @@
     @apply bg-accent-600 text-white hover:bg-accent-700;
   }
   .btn-dark {
-    @apply bg-gray-50 text-white hover:bg-gray-300;
+    @apply bg-ink text-on-ink hover:bg-gray-300;
   }
   .btn-ghost {
     @apply bg-bg-800 hover:bg-bg-700 text-gray-100;
@@ -30,7 +30,7 @@
   }
 
   .input {
-    @apply w-full bg-bg-800 border border-transparent rounded-xl px-4 py-2.5 text-[15px] font-medium text-gray-100 placeholder-gray-500 transition-colors focus:outline-none focus:bg-white focus:border-gray-50;
+    @apply w-full bg-bg-800 border border-transparent rounded-xl px-4 py-2.5 text-[15px] font-medium text-gray-100 placeholder-gray-500 transition-colors focus:outline-none focus:bg-bg-950 focus:border-ink;
   }
   .label {
     @apply block text-sm font-semibold text-gray-400 mb-1.5;
