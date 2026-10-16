@@ -625,7 +625,7 @@ test('cupo mensual: cuenta cargos aprobados en el mes, independientemente de si 
   }
 });
 
-test('cupo mensual: lo aprobado pero aún no descargado no cuenta (pedido de Edu, 2 ago 2026)', async () => {
+test('cupo mensual: lo aprobado aunque no esté descargado cuenta para frenar solicitudes en masa', async () => {
   const upsertSetting = db.prepare(`
     INSERT INTO settings (key, value) VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value=excluded.value
@@ -662,16 +662,19 @@ test('cupo mensual: lo aprobado pero aún no descargado no cuenta (pedido de Edu
   };
 
   try {
-    // Un cargo manual (sin tmdb_id, siempre cuenta) sube used a 1, no a 2: la
-    // que aún no está en Plex no debe aportar nada al cupo mensual.
+    // El cargo manual y la solicitud aún sin descargar cuentan: el mensual
+    // limita solicitudes, mientras el cupo normal sigue esperando a Plex.
     const res = await agent
       .post('/api/quota/manual-charge/1896/1786')
       .send({ title: 'Vista fuera de Seerr' })
       .expect(200);
-    assert.deepEqual(res.body.monthly, { enabled: true, limit: 5, used: 1, remaining: 4, daysUntilReset: getDaysUntilMonthlyReset() });
+    assert.deepEqual(res.body.monthly, { enabled: true, limit: 5, used: 2, remaining: 3, daysUntilReset: getDaysUntilMonthlyReset() });
 
     const history = (await agent.get('/api/quota/monthly-history/1896/1786').expect(200)).body;
-    assert.deepEqual(history.map((r) => r.media_title), ['Vista fuera de Seerr']);
+    assert.deepEqual(
+      history.map((r) => r.media_title).sort(),
+      ['Aún descargando', 'Vista fuera de Seerr']
+    );
   } finally {
     global.fetch = originalFetch;
     db.prepare('DELETE FROM decisions_log WHERE library_id = 1786').run();
@@ -681,7 +684,7 @@ test('cupo mensual: lo aprobado pero aún no descargado no cuenta (pedido de Edu
   }
 });
 
-test('cupo mensual total: lo aún no descargado tampoco cuenta para el total', async () => {
+test('cupo mensual total: lo aprobado sin descargar cuenta para el total', async () => {
   const upsertSetting = db.prepare(`
     INSERT INTO settings (key, value) VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value=excluded.value
@@ -725,7 +728,7 @@ test('cupo mensual total: lo aún no descargado tampoco cuenta para el total', a
       .expect(200);
     const quota = (await agent.get('/api/quota').expect(200)).body;
     const user = quota.find((u) => u.userId === 1897);
-    assert.equal(user.monthlyTotal.used, 1); // solo el cargo manual, no la que aún descarga
+    assert.equal(user.monthlyTotal.used, 2); // cargo manual + solicitud aún sin descargar
   } finally {
     global.fetch = originalFetch;
     db.prepare('DELETE FROM decisions_log WHERE library_id = 1787').run();
