@@ -185,15 +185,15 @@ const getLibraryForRequest = db.prepare(`
 // no en libraries.
 const DEFAULT_MONTHLY_TOTAL_LIMIT = 20;
 
-// Reset de cupo mensual = inicio del mes UTC siguiente (mismo corte que usa
-// filterThisMonth).
+// Reset de cupo mensual = inicio del mes UTC siguiente.
 export function getDaysUntilMonthlyReset() {
   const now = new Date();
   const nextMonthStartMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
   return Math.ceil((nextMonthStartMs - now.getTime()) / 86400000);
 }
 
-// Filas aprobadas de un usuario en TODAS las bibliotecas habilitadas.
+// Filas aprobadas de un usuario en TODAS las bibliotecas habilitadas, con el
+// kind para comprobar su disponibilidad en la calidad correcta.
 const getApprovedRowsAllLibraries = db.prepare(`
   SELECT dl.id, dl.media_title, dl.media_type, dl.tmdb_id, dl.season_number, dl.poster_url,
          dl.username, dl.library_id, dl.created_at, l.kind AS kind
@@ -202,15 +202,52 @@ const getApprovedRowsAllLibraries = db.prepare(`
   WHERE dl.user_id = ? AND dl.decision = 'approved' AND dl.voided_at IS NULL AND l.enabled = 1
 `);
 
-// Pedido de Edu (16 oct 2026): el cupo normal no se reserva hasta que el
-// contenido pueda descargarse, pero el tope mensual limita PETICIONES. Por
-// tanto cuenta toda aprobación del mes, aunque siga esperando release/cupo.
-// Esto evita que alguien solicite muchas películas de golpe aprovechando que
-// las no disponibles todavía no ocupan el cupo simultáneo.
-function filterThisMonth(rows) {
+// Una aprobación reserva cupo mensual durante 48 horas. Pasado ese plazo, si
+// sigue sin estar disponible en Plex, libera el hueco; si ya está disponible,
+// continúa contando el resto del mes. Así se frena una ráfaga de solicitudes
+// sin bloquear durante semanas una película o temporada que aún no existe.
+const MONTHLY_UNAVAILABLE_RESERVATION_MS = 2 * 86_400_000;
+
+async function filterCountedThisMonth(rows) {
   const now = new Date();
   const startOfMonthMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
-  return rows.filter((r) => rowTimeMs(r) >= startOfMonthMs);
+  const releaseAtMs = now.getTime() - MONTHLY_UNAVAILABLE_RESERVATION_MS;
+  const thisMonth = rows.filter((r) => rowTimeMs(r) >= startOfMonthMs);
+  const recent = thisMonth.filter((r) => rowTimeMs(r) > releaseAtMs);
+  const older = thisMonth.filter((r) => rowTimeMs(r) <= releaseAtMs);
+  if (older.length === 0) return recent;
+
+  const movieRows = older.filter((r) => r.media_type !== 'tv');
+  const tvRows = older.filter((r) => r.media_type === 'tv');
+  const available = [];
+
+  const moviesByKind = new Map();
+  for (const r of movieRows) {
+    const kind = r.kind || 'standard';
+    if (!moviesByKind.has(kind)) moviesByKind.set(kind, []);
+    moviesByKind.get(kind).push(r);
+  }
+  for (const [kind, kindRows] of moviesByKind) {
+    const availability = await getMovieAvailability(kindRows.map((r) => r.tmdb_id), kind === '4k');
+    for (const r of kindRows) {
+      if (r.tmdb_id == null || !availability.get(r.tmdb_id)?.unavailable) available.push(r);
+    }
+  }
+
+  const tvDetailsCache = new Map();
+  for (const r of tvRows) {
+    if (r.tmdb_id == null || r.season_number == null) {
+      available.push(r);
+      continue;
+    }
+    const key = `${r.tmdb_id}:${r.season_number}`;
+    if (!tvDetailsCache.has(key)) tvDetailsCache.set(key, await getMediaDetails('tv', r.tmdb_id, r.season_number));
+    const details = tvDetailsCache.get(key);
+    const status = details?.seasonStatuses?.[r.season_number] ?? 0;
+    const unavailable = details?.seasonStatuses != null && status < 4;
+    if (!unavailable) available.push(r);
+  }
+  return [...recent, ...available];
 }
 
 // Issue #20: filas detrás del contador getMonthlyTotalQuota para el mismo
@@ -218,7 +255,7 @@ function filterThisMonth(rows) {
 export async function getMonthlyHistoryRowsTotal(userId) {
   const identity = quotaIdentity(userId);
   const rows = identity.memberIds.flatMap((memberId) => getApprovedRowsAllLibraries.all(memberId));
-  return filterThisMonth(rows).sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  return (await filterCountedThisMonth(rows)).sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
 }
 const getMonthlyTotalOverrideRaw = db.prepare('SELECT * FROM monthly_total_overrides WHERE user_id = ?');
 const getGroupMonthlyTotalOverrideForUser = db.prepare(`
@@ -284,7 +321,7 @@ export async function getMonthlyTotalQuota(userId) {
   let used = 0;
   if (enabled) {
     const rows = identity.memberIds.flatMap((memberId) => getApprovedRowsAllLibraries.all(memberId));
-    used = filterThisMonth(rows).length;
+    used = (await filterCountedThisMonth(rows)).length;
   }
   return { enabled, limit, used, remaining: Math.max(0, limit - used), daysUntilReset: getDaysUntilMonthlyReset() };
 }
@@ -305,7 +342,7 @@ export async function getMonthlyHistoryRows(userId, libraryId) {
   const rows = identity.memberIds.flatMap((memberId) =>
     getApprovedRowsForLibrary.all(memberId, libraryId).map((r) => ({ ...r, kind: library?.kind }))
   );
-  return filterThisMonth(rows).sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  return (await filterCountedThisMonth(rows)).sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
 }
 const requestUnitAlreadyLogged = db.prepare(`
   SELECT 1 FROM decisions_log
@@ -813,8 +850,8 @@ export async function getBalance(userId, libraryId) {
   // NULL (ver addPenalty) — aquí no aplica, la resta getMonthlyTotalQuota.
   monthlyLimit = Math.max(0, monthlyLimit - getActivePenaltyHoles.get(identity.cacheId, 'monthly', libraryId).total);
   const resetAt = getResetAt.get(identity.cacheId, libraryId)?.reset_at ?? '0000-01-01';
-  // v2: cupo mensual — independiente de si se ha visto o descargado. Consulta
-  // propia sin filtrar por resetAt: un reset del
+  // v2: cupo mensual — una aprobación reciente reserva hueco; tras 48h solo
+  // cuenta si ya está disponible. Consulta propia sin filtrar por resetAt: un reset del
   // saldo normal no afecta al mensual, igual que antes. Solo se calcula si
   // está activado — si no, ahorra la consulta a Seerr en cada ciclo/biblioteca.
   const monthlyEnabled = getMonthlyQuotaMode() === 'per_library' && Boolean(library.monthly_quota_enabled);
@@ -823,7 +860,7 @@ export async function getBalance(userId, libraryId) {
     const monthlyRows = identity.memberIds.flatMap((memberId) =>
       getApprovedRowsForLibrary.all(memberId, libraryId).map((r) => ({ ...r, kind: library.kind }))
     );
-    monthlyUsed = filterThisMonth(monthlyRows).length;
+    monthlyUsed = (await filterCountedThisMonth(monthlyRows)).length;
   }
   const monthly = {
     enabled: monthlyEnabled,

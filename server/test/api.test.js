@@ -625,7 +625,7 @@ test('cupo mensual: cuenta cargos aprobados en el mes, independientemente de si 
   }
 });
 
-test('cupo mensual: lo aprobado aunque no esté descargado cuenta para frenar solicitudes en masa', async () => {
+test('cupo mensual: una aprobación no disponible reserva hueco 2 días y después lo libera', async () => {
   const upsertSetting = db.prepare(`
     INSERT INTO settings (key, value) VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value=excluded.value
@@ -641,7 +641,9 @@ test('cupo mensual: lo aprobado aunque no esté descargado cuenta para frenar so
   // Aprobada este mes pero todavía sin descargar (status 2 = pedida, no lista).
   db.prepare(`
     INSERT INTO decisions_log (request_id, user_id, username, library_id, media_title, media_type, tmdb_id, decision, created_at)
-    VALUES (-9201, 1896, 'jesus', 1786, 'Aún descargando', 'movie', 777001, 'approved', datetime('now'))
+    VALUES
+      (-9201, 1896, 'jesus', 1786, 'Aún descargando', 'movie', 777001, 'approved', datetime('now')),
+      (-9203, 1896, 'jesus', 1786, 'Sin descargar antigua', 'movie', 777003, 'approved', datetime('now', '-3 days'))
   `).run();
 
   const originalFetch = global.fetch;
@@ -652,7 +654,7 @@ test('cupo mensual: lo aprobado aunque no esté descargado cuenta para frenar so
       const data = cmd === 'get_users' ? [{ user_id: 1896, username: 'jesus' }] : { data: [] };
       return new Response(JSON.stringify({ response: { result: 'success', data } }), { status: 200 });
     }
-    if (url === 'http://seerr.test/api/v1/movie/777001') {
+    if (url === 'http://seerr.test/api/v1/movie/777001' || url === 'http://seerr.test/api/v1/movie/777003') {
       return new Response(JSON.stringify({ title: 'Aún descargando', mediaInfo: { status: 2 } }), { status: 200 });
     }
     if (url.startsWith('http://seerr.test')) {
@@ -662,8 +664,8 @@ test('cupo mensual: lo aprobado aunque no esté descargado cuenta para frenar so
   };
 
   try {
-    // El cargo manual y la solicitud aún sin descargar cuentan: el mensual
-    // limita solicitudes, mientras el cupo normal sigue esperando a Plex.
+    // El cargo manual y la solicitud reciente cuentan; la no disponible de
+    // hace 3 días ya ha liberado su reserva mensual.
     const res = await agent
       .post('/api/quota/manual-charge/1896/1786')
       .send({ title: 'Vista fuera de Seerr' })
@@ -684,7 +686,7 @@ test('cupo mensual: lo aprobado aunque no esté descargado cuenta para frenar so
   }
 });
 
-test('cupo mensual total: lo aprobado sin descargar cuenta para el total', async () => {
+test('cupo mensual total: una aprobación sin descargar reserva hueco durante 2 días', async () => {
   const upsertSetting = db.prepare(`
     INSERT INTO settings (key, value) VALUES (?, ?)
     ON CONFLICT(key) DO UPDATE SET value=excluded.value
