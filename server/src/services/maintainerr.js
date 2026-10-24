@@ -556,10 +556,14 @@ const upsertSalvadoMessage = db.prepare(`
   INSERT INTO salvado_messages (media_server_id, chat_id, message_id, has_photo, text)
   VALUES (@mediaServerId, @chatId, @messageId, @hasPhoto, @text)
   ON CONFLICT(media_server_id) DO UPDATE SET
-    chat_id = excluded.chat_id, message_id = excluded.message_id, has_photo = excluded.has_photo, text = excluded.text
+    chat_id = excluded.chat_id, message_id = excluded.message_id, has_photo = excluded.has_photo,
+    text = excluded.text, close_suffix = NULL
 `);
 const getSalvadoMessage = db.prepare('SELECT * FROM salvado_messages WHERE media_server_id = ?');
 const deleteSalvadoMessage = db.prepare('DELETE FROM salvado_messages WHERE media_server_id = ?');
+const markSalvadoMessageClosing = db.prepare('UPDATE salvado_messages SET close_suffix = ? WHERE media_server_id = ?');
+const getPendingClosedSalvadoMessages = db.prepare('SELECT * FROM salvado_messages WHERE close_suffix IS NOT NULL');
+const getLatestSalvadoTitle = db.prepare('SELECT title FROM salvados WHERE media_server_id = ? ORDER BY id DESC LIMIT 1');
 
 function toSqliteText(ms) {
   return new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
@@ -1077,22 +1081,46 @@ async function findCurrentTargetCollection(mediaServerId) {
   );
 }
 
-// Anexa una línea al mensaje de salvado y, a diferencia de appendSavedNote,
-// no vuelve a guardar la fila (se usa justo antes de borrarla).
-async function closeSalvadoMessage(mediaServerId, suffix) {
-  const row = getSalvadoMessage.get(mediaServerId);
-  deleteSalvadoMessage.run(mediaServerId);
-  if (!row) return;
+// Intenta cerrar el mensaje original. Si Telegram ya no permite editarlo
+// (mensaje eliminado, chat migrado, etc.), manda un aviso nuevo al grupo. La
+// fila solo se borra tras confirmar una de las dos vías; si Telegram está
+// caído queda como outbox para el siguiente ciclo.
+async function deliverClosedSalvadoMessage(row) {
   try {
     const method = row.has_photo ? 'editMessageCaption' : 'editMessageText';
     await botApi(method, {
       chat_id: row.chat_id,
       message_id: row.message_id,
-      [row.has_photo ? 'caption' : 'text']: `${row.text}\n\n${suffix}`,
+      [row.has_photo ? 'caption' : 'text']: `${row.text}\n\n${row.close_suffix}`,
       reply_markup: { inline_keyboard: [] },
     });
+    deleteSalvadoMessage.run(row.media_server_id);
+    return;
   } catch (err) {
     console.error('[maintainerr] error cerrando mensaje de salvado:', err.message);
+  }
+
+  const title = getLatestSalvadoTitle.get(row.media_server_id)?.title;
+  const status = row.close_suffix.includes('Ya no está') ? 'ya no está en salvados' : 'se ha borrado';
+  const fallback = title ? `🗑️ «${title}» ${status}.` : `🗑️ El contenido salvado ${status}.`;
+  try {
+    await sendToGroup(fallback);
+    deleteSalvadoMessage.run(row.media_server_id);
+  } catch (err) {
+    console.error('[maintainerr] error enviando cierre alternativo de salvado:', err.message);
+  }
+}
+
+async function closeSalvadoMessage(mediaServerId, suffix) {
+  const row = getSalvadoMessage.get(mediaServerId);
+  if (!row) return;
+  markSalvadoMessageClosing.run(suffix, mediaServerId);
+  await deliverClosedSalvadoMessage({ ...row, close_suffix: suffix });
+}
+
+async function flushPendingClosedSalvadoMessages() {
+  for (const row of getPendingClosedSalvadoMessages.all()) {
+    await deliverClosedSalvadoMessage(row);
   }
 }
 
@@ -1143,6 +1171,7 @@ async function finalizeSalvadoDeletion(mediaServerId) {
 
 export async function processSalvados() {
   if (!isEnabled()) return;
+  await flushPendingClosedSalvadoMessages();
   const ids = distinctSalvadoMediaIds.all().map((r) => r.media_server_id);
   for (const mediaServerId of ids) {
     const rows = getSalvadosForItem.all(mediaServerId);

@@ -47,8 +47,8 @@ test('/pendientes: con chat vinculado, lista lo pendiente de todas sus bibliotec
   upsertSetting('tautulli_api_key', 'test-key');
   db.prepare("INSERT INTO telegram_links (user_id, chat_id, linked_at) VALUES (960, 'chat-960', datetime('now'))").run();
   db.prepare(`
-    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
-    VALUES (9600, 'Películas', 'movie', 'standard', 1, 4)
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit, expiry_days)
+    VALUES (9600, 'Películas', 'movie', 'standard', 1, 4, 0)
   `).run();
   db.prepare(`
     INSERT INTO decisions_log (request_id, user_id, username, library_id, media_title, media_type, decision, created_at)

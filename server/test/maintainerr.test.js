@@ -701,6 +701,42 @@ test('processSalvados: todos la han visto → borra 24h después del último, v�
   assert.deepEqual(body.reply_markup, { inline_keyboard: [] });
 });
 
+test('processSalvados: si Telegram no puede editar el original manda un aviso nuevo de borrado', async () => {
+  db.exec("DELETE FROM salvados; DELETE FROM maintainerr_candidates; DELETE FROM salvado_messages;");
+  insertCandidateRow.run('ps-fallback', new Date(Date.now() - 10 * 86_400_000).toISOString().slice(0, 19).replace('T', ' '), 7, 1);
+  db.prepare(`
+    INSERT INTO salvados (media_server_id, tmdb_id, title, telegram_user_id, telegram_name, user_id, library_id, saved_at, expires_at, watched_at)
+    VALUES ('ps-fallback', NULL, 'Together', '111', 'David', NULL, NULL, datetime('now', '-5 days'), datetime('now', '-1 day'), datetime('now', '-2 days'))
+  `).run();
+  insertSalvadoMessageRow.run('ps-fallback', '✅ Salvada por David hasta hoy.');
+
+  const calls = [];
+  global.fetch = async (url, options = {}) => {
+    const u = String(url);
+    calls.push({ url: u, options });
+    if (u.endsWith('/api/collections')) {
+      return new Response(JSON.stringify([
+        { id: 4, title: 'Peliculas Salvadas por 15 días', type: 'movie', libraryId: '5', media: [{ mediaServerId: 'ps-fallback' }] },
+      ]), { status: 200 });
+    }
+    if (u.includes('/media/handle')) return new Response(JSON.stringify({}), { status: 200 });
+    if (u.includes('/editMessageText')) {
+      return new Response(JSON.stringify({ ok: false, description: 'Bad Request: message to edit not found' }), { status: 200 });
+    }
+    if (u.includes('/sendMessage')) {
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 999, chat: { id: -100123 } } }), { status: 200 });
+    }
+    throw new Error(`fetch inesperado en test: ${u}`);
+  };
+
+  await processSalvados();
+
+  const fallbackCall = calls.find((c) => c.url.includes('/sendMessage'));
+  assert.ok(fallbackCall, 'debe enviar un mensaje nuevo cuando el original no se puede editar');
+  assert.match(JSON.parse(fallbackCall.options.body).text, /Together.*se ha borrado/);
+  assert.equal(db.prepare("SELECT 1 FROM salvado_messages WHERE media_server_id = 'ps-fallback'").get(), undefined);
+});
+
 test('processSalvados: falta gente por ver → no borra, expires_at queda en el peor caso conocido', async () => {
   db.exec("DELETE FROM salvados; DELETE FROM maintainerr_candidates; DELETE FROM salvado_messages;");
   upsertSetting.run('tautulli_url', 'http://tautulli.test');

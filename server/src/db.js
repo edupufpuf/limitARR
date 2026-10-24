@@ -437,6 +437,10 @@ db.exec(`
 // arriba): tiene que ir después de ambos, si no "no such table" en DBs que
 // aún no la tienen.
 addColumnIfMissing("ALTER TABLE salvado_messages ADD COLUMN text TEXT NOT NULL DEFAULT ''");
+// Si no se puede editar el mensaje original al resolverse un salvado, se
+// conserva aquí el cierre pendiente para reintentarlo y/o mandar un aviso
+// nuevo. NULL mientras el salvado sigue activo.
+addColumnIfMissing('ALTER TABLE salvado_messages ADD COLUMN close_suffix TEXT');
 // La cola solo avanza cuando ESTA temporada predecesora consta como vista. Sin
 // guardarla, quitar/caducar una temporada podía desbloquear por error la siguiente.
 addColumnIfMissing('ALTER TABLE season_queue ADD COLUMN previous_season_number INTEGER');
