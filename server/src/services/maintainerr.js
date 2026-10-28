@@ -217,6 +217,24 @@ function postponeCollectionMedia(collectionId, mediaServerId, days) {
   });
 }
 
+export async function setCollectionExclusion(collectionId, mediaServerId, excluded) {
+  const base = getRawSetting(URL_KEY);
+  if (!base) throw new Error('Maintainerr no configurado (falta la URL)');
+  const res = await fetch(`${base}/api/rules/exclusions/bulk`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      mediaIds: [String(mediaServerId)],
+      collectionId: Number(collectionId),
+      action: excluded ? 0 : 1,
+    }),
+  });
+  if (!res.ok) throw new Error(`Maintainerr exclusión falló: ${res.status} ${await res.text()}`);
+  const json = await res.json();
+  const result = json.results?.find((item) => String(item.mediaId) === String(mediaServerId));
+  if (!result || result.code !== 1) throw new Error(`Maintainerr exclusión falló: ${result?.message ?? 'sin resultado'}`);
+}
+
 // --- Bot Telegram dedicado ---
 
 async function botApi(method, params = {}) {
@@ -562,8 +580,8 @@ const pendingTitles = new Map();
 // abajo), un texto literal en vez del viejo "+N days" — el que se pasa al
 // insertar es el peor caso conocido en ese momento (ver getFallbackDeadlineMs).
 const insertSalvado = db.prepare(`
-  INSERT INTO salvados (media_server_id, tmdb_id, title, poster_url, telegram_user_id, telegram_name, user_id, library_id, saved_at, expires_at, grace_days, target_collection_id)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)
+  INSERT INTO salvados (media_server_id, tmdb_id, title, poster_url, telegram_user_id, telegram_name, user_id, library_id, saved_at, expires_at, grace_days, target_collection_id, source_collection_id)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?)
 `);
 // Solo filas activas (resolved_at IS NULL): todo lo que llama a esto quiere
 // el estado "sigue salvada" — el histórico completo (incluye resueltas) vive
@@ -845,9 +863,11 @@ async function handleSaveCallback(query) {
       throw new Error('la colección destino no coincide con la biblioteca y el tipo del origen');
     }
 
-    // Primero añade al destino y después quita del origen: si Maintainerr
-    // falla entre ambas operaciones, el contenido nunca queda desprotegido.
+    // Primero añade al destino, después lo excluye de la regla origen y por
+    // último lo quita de esa colección. Sin la exclusión, Maintainerr volvería
+    // a añadirlo al siguiente ciclo por seguir cumpliendo la regla.
     await addToCollection(Number(selectedTarget.id), mediaServerId);
+    await setCollectionExclusion(Number(sourceId), mediaServerId, true);
     await removeFromCollection(Number(sourceId), mediaServerId);
     // Se editará el mensaje aquí mismo abajo (con la nota de "Salvada por...");
     // sin borrar esta fila, el sondeo de respaldo lo vería salir de la colección
@@ -888,7 +908,8 @@ async function handleSaveCallback(query) {
       meta.libraryId,
       toSqliteText(initialDeadline),
       graceDays,
-      Number(selectedTarget.id)
+      Number(selectedTarget.id),
+      Number(sourceId)
     );
 
     await botApi('answerCallbackQuery', { callback_query_id: query.id, text: 'Salvada' });
@@ -986,7 +1007,8 @@ async function handleAddSaveCallback(query) {
       ref.library_id,
       toSqliteText(initialDeadline),
       graceDays,
-      targetCollectionId
+      targetCollectionId,
+      ref.source_collection_id ?? null
     );
 
     await botApi('answerCallbackQuery', { callback_query_id: query.id, text: 'Salvada también' });
@@ -1247,12 +1269,33 @@ async function noteWindowClosed(mediaServerId) {
   }
 }
 
+async function clearSourceExclusions(mediaServerId) {
+  const sourceIds = [...new Set(
+    getSalvadosForItem.all(mediaServerId)
+      .map((row) => row.source_collection_id)
+      .filter((id) => id != null)
+  )];
+  try {
+    for (const sourceId of sourceIds) {
+      await setCollectionExclusion(sourceId, mediaServerId, false);
+    }
+    return true;
+  } catch (err) {
+    // No se marca resuelto: el siguiente ciclo vuelve a intentar retirar la
+    // exclusión, para que una futura reaparición en Plex no quede protegida
+    // para siempre por un salvado antiguo.
+    console.error('[maintainerr] error retirando exclusión del salvado:', err.message);
+    return false;
+  }
+}
+
 async function finalizeSalvadoDeletion(mediaServerId) {
   const target = await findCurrentTargetCollection(mediaServerId);
   if (!target) {
     // Ya no está en ninguna colección de salvados vigilada (lo quitaron a
     // mano en Maintainerr, o se borró de otra forma) — se limpia el rastro
     // sin llamar a media/handle, que fallaría (el ítem ya no está ahí).
+    if (!(await clearSourceExclusions(mediaServerId))) return;
     resolveSalvadosForItem.run(mediaServerId);
     deleteCandidate.run(mediaServerId);
     await closeSalvadoMessage(mediaServerId, '🗑️ Ya no está salvada.');
@@ -1265,6 +1308,7 @@ async function finalizeSalvadoDeletion(mediaServerId) {
     console.error('[maintainerr] error borrando salvado:', err.message);
     return;
   }
+  if (!(await clearSourceExclusions(mediaServerId))) return;
   resolveSalvadosForItem.run(mediaServerId);
   deleteCandidate.run(mediaServerId);
   await closeSalvadoMessage(mediaServerId, '🗑️ Borrada.');

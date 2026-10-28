@@ -4,7 +4,7 @@ import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { db } from '../src/db.js';
 import { getWebhookSecret } from '../src/auth.js';
-import { buildTvGracePeriodButtons, getPostponeDays, getSalvadosByUser, getAllSalvados, getSalvadosHistory, pollMaintainerrCollections, processSalvados } from '../src/services/maintainerr.js';
+import { buildTvGracePeriodButtons, getPostponeDays, setCollectionExclusion, getSalvadosByUser, getAllSalvados, getSalvadosHistory, pollMaintainerrCollections, processSalvados } from '../src/services/maintainerr.js';
 
 // Tests del módulo Maintainerr con la DB en memoria y global.fetch mockeado
 // (estilo eliminarr.test.js: nada de red real, ni Maintainerr ni Telegram).
@@ -73,6 +73,23 @@ test('un segundo salvado prolonga el contador de Maintainerr hasta su nueva fech
   assert.equal(getPostponeDays('2026-10-25 12:00:00', 7, 7, now), 3);
   // Si el plazo actual ya llega más lejos, no debe acortarse ni aplazarse.
   assert.equal(getPostponeDays('2026-10-27 12:00:00', 30, 7, now), 0);
+});
+
+test('salvar añade una exclusión en la colección de borrado y resolverla la retira', async () => {
+  const calls = [];
+  global.fetch = async (url, options) => {
+    calls.push({ url: String(url), body: JSON.parse(options.body) });
+    return new Response(JSON.stringify({ results: [{ mediaId: '9977', code: 1, message: 'Success' }] }), { status: 201 });
+  };
+
+  await setCollectionExclusion(2, '9977', true);
+  await setCollectionExclusion(2, '9977', false);
+
+  assert.ok(calls.every((call) => call.url.endsWith('/api/rules/exclusions/bulk')));
+  assert.deepEqual(calls.map((call) => call.body), [
+    { mediaIds: ['9977'], collectionId: 2, action: 0 },
+    { mediaIds: ['9977'], collectionId: 2, action: 1 },
+  ]);
 });
 
 function mockFetch() {

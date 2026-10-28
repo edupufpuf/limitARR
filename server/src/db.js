@@ -254,6 +254,10 @@ addColumnIfMissing('ALTER TABLE salvados ADD COLUMN grace_days INTEGER');
 // (series: 7, 14 o 30 días). Permite moverla a una colección más larga si
 // otro usuario la salva después y evita depender de nombres que pueden cambiar.
 addColumnIfMissing('ALTER TABLE salvados ADD COLUMN target_collection_id INTEGER');
+// Colección de borrado de la que salió el contenido. Mientras está salvado se
+// crea una exclusión ahí para que su regla no vuelva a añadirlo; al resolverse
+// se usa este id para retirar la exclusión.
+addColumnIfMissing('ALTER TABLE salvados ADD COLUMN source_collection_id INTEGER');
 
 // v2: roles — igual que los grupos, un usuario tiene como mucho un rol
 // (user_roles.user_id es PK), y el rol da valores por defecto de límite,
