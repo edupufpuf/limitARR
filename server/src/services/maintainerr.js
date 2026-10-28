@@ -53,12 +53,33 @@ function parsePairs(raw) {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed)
-      ? parsed.filter((p) => p && typeof p.source === 'string' && typeof p.target === 'string')
-      : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((p) => {
+      if (!p || typeof p.source !== 'string') return [];
+      const target = typeof p.target === 'string' && p.target ? p.target : null;
+      const targets = Object.fromEntries(
+        Object.entries(p.targets ?? {}).filter(([days, title]) =>
+          VALID_TV_GRACE_DAYS.has(String(days)) && typeof title === 'string' && title
+        )
+      );
+      if (!target && Object.keys(targets).length === 0) return [];
+      return [{ source: p.source, ...(target ? { target } : {}), ...(Object.keys(targets).length ? { targets } : {}) }];
+    });
   } catch {
     return [];
   }
+}
+
+function pairTargetTitles(pair) {
+  return [...new Set([pair?.target, ...Object.values(pair?.targets ?? {})].filter(Boolean))];
+}
+
+function targetTitleForDays(pair, days) {
+  return pair?.targets?.[String(days)] ?? pair?.target ?? pairTargetTitles(pair)[0] ?? null;
+}
+
+function allTargetTitles(pairs) {
+  return new Set(pairs.flatMap(pairTargetTitles));
 }
 
 export function getMaintainerrSettings() {
@@ -119,9 +140,17 @@ export function updateMaintainerrSettings({ url, botToken, chatId, topicId, pair
     setRawSetting(SALVADO_GRACE_DAYS_KEY, Number.isFinite(n) && n > 0 ? String(Math.round(n)) : String(DEFAULT_SALVADO_GRACE_DAYS));
   }
   if (Array.isArray(pairs)) {
-    const clean = pairs
-      .filter((p) => p && typeof p.source === 'string' && typeof p.target === 'string' && p.target)
-      .map((p) => ({ source: p.source, target: p.target }));
+    const clean = pairs.flatMap((p) => {
+      if (!p || typeof p.source !== 'string') return [];
+      const target = typeof p.target === 'string' && p.target ? p.target : null;
+      const targets = Object.fromEntries(
+        Object.entries(p.targets ?? {}).filter(([days, title]) =>
+          VALID_TV_GRACE_DAYS.has(String(days)) && typeof title === 'string' && title
+        )
+      );
+      if (!target && Object.keys(targets).length === 0) return [];
+      return [{ source: p.source, ...(target ? { target } : {}), ...(Object.keys(targets).length ? { targets } : {}) }];
+    });
     setRawSetting(PAIRS_KEY, JSON.stringify(clean));
   }
 }
@@ -178,6 +207,13 @@ function addToCollection(collectionId, mediaServerId) {
   return maintainerrRequest('/add', {
     method: 'POST',
     body: JSON.stringify({ collectionId, media: [{ mediaServerId }], manual: true }),
+  });
+}
+
+function postponeCollectionMedia(collectionId, mediaServerId, days) {
+  return maintainerrRequest('/media/postpone', {
+    method: 'POST',
+    body: JSON.stringify({ collectionId, mediaId: String(mediaServerId), days }),
   });
 }
 
@@ -417,7 +453,7 @@ export async function handleMaintainerrWebhook(body) {
   const { pairs } = getMaintainerrSettings();
   // Ignorar altas en las propias colecciones de salvados (evita bucle:
   // salvar → add → webhook → otro aviso).
-  if (pairs.some((p) => p.target === body.collectionName)) return;
+  if (allTargetTitles(pairs).has(body.collectionName)) return;
 
   const collections = await listCollections();
   const source = collections.find((c) => c.title === body.collectionName);
@@ -427,7 +463,8 @@ export async function handleMaintainerrWebhook(body) {
   }
   // Destino elegido a mano por el admin para ESTA colección concreta (panel
   // Notificaciones → Maintainerr), no adivinado por biblioteca/tipo.
-  const targetTitle = pairs.find((p) => p.source === body.collectionName)?.target;
+  const pair = pairs.find((p) => p.source === body.collectionName);
+  const targetTitle = targetTitleForDays(pair, 7);
   const target = targetTitle ? collections.find((c) => c.title === targetTitle) : null;
 
   // Maintainerr no manda el título suelto, solo embebido en su mensaje:
@@ -470,7 +507,7 @@ export async function pollMaintainerrCollections() {
   for (const pair of pairs) {
     const source = collections.find((c) => c.title === pair.source);
     if (!source) continue;
-    const target = collections.find((c) => c.title === pair.target) ?? null;
+    const target = collections.find((c) => c.title === targetTitleForDays(pair, 7)) ?? null;
     const media = source.media ?? [];
     const currentIds = new Set(media.map((m) => String(m.mediaServerId)));
     const notifiedIds = getNotifiedIds.all(source.id).map((r) => r.media_server_id);
@@ -525,8 +562,8 @@ const pendingTitles = new Map();
 // abajo), un texto literal en vez del viejo "+N days" — el que se pasa al
 // insertar es el peor caso conocido en ese momento (ver getFallbackDeadlineMs).
 const insertSalvado = db.prepare(`
-  INSERT INTO salvados (media_server_id, tmdb_id, title, poster_url, telegram_user_id, telegram_name, user_id, library_id, saved_at, expires_at, grace_days)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?)
+  INSERT INTO salvados (media_server_id, tmdb_id, title, poster_url, telegram_user_id, telegram_name, user_id, library_id, saved_at, expires_at, grace_days, target_collection_id)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)
 `);
 // Solo filas activas (resolved_at IS NULL): todo lo que llama a esto quiere
 // el estado "sigue salvada" — el histórico completo (incluye resueltas) vive
@@ -537,6 +574,9 @@ const getSalvadoForItemAndUser = db.prepare(
 );
 const updateSalvadoWatchedAt = db.prepare('UPDATE salvados SET watched_at = ? WHERE id = ?');
 const updateSalvadosExpiresAt = db.prepare('UPDATE salvados SET expires_at = ? WHERE media_server_id = ?');
+const updateSalvadosTargetCollection = db.prepare(
+  'UPDATE salvados SET target_collection_id = ? WHERE media_server_id = ? AND resolved_at IS NULL'
+);
 // No se borra la fila (el Registro y el historial de la pestaña Salvadas la
 // necesitan viva) — se marca resuelta, mismo espíritu que decisions_log
 // (nunca se reescribe una fila 'approved' vieja, solo se añaden eventos).
@@ -571,6 +611,15 @@ function toSqliteText(ms) {
 
 function sqliteTextToMs(text) {
   return new Date(`${text.replace(' ', 'T')}Z`).getTime();
+}
+
+export function getPostponeDays(addDate, deleteAfterDays, graceDays, nowMs = Date.now()) {
+  if (!addDate) return 0;
+  const addDateMs = Date.parse(`${String(addDate).replace(' ', 'T')}Z`);
+  const currentDueMs = addDateMs + Number(deleteAfterDays) * 86_400_000;
+  const wantedDueMs = nowMs + Number(graceDays) * 86_400_000;
+  if (![addDateMs, currentDueMs, wantedDueMs].every(Number.isFinite)) return 0;
+  return Math.max(0, Math.ceil((wantedDueMs - currentDueMs) / 86_400_000));
 }
 
 function isTvLibrary(libraryId) {
@@ -781,8 +830,25 @@ async function handleSaveCallback(query) {
     const sourceCollection = collectionsBefore.find((c) => c.id === Number(sourceId));
     const liveMedia = sourceCollection?.media?.find((m) => String(m.mediaServerId) === String(mediaServerId));
 
+    // En series el destino depende del plazo elegido en Telegram. `targetId`
+    // sigue viajando en el callback por compatibilidad con mensajes antiguos,
+    // pero el mapeo vivo del panel gana si existe.
+    const requestedDays = sourceCollection?.type !== 'movie' && VALID_TV_GRACE_DAYS.has(requestedGraceDays)
+      ? Number(requestedGraceDays)
+      : null;
+    const pair = getMaintainerrSettings().pairs.find((p) => p.source === sourceCollection?.title);
+    const mappedTargetTitle = requestedDays != null ? targetTitleForDays(pair, requestedDays) : pair?.target;
+    const selectedTarget = collectionsBefore.find((c) => c.title === mappedTargetTitle)
+      ?? collectionsBefore.find((c) => c.id === Number(targetId));
+    if (!sourceCollection || !selectedTarget) throw new Error('colección origen/destino no encontrada');
+    if (selectedTarget.type !== sourceCollection.type || selectedTarget.libraryId !== sourceCollection.libraryId) {
+      throw new Error('la colección destino no coincide con la biblioteca y el tipo del origen');
+    }
+
+    // Primero añade al destino y después quita del origen: si Maintainerr
+    // falla entre ambas operaciones, el contenido nunca queda desprotegido.
+    await addToCollection(Number(selectedTarget.id), mediaServerId);
     await removeFromCollection(Number(sourceId), mediaServerId);
-    await addToCollection(Number(targetId), mediaServerId);
     // Se editará el mensaje aquí mismo abajo (con la nota de "Salvada por...");
     // sin borrar esta fila, el sondeo de respaldo lo vería salir de la colección
     // origen en el próximo ciclo y lo marcaría (mal) como "YA BORRADA" encima.
@@ -809,9 +875,7 @@ async function handleSaveCallback(query) {
       posterUrl: cached.posterUrl ?? liveMedia?.image_path ?? null,
       libraryId: cached.libraryId ?? (sourceCollection?.libraryId != null ? Number(sourceCollection.libraryId) : null),
     };
-    const graceDays = sourceCollection?.type !== 'movie' && VALID_TV_GRACE_DAYS.has(requestedGraceDays)
-      ? Number(requestedGraceDays)
-      : null;
+    const graceDays = requestedDays;
     const initialDeadline = Date.now() + (graceDays ?? getSalvadoGraceDays(meta.libraryId)) * 86_400_000;
     insertSalvado.run(
       String(mediaServerId),
@@ -823,7 +887,8 @@ async function handleSaveCallback(query) {
       resolveTautulliUser(query.from.id),
       meta.libraryId,
       toSqliteText(initialDeadline),
-      graceDays
+      graceDays,
+      Number(selectedTarget.id)
     );
 
     await botApi('answerCallbackQuery', { callback_query_id: query.id, text: 'Salvada' });
@@ -874,6 +939,41 @@ async function handleAddSaveCallback(query) {
     const graceDays = isTvLibrary(ref.library_id) && VALID_TV_GRACE_DAYS.has(requestedGraceDays)
       ? Number(requestedGraceDays)
       : null;
+    let targetCollectionId = ref.target_collection_id ?? null;
+
+    // Maintainerr también debe reflejar el plazo desde ESTE salvado. Si elige
+    // una duración mayor, cambia de colección; si se mantiene en la misma (o
+    // elige una menor pero vence después que el contador actual), usa su API
+    // de aplazamiento para que el overlay de Plex llegue hasta la misma fecha.
+    if (graceDays != null) {
+      const collections = await listCollections();
+      const { pairs } = getMaintainerrSettings();
+      const targetTitles = allTargetTitles(pairs);
+      const currentTarget = collections.find((c) =>
+        (c.id === Number(targetCollectionId) || targetTitles.has(c.title))
+        && c.media?.some((m) => String(m.mediaServerId) === String(mediaServerId))
+      );
+      const pair = pairs.find((p) => pairTargetTitles(p).includes(currentTarget?.title));
+      if (!currentTarget || !pair) throw new Error('no se encontró la colección para el plazo elegido');
+      const currentPeriod = Number(
+        Object.entries(pair.targets ?? {}).find(([, title]) => title === currentTarget.title)?.[0]
+      );
+      const desiredTitle = Number.isFinite(currentPeriod) && graceDays <= currentPeriod
+        ? currentTarget.title
+        : targetTitleForDays(pair, graceDays);
+      const desiredTarget = collections.find((c) => c.title === desiredTitle);
+      if (!desiredTarget) throw new Error('no se encontró el destino para el plazo elegido');
+      if (desiredTarget.id !== currentTarget.id) {
+        await addToCollection(Number(desiredTarget.id), mediaServerId);
+        await removeFromCollection(Number(currentTarget.id), mediaServerId);
+      } else {
+        const liveMedia = currentTarget.media?.find((m) => String(m.mediaServerId) === String(mediaServerId));
+        const extraDays = getPostponeDays(liveMedia?.addDate, currentTarget.deleteAfterDays, graceDays);
+        if (extraDays > 0) await postponeCollectionMedia(Number(currentTarget.id), mediaServerId, extraDays);
+      }
+      targetCollectionId = Number(desiredTarget.id);
+      updateSalvadosTargetCollection.run(targetCollectionId, mediaServerId);
+    }
     const initialDeadline = Date.now() + (graceDays ?? getSalvadoGraceDays(ref.library_id)) * 86_400_000;
     insertSalvado.run(
       mediaServerId,
@@ -885,7 +985,8 @@ async function handleAddSaveCallback(query) {
       resolveTautulliUser(query.from.id),
       ref.library_id,
       toSqliteText(initialDeadline),
-      graceDays
+      graceDays,
+      targetCollectionId
     );
 
     await botApi('answerCallbackQuery', { callback_query_id: query.id, text: 'Salvada también' });
@@ -939,7 +1040,7 @@ async function filterStillInCollection(rows) {
     console.error('[maintainerr] no se pudo comprobar colección de salvados en vivo, se confía en expires_at:', err.message);
     return rows;
   }
-  const targetTitles = new Set(pairs.map((p) => p.target));
+  const targetTitles = allTargetTitles(pairs);
   const targetCollections = collections.filter((c) => targetTitles.has(c.title));
   return rows.filter((row) =>
     targetCollections.some((c) => c.media?.some((m) => String(m.mediaServerId) === String(row.media_server_id)))
@@ -1073,7 +1174,7 @@ async function findCurrentTargetCollection(mediaServerId) {
   const { pairs } = getMaintainerrSettings();
   if (pairs.length === 0) return null;
   const collections = await listCollections().catch(() => []);
-  const targetTitles = new Set(pairs.map((p) => p.target));
+  const targetTitles = allTargetTitles(pairs);
   return (
     collections.find(
       (c) => targetTitles.has(c.title) && c.media?.some((m) => String(m.mediaServerId) === String(mediaServerId))

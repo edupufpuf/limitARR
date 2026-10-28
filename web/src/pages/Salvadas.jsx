@@ -142,6 +142,7 @@ export default function Salvadas() {
   const [mntResult, setMntResult] = useState(null);
   const [mntLiveCollections, setMntLiveCollections] = useState(null);
   const [mntPairsMap, setMntPairsMap] = useState({}); // { tituloOrigen: tituloDestino }
+  const [mntPeriodTargetsMap, setMntPeriodTargetsMap] = useState({}); // { tituloOrigen: { 7, 14, 30 } }
   const [savingMnt, setSavingMnt] = useState(false);
   const [libraries, setLibraries] = useState([]);
 
@@ -165,14 +166,22 @@ export default function Salvadas() {
       setMntDeleteMessageTv(m.deleteMessageTv ?? '');
       setMntGraceDays(m.salvadoGraceDays ?? 5);
       const map = {};
-      (m.pairs ?? []).forEach((p) => { map[p.source] = p.target; });
+      const periods = {};
+      (m.pairs ?? []).forEach((p) => {
+        if (p.target) map[p.source] = p.target;
+        if (p.targets) periods[p.source] = p.targets;
+      });
       setMntPairsMap(map);
+      setMntPeriodTargetsMap(periods);
     }).catch(() => {});
     const timer = setInterval(load, REFRESH_MS);
     return () => clearInterval(timer);
   }, []);
 
-  const normalizePairs = (map) => JSON.stringify(Object.entries(map).sort());
+  const normalizedPairSettings = (pairsMap, periodMap) => JSON.stringify({
+    pairs: Object.entries(pairsMap).sort(),
+    periods: Object.entries(periodMap).sort().map(([source, targets]) => [source, Object.entries(targets).sort()]),
+  });
   const mntDirty = Boolean(
     mnt &&
       (mntToken !== '' ||
@@ -184,7 +193,10 @@ export default function Salvadas() {
         mntDeleteMessage !== (mnt.deleteMessage ?? '') ||
         mntDeleteMessageTv !== (mnt.deleteMessageTv ?? '') ||
         mntGraceDays !== (mnt.salvadoGraceDays ?? 5) ||
-        normalizePairs(mntPairsMap) !== normalizePairs(Object.fromEntries((mnt.pairs ?? []).map((p) => [p.source, p.target]))))
+        normalizedPairSettings(mntPairsMap, mntPeriodTargetsMap) !== normalizedPairSettings(
+          Object.fromEntries((mnt.pairs ?? []).filter((p) => p.target).map((p) => [p.source, p.target])),
+          Object.fromEntries((mnt.pairs ?? []).filter((p) => p.targets).map((p) => [p.source, p.targets]))
+        ))
   );
   useDirty('salvadas-maintainerr', mntDirty);
 
@@ -192,7 +204,12 @@ export default function Salvadas() {
     setSavingMnt(true);
     setMntResult(null);
     try {
-      const pairs = Object.entries(mntPairsMap).map(([source, target]) => ({ source, target }));
+      const sources = new Set([...Object.keys(mntPairsMap), ...Object.keys(mntPeriodTargetsMap)]);
+      const pairs = [...sources].map((source) => ({
+        source,
+        ...(mntPairsMap[source] ? { target: mntPairsMap[source] } : {}),
+        ...(mntPeriodTargetsMap[source] ? { targets: mntPeriodTargetsMap[source] } : {}),
+      }));
       const m = await api.updateMaintainerrSettings({
         url: mntUrl,
         botToken: mntToken,
@@ -238,6 +255,19 @@ export default function Salvadas() {
       else delete next[sourceTitle];
       return next;
     });
+  }
+
+  function setPeriodTarget(sourceTitle, days, targetTitle) {
+    setMntPeriodTargetsMap((prev) => {
+      const next = { ...prev, [sourceTitle]: { ...(prev[sourceTitle] ?? {}) } };
+      if (targetTitle) next[sourceTitle][days] = targetTitle;
+      else delete next[sourceTitle][days];
+      if (Object.keys(next[sourceTitle]).length === 0) delete next[sourceTitle];
+      return next;
+    });
+    // El destino de 7 días queda también como fallback para mensajes de
+    // Telegram creados antes de esta versión.
+    if (String(days) === '7') setPairTarget(sourceTitle, targetTitle);
   }
 
   function onLibraryGraceSaved(libraryId, salvadoGraceDays) {
@@ -456,8 +486,8 @@ export default function Salvadas() {
           <MiniSection title="Colecciones: qué va a dónde al salvar">
             <ol className="text-xs text-gray-500 mt-1 mb-3 list-decimal list-inside space-y-1">
               <li>En Maintainerr crea la colección de borrado (regla Radarr/Sonarr) como siempre.</li>
-              <li>Crea otra colección en la <strong>misma biblioteca y tipo</strong> para "salvados" (el nombre es libre; los días de "delete after days" de ESTA ya no importan — limitARR decide cuándo borrarla de verdad, ver "Plazo de gracia" arriba). Maintainerr no deja mezclar bibliotecas ni tipos al mover media entre colecciones, por eso solo aparecen como opción las compatibles.</li>
-              <li>Pulsa "Cargar colecciones de Maintainerr" y, para cada colección de borrado, elige a mano a cuál de salvados se mueve la película. Nada se adivina por nombre — si no eliges destino, esa colección se queda sin botón "Salvar".</li>
+              <li>Para películas crea un destino de salvados. Para temporadas crea tres destinos compatibles, con <strong>Delete after days</strong> en 7, 14 y 30; así la etiqueta de Plex coincide con el botón de Telegram.</li>
+              <li>Pulsa "Cargar colecciones de Maintainerr" y elige los destinos. En series aparecerá un selector para cada plazo. Si no eliges destino, esa colección se queda sin botón "Salvar".</li>
               <li>En Maintainerr añade el webhook de abajo como agente (Settings → Notifications → Webhook Agent), payload <code>{'{}'}</code>, evento "Media Added To Collection".</li>
             </ol>
             <button type="button" onClick={loadMaintainerrCollections} className="btn btn-ghost">Cargar colecciones de Maintainerr</button>
@@ -481,18 +511,40 @@ export default function Salvadas() {
                           <td className="pr-3 py-1 text-gray-300">{c.title}</td>
                           <td className="pr-3 py-1 text-gray-500">{c.type}, biblioteca {c.libraryId}</td>
                           <td className="py-1">
-                            <select
-                              value={mntPairsMap[c.title] ?? ''}
-                              onChange={(e) => setPairTarget(c.title, e.target.value)}
-                              className="input py-1"
-                            >
-                              <option value="">— no salvable —</option>
-                              {compatible.map((o) => (
-                                <option key={o.id} value={o.title}>
-                                  {o.title} ({o.deleteAfterDays ?? '—'} días)
-                                </option>
-                              ))}
-                            </select>
+                            {c.type === 'season' ? (
+                              <div className="grid gap-1 min-w-64">
+                                {[['7', '1 semana'], ['14', '2 semanas'], ['30', '1 mes']].map(([days, label]) => (
+                                  <label key={days} className="flex items-center gap-2">
+                                    <span className="w-20 text-gray-500">{label}</span>
+                                    <select
+                                      value={mntPeriodTargetsMap[c.title]?.[days] ?? ''}
+                                      onChange={(e) => setPeriodTarget(c.title, days, e.target.value)}
+                                      className="input py-1"
+                                    >
+                                      <option value="">— no salvable —</option>
+                                      {compatible.map((o) => (
+                                        <option key={o.id} value={o.title}>
+                                          {o.title} ({o.deleteAfterDays ?? '—'} días)
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                ))}
+                              </div>
+                            ) : (
+                              <select
+                                value={mntPairsMap[c.title] ?? ''}
+                                onChange={(e) => setPairTarget(c.title, e.target.value)}
+                                className="input py-1"
+                              >
+                                <option value="">— no salvable —</option>
+                                {compatible.map((o) => (
+                                  <option key={o.id} value={o.title}>
+                                    {o.title} ({o.deleteAfterDays ?? '—'} días)
+                                  </option>
+                                ))}
+                              </select>
+                            )}
                           </td>
                         </tr>
                       );

@@ -4,7 +4,7 @@ import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { db } from '../src/db.js';
 import { getWebhookSecret } from '../src/auth.js';
-import { buildTvGracePeriodButtons, getSalvadosByUser, getAllSalvados, getSalvadosHistory, pollMaintainerrCollections, processSalvados } from '../src/services/maintainerr.js';
+import { buildTvGracePeriodButtons, getPostponeDays, getSalvadosByUser, getAllSalvados, getSalvadosHistory, pollMaintainerrCollections, processSalvados } from '../src/services/maintainerr.js';
 
 // Tests del módulo Maintainerr con la DB en memoria y global.fetch mockeado
 // (estilo eliminarr.test.js: nada de red real, ni Maintainerr ni Telegram).
@@ -64,6 +64,15 @@ test('selector de plazo para series ofrece 1 semana, 2 semanas y 1 mes', () => {
       { text: '1 mes', callback_data: 'save:8501:2:5:30' },
     ]
   );
+});
+
+test('un segundo salvado prolonga el contador de Maintainerr hasta su nueva fecha', () => {
+  const now = Date.parse('2026-10-28T12:00:00Z');
+  // La colección de 7 días empezó hace 3: quedan 4. Un nuevo salvado de 7
+  // necesita añadir 3 días para volver a tener una semana completa.
+  assert.equal(getPostponeDays('2026-10-25 12:00:00', 7, 7, now), 3);
+  // Si el plazo actual ya llega más lejos, no debe acortarse ni aplazarse.
+  assert.equal(getPostponeDays('2026-10-27 12:00:00', 30, 7, now), 0);
 });
 
 function mockFetch() {
@@ -617,6 +626,25 @@ test('endpoints admin: /salvados y settings del módulo responden', async () => 
   assert.equal(settings.body.enabled, true);
   assert.match(settings.body.webhookUrl, /\/api\/webhook\/maintainerr\//);
   assert.equal(settings.body.bot_token_set, true);
+});
+
+test('settings Maintainerr conserva un destino distinto para 7, 14 y 30 días', async () => {
+  const previous = db.prepare("SELECT value FROM settings WHERE key = 'maintainerr_salvados_pairs'").get()?.value;
+  const pairs = [{
+    source: 'Series eliminadas en 7 dias',
+    target: 'Series salvadas · 1 semana',
+    targets: {
+      7: 'Series salvadas · 1 semana',
+      14: 'Series salvadas · 2 semanas',
+      30: 'Series salvadas · 1 mes',
+    },
+  }];
+  try {
+    const response = await agent.put('/api/maintainerr/settings').send({ pairs }).expect(200);
+    assert.deepEqual(response.body.pairs, pairs);
+  } finally {
+    upsertSetting.run('maintainerr_salvados_pairs', previous);
+  }
 });
 
 test('PUT /libraries/:id: guarda y limpia el override de plazo de gracia de salvados', async () => {
