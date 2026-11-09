@@ -953,7 +953,7 @@ test('refreshStaleAndNotify: registra vista una temporada no disponible aunque e
       const rows = Array.from({ length: 6 }, (_, index) => ({
         grandparent_title: 'Serie', parent_media_index: 2, media_index: index + 1,
         rating_key: String(9811 + index), parent_rating_key: '9810', grandparent_rating_key: '9800',
-        percent_complete: 100, date: 1790540627,
+        percent_complete: 100, date: Math.floor(Date.now() / 1000),
       }));
       return new Response(JSON.stringify({ response: { result: 'success', data: { data: rows } } }), { status: 200 });
     }

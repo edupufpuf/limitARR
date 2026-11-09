@@ -28,6 +28,8 @@ import {
   refreshQuotaCache,
   shouldVoidApprovedRequest,
   applyWaitlistAccounting,
+  watchesSince,
+  buildLatestWatchedByTitle,
 } from '../src/quota.js';
 import { setRawSetting, updateSettings } from '../src/settings.js';
 import { db } from '../src/db.js';
@@ -955,6 +957,112 @@ test('refreshQuotaCache: una temporada presente en Plex cuenta una sola vez aunq
     db.prepare('DELETE FROM decisions_log WHERE library_id = 9501').run();
     db.prepare('DELETE FROM quota_cache WHERE library_id = 9501').run();
     db.prepare('DELETE FROM libraries WHERE id = 9501').run();
+    setRawSetting('tautulli_url', '');
+    setRawSetting('tautulli_api_key', '');
+    setRawSetting('seerr_url', '');
+    setRawSetting('seerr_api_key', '');
+  }
+});
+
+// Caso Luca/Wicked (9 nov 2026): la película ya estuvo en la biblioteca, la vio
+// en ene 2025, se borró y la volvió a pedir. Ese visionado viejo no puede
+// liberar el cupo de la solicitud nueva.
+test('computeBalance: visionado anterior a la aprobación no libera una re-pedida', () => {
+  const approved = [{ media_title: 'Wicked', tmdb_id: 402431, created_at: '2026-11-09 08:12:21' }];
+  const watched = buildLatestWatchedByTitle([
+    { title: 'Wicked', percent: 93, date: Date.parse('2025-01-12T14:28:38Z') },
+  ]);
+  const r = computeBalance(2, approved, watched);
+  assert.equal(r.outstanding, 1);
+  assert.equal(r.pendingItems.length, 1);
+});
+
+test('computeBalance: visionado posterior a la aprobación sí libera', () => {
+  const approved = [{ media_title: 'Wicked', tmdb_id: 402431, created_at: '2026-11-09 08:12:21' }];
+  const watched = buildLatestWatchedByTitle([
+    { title: 'Wicked', percent: 93, date: Date.parse('2025-01-12T14:28:38Z') },
+    { title: 'Wicked', percent: 90, date: Date.parse('2026-11-09T20:00:00Z') },
+  ]);
+  assert.equal(computeBalance(2, approved, watched).outstanding, 0);
+});
+
+test('computeBalance: aprobación vieja vista + re-pedida nueva sin ver → solo cuenta la nueva', () => {
+  const approved = [
+    { media_title: 'Wicked', tmdb_id: 402431, created_at: '2025-01-10 10:00:00' },
+    { media_title: 'Wicked', tmdb_id: 402431, created_at: '2026-11-09 08:12:21', request_id: 148 },
+  ];
+  const watched = buildLatestWatchedByTitle([
+    { title: 'Wicked', percent: 93, date: Date.parse('2025-01-12T14:28:38Z') },
+  ]);
+  const r = computeBalance(2, approved, watched);
+  assert.equal(r.outstanding, 1);
+  assert.equal(r.pendingItems[0].requestId, 148);
+});
+
+test('computeBalance: visionado sin fecha sigue liberando (comportamiento previo)', () => {
+  const approved = [{ media_title: 'Matrix', tmdb_id: 603, created_at: '2026-11-09 08:00:00' }];
+  const watched = buildLatestWatchedByTitle([{ title: 'Matrix', percent: 100, date: null }]);
+  assert.equal(computeBalance(1, approved, watched).outstanding, 0);
+});
+
+test('watchesSince: temporada re-pedida ignora episodios vistos antes de la aprobación', () => {
+  const since = Date.parse('2026-11-01T00:00:00Z');
+  const history = [
+    { ratingKey: 'e1', percent: 100, date: Date.parse('2025-03-01T00:00:00Z'), showTitle: 'Silo', seasonNumber: 1, episodeNumber: 1 },
+    { ratingKey: 'e2', percent: 100, date: Date.parse('2026-11-02T00:00:00Z'), showTitle: 'Silo', seasonNumber: 1, episodeNumber: 2 },
+    { ratingKey: 'e3', percent: 100, date: null, showTitle: 'Silo', seasonNumber: 1, episodeNumber: 3 },
+  ];
+  const index = buildWatchedEpisodeIndex(watchesSince(history, since));
+  assert.deepEqual([...index.ratingKeys].sort(), ['e2', 'e3']);
+  assert.equal(watchesSince(history, null).length, 3);
+});
+
+test('refreshQuotaCache: película re-pedida tras borrarse no se libera con el visionado anterior', async () => {
+  updateSettings({
+    tautulli_url: 'http://tautulli.test',
+    tautulli_api_key: 'k',
+    seerr_url: 'http://seerr.test',
+    seerr_api_key: 'k',
+  });
+  db.prepare(`
+    INSERT INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (9520, 'Pelis', 'movie', 'standard', 1, 2)
+  `).run();
+  db.prepare(`
+    INSERT INTO decisions_log (request_id, user_id, library_id, media_title, media_type, tmdb_id, decision, poster_url, created_at)
+    VALUES (8148, 9620, 9520, 'Wicked', 'movie', 402431, 'approved', 'https://img/w.jpg', datetime('now', '-3 hours'))
+  `).run();
+
+  const originalFetch = global.fetch;
+  const oldWatch = Math.floor(Date.parse('2025-01-12T14:28:38Z') / 1000);
+  global.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes('cmd=get_history')) {
+      return new Response(JSON.stringify({ response: { result: 'success', data: { data: [
+        { full_title: 'Wicked', percent_complete: 93, date: oldWatch },
+      ] } } }), { status: 200 });
+    }
+    if (url === 'http://seerr.test/api/v1/movie/402431') {
+      return new Response(JSON.stringify({ title: 'Wicked', mediaInfo: { status: 5 } }), { status: 200 });
+    }
+    if (url.startsWith('http://seerr.test')) {
+      return new Response(JSON.stringify({ results: [] }), { status: 200 });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const result = await refreshQuotaCache(9620, 9520);
+    assert.equal(result.outstanding, 1);
+    assert.equal(result.pendingItems.length, 1);
+    assert.equal(result.pendingItems[0].title, 'Wicked');
+    assert.equal(result.pendingItems[0].watchedPercent, 0);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM decisions_log WHERE library_id = 9520').run();
+    db.prepare('DELETE FROM quota_cache WHERE library_id = 9520').run();
+    db.prepare('DELETE FROM libraries WHERE id = 9520').run();
+    db.prepare('DELETE FROM library_entries WHERE tmdb_id = 402431').run();
     setRawSetting('tautulli_url', '');
     setRawSetting('tautulli_api_key', '');
     setRawSetting('seerr_url', '');

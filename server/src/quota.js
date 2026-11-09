@@ -379,6 +379,34 @@ function rowTimeMs(row) {
   return Date.parse(row.created_at.replace(' ', 'T') + 'Z');
 }
 
+// Caso Luca/Wicked (9 nov 2026): una película o temporada que ya estuvo en la
+// biblioteca, se borró y se vuelve a pedir trae en Tautulli el visionado de
+// la vez anterior — y ese visionado viejo liberaba al instante el cupo de la
+// solicitud nueva. Solo cuenta lo visto desde la aprobación de esa fila.
+// Sesiones sin fecha se conservan (no se puede saber, comportamiento previo).
+function approvalSinceMs(row) {
+  return row?.created_at ? rowTimeMs(row) : null;
+}
+
+export function watchesSince(history, sinceMs) {
+  if (sinceMs == null || !Number.isFinite(sinceMs)) return history;
+  return history.filter((h) => h.date == null || h.date >= sinceMs);
+}
+
+// Por título normalizado, la fecha del visionado más reciente que cruzó el
+// umbral (Infinity si Tautulli no dio fecha). computeBalance la compara con
+// la aprobación de cada fila.
+export function buildLatestWatchedByTitle(history) {
+  const latest = new Map();
+  for (const h of history) {
+    if (h.percent < WATCHED_THRESHOLD) continue;
+    const key = normalize(h.title);
+    const date = h.date ?? Infinity;
+    latest.set(key, Math.max(latest.get(key) ?? -Infinity, date));
+  }
+  return latest;
+}
+
 // Issue #10: caducidad. Pasados expiryDays sin ver un pendiente, deja de contar
 // y sale de la lista (el cupo se libera solo). 0 = sin caducidad; NULL hereda.
 const DEFAULT_EXPIRY_DAYS = 30;
@@ -508,7 +536,18 @@ export function resolveLimit(overrides, defaultLimit) {
 // títulos vistos, decide cuántas están pendientes y cuál es el saldo. Nunca
 // negativo: por debajo de 0 se queda en 0 (el bloqueo ya lo gestiona balance < 1).
 export function computeBalance(limit, approvedRows, watchedTitles, unavailableTmdbIds = new Set(), percentByTitle = new Map(), expiryDays = null, availability = null) {
-  const pending = approvedRows.filter((r) => !watchedTitles.has(normalize(r.media_title)));
+  // watchedTitles: Set de títulos vistos (sin fechas, legado/tests) o Map
+  // título → último visionado (ver buildLatestWatchedByTitle), que solo cuenta
+  // si es posterior a la aprobación de la fila.
+  const isWatched = (r) => {
+    const key = normalize(r.media_title);
+    if (!(watchedTitles instanceof Map)) return watchedTitles.has(key);
+    const latest = watchedTitles.get(key);
+    if (latest == null) return false;
+    const since = approvalSinceMs(r);
+    return since == null || latest >= since;
+  };
+  const pending = approvedRows.filter((r) => !isWatched(r));
   // Issue #1: las que aún no están disponibles en Plex (según Seerr: faltante,
   // sin estrenar o no encontrada) no restan cupo, pero sí se listan como
   // pendientes (con marca) para que se vea que la solicitud existe y aún no cuenta.
@@ -704,7 +743,16 @@ function dedupeTvApprovalRows(rows) {
 async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatchedPercent = DEFAULT_SEASON_WATCHED_PERCENT, expiryDays = null) {
   const uniqueApprovedRows = dedupeTvApprovalRows(approvedRows);
   await hydrateMissingPosters(uniqueApprovedRows);
-  const watchedIndex = buildWatchedEpisodeIndex(watchedEpisodes);
+  // Índice de vistos por fecha de aprobación (ver watchesSince): una temporada
+  // re-pedida no se libera con el visionado de la vez anterior.
+  const watchedIndexBySince = new Map();
+  const watchedIndexFor = (row) => {
+    const since = approvalSinceMs(row);
+    if (!watchedIndexBySince.has(since)) {
+      watchedIndexBySince.set(since, buildWatchedEpisodeIndex(watchesSince(watchedEpisodes, since)));
+    }
+    return watchedIndexBySince.get(since);
+  };
 
   const pending = [];
   const showDetailsCache = new Map();
@@ -743,7 +791,7 @@ async function computeTvBalance(limit, approvedRows, watchedEpisodes, seasonWatc
     }
     const episodes = seasonEpisodesCache.get(cacheKey);
     const state = seasonWatchState(
-      watchedIndex,
+      watchedIndexFor(row),
       episodes,
       {
         showTitle: row.media_title.replace(/ - Temporada \d+$/, ''),
@@ -892,13 +940,19 @@ export async function getBalance(userId, libraryId) {
   for (const memberId of identity.watchMemberIds ?? identity.memberIds) {
     history.push(...(await getUserMovieHistory(memberId, libraryId)));
   }
-  const watchedTitles = new Set(
-    history.filter((h) => h.percent >= WATCHED_THRESHOLD).map((h) => normalize(h.title))
-  );
-  // Issue #7: mayor % alcanzado por título (puede haber varias sesiones parciales).
+  const watchedTitles = buildLatestWatchedByTitle(history);
+  // Issue #7: mayor % alcanzado por título (puede haber varias sesiones parciales),
+  // solo desde la aprobación más reciente de ese título (re-pedidas).
+  const latestApprovalByTitle = new Map();
+  for (const r of approved) {
+    const key = normalize(r.media_title);
+    const since = approvalSinceMs(r) ?? -Infinity;
+    latestApprovalByTitle.set(key, Math.max(latestApprovalByTitle.get(key) ?? -Infinity, since));
+  }
   const percentByTitle = new Map();
   for (const h of history) {
     const key = normalize(h.title);
+    if (h.date != null && h.date < (latestApprovalByTitle.get(key) ?? -Infinity)) continue;
     percentByTitle.set(key, Math.max(percentByTitle.get(key) ?? 0, h.percent));
   }
   await hydrateMissingPosters(approved);
@@ -1718,7 +1772,7 @@ export async function importSeerrHistory() {
 }
 
 const getUnresolvedApproved = db.prepare(`
-  SELECT id, request_id, user_id, username, library_id, media_title, media_type, tmdb_id, season_number, poster_url
+  SELECT id, request_id, user_id, username, library_id, media_title, media_type, tmdb_id, season_number, poster_url, created_at
   FROM decisions_log
   WHERE decision = 'approved' AND voided_at IS NULL AND user_id IS NOT NULL AND library_id IS NOT NULL
 `);
@@ -1767,17 +1821,18 @@ export async function backfillWatchedHistory() {
     const movieRows = groupRows.filter((r) => r.media_type !== 'tv');
     if (movieRows.length > 0) {
       const history = await getUserMovieHistory(userId, libraryId, 2000);
-      // Primer visionado que cruzó el umbral, no el último (varias
-      // reproducciones sueltas no cambian cuándo "se vio" de verdad).
-      const firstWatchedByTitle = new Map();
-      for (const h of history) {
-        if (h.percent < WATCHED_THRESHOLD || h.date == null) continue;
-        const titleKey = normalize(h.title);
-        const prev = firstWatchedByTitle.get(titleKey);
-        if (prev == null || h.date < prev) firstWatchedByTitle.set(titleKey, h.date);
-      }
       for (const row of movieRows) {
-        const date = firstWatchedByTitle.get(normalize(row.media_title));
+        // Primer visionado que cruzó el umbral DESDE la aprobación (una
+        // re-pedida no hereda el de la vez anterior, ver watchesSince), no el
+        // último (varias reproducciones sueltas no cambian cuándo "se vio").
+        const titleKey = normalize(row.media_title);
+        const since = approvalSinceMs(row) ?? -Infinity;
+        let date = null;
+        for (const h of history) {
+          if (h.percent < WATCHED_THRESHOLD || h.date == null || h.date < since) continue;
+          if (normalize(h.title) !== titleKey) continue;
+          if (date == null || h.date < date) date = h.date;
+        }
         if (date == null) continue;
         insertBackfilledWatched.run({
           requestId: row.request_id,
@@ -1798,11 +1853,12 @@ export async function backfillWatchedHistory() {
     const tvRows = groupRows.filter((r) => r.media_type === 'tv' && r.tmdb_id && r.season_number);
     if (tvRows.length > 0) {
       const history = await getUserEpisodeHistory(userId, libraryId, 5000);
-      const watchedIndex = buildWatchedEpisodeIndex(history);
-      const dateIndex = buildWatchedEpisodeDateIndex(history);
       const seasonWatchedPercent = getSeasonWatchedPercent();
 
       for (const row of tvRows) {
+        const rowHistory = watchesSince(history, approvalSinceMs(row));
+        const watchedIndex = buildWatchedEpisodeIndex(rowHistory);
+        const dateIndex = buildWatchedEpisodeDateIndex(rowHistory);
         const detailsCacheKey = `${row.tmdb_id}:${row.season_number}`;
         if (!showDetailsCache.has(detailsCacheKey)) {
           showDetailsCache.set(detailsCacheKey, await getMediaDetails('tv', row.tmdb_id, row.season_number));
