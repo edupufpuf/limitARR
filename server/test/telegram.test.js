@@ -52,7 +52,7 @@ test('/pendientes: con chat vinculado, lista lo pendiente de todas sus bibliotec
   `).run();
   db.prepare(`
     INSERT INTO decisions_log (request_id, user_id, username, library_id, media_title, media_type, decision, created_at)
-    VALUES (-9601, 960, 'edu', 9600, 'Pendiente sin carátula', 'movie', 'approved', '2026-09-20 10:00:00')
+    VALUES (-9601, 960, 'edu', 9600, 'Pendiente sin carátula', 'movie', 'approved', datetime('now', '-5 days'))
   `).run();
 
   const sent = [];
@@ -74,7 +74,7 @@ test('/pendientes: con chat vinculado, lista lo pendiente de todas sus bibliotec
     const withCaption = sent.find((s) => /Sin carátula/.test(s.body.text || ''));
     assert.ok(withCaption, 'debe listar la pendiente sin carátula');
     assert.match(withCaption.body.text, /Pendiente sin carátula \(Películas\)/);
-    assert.match(withCaption.body.text, /Pedido: 20\/09\/2026 \(hace \d+ días\)/);
+    assert.match(withCaption.body.text, /Pedido: \d{2}\/\d{2}\/\d{4} \(hace 5 días\)/);
   } finally {
     global.fetch = originalFetch;
     db.prepare('DELETE FROM decisions_log WHERE library_id = 9600').run();

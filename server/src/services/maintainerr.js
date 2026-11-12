@@ -1108,13 +1108,13 @@ export function getSalvadosHistory(days = 30) {
 // se borra igual. Todo esto vive en processSalvados, en el mismo ciclo de
 // sondeo que pollMaintainerrCollections.
 
-const WATCH_THRESHOLD_PERCENT = 85; // mismo criterio que el resto del proyecto (ver DEFAULT_SEASON_WATCHED_PERCENT en quota.js)
+const WATCH_THRESHOLD_PERCENT = 90;
 const DEFAULT_SEASON_WATCHED_PERCENT = 85;
 const POST_WATCH_GRACE_MS = 24 * 60 * 60 * 1000;
 
 // Marca watched_at en las filas de un ítem cuyo salvador (vinculado a un
 // usuario de Tautulli) lo haya visto DESPUÉS de salvarlo. En películas basta
-// una reproducción al 85 %. En series se cuentan episodios distintos y se usa
+// una reproducción al 90 %. En series se cuentan episodios distintos y se usa
 // el mismo porcentaje de temporada configurable que libera cupo (85 % por
 // defecto); watched_at es el instante en que se alcanzó ese porcentaje.
 async function markWatchedRows(mediaServerId, rows) {

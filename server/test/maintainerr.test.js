@@ -850,6 +850,49 @@ test('processSalvados: detecta el visionado vía Tautulli (después del salvado)
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM salvados WHERE media_server_id = 'ps-3' AND resolved_at IS NULL").get().n, 0);
 });
 
+test('processSalvados: una película salvada exige el 90 % de visionado', async () => {
+  db.exec("DELETE FROM salvados; DELETE FROM maintainerr_candidates; DELETE FROM salvado_messages;");
+  upsertSetting.run('tautulli_url', 'http://tautulli.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
+  insertCandidateRow.run('ps-90', new Date(Date.now() - 20 * 86_400_000).toISOString().slice(0, 19).replace('T', ' '), 7, 1);
+  db.prepare(`
+    INSERT INTO salvados (media_server_id, tmdb_id, title, telegram_user_id, telegram_name, user_id, library_id, saved_at, expires_at, watched_at)
+    VALUES ('ps-90', NULL, 'Umbral 90', '111', 'David', 501, NULL, datetime('now', '-2 days'), datetime('now', '+3 days'), NULL)
+  `).run();
+
+  let percentComplete = 89;
+  const watchedAtSec = Math.floor((Date.now() - 2 * 86_400_000) / 1000);
+  const { fetchImpl, calls } = targetCollectionsFetch('ps-90', {
+    tautulli: async (u) => {
+      const cmd = new URL(u).searchParams.get('cmd');
+      if (cmd === 'get_history') {
+        return new Response(
+          JSON.stringify({ response: { result: 'success', data: { data: [{ user_id: 501, date: watchedAtSec, percent_complete: percentComplete }] } } }),
+          { status: 200 }
+        );
+      }
+      throw new Error(`unexpected tautulli cmd ${cmd}`);
+    },
+  });
+  global.fetch = fetchImpl;
+
+  try {
+    await processSalvados();
+    assert.equal(
+      db.prepare("SELECT watched_at FROM salvados WHERE media_server_id = 'ps-90'").get().watched_at,
+      null,
+      '89 % no debe contar como vista'
+    );
+    assert.equal(calls.some((c) => c.url.includes('/media/handle')), false);
+
+    percentComplete = 90;
+    await processSalvados();
+    assert.ok(calls.some((c) => c.url.includes('/media/handle')), '90 % debe activar el borrado cuando ya pasaron 24h');
+  } finally {
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key')").run();
+  }
+});
+
 test('processSalvados: una temporada se borra 24h después de que todos los salvadores alcancen el umbral', async () => {
   db.exec("DELETE FROM salvados; DELETE FROM maintainerr_candidates; DELETE FROM salvado_messages; DELETE FROM libraries WHERE id = 75;");
   upsertSetting.run('tautulli_url', 'http://tautulli.test');
