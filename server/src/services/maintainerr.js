@@ -1113,10 +1113,11 @@ const DEFAULT_SEASON_WATCHED_PERCENT = 85;
 const POST_WATCH_GRACE_MS = 24 * 60 * 60 * 1000;
 
 // Marca watched_at en las filas de un ítem cuyo salvador (vinculado a un
-// usuario de Tautulli) lo haya visto DESPUÉS de salvarlo. En películas basta
-// una reproducción al 90 %. En series se cuentan episodios distintos y se usa
-// el mismo porcentaje de temporada configurable que libera cupo (85 % por
-// defecto); watched_at es el instante en que se alcanzó ese porcentaje.
+// usuario de Tautulli) lo haya visto. En películas se exige una reproducción
+// posterior al salvado y al 90 %. En series se cuentan todos los episodios
+// vistos por el usuario, antes y después del salvado, y se usa el porcentaje
+// de temporada configurable que libera cupo (85 % por defecto); watched_at es
+// el instante en que se alcanzó ese porcentaje.
 async function markWatchedRows(mediaServerId, rows) {
   const unresolved = rows.filter((r) => r.user_id != null && r.watched_at == null);
   if (unresolved.length === 0) return;
@@ -1154,14 +1155,12 @@ async function markWatchedRows(mediaServerId, rows) {
     const requiredEpisodes = Math.ceil(episodeNumbers.size * seasonWatchedPercent / 100);
 
     for (const row of unresolved) {
-      const savedAtMs = sqliteTextToMs(row.saved_at);
       const firstWatchByEpisode = new Map();
       for (const play of history) {
         if (
           play.userId !== row.user_id ||
           play.percent < WATCH_THRESHOLD_PERCENT ||
           play.watchedAt == null ||
-          play.watchedAt < savedAtMs ||
           !episodeNumbers.has(play.episodeNumber)
         ) continue;
         const previous = firstWatchByEpisode.get(play.episodeNumber);

@@ -949,6 +949,52 @@ test('processSalvados: una temporada se borra 24h después de que todos los salv
   }
 });
 
+test('processSalvados: una temporada suma episodios vistos antes y después de salvarla', async () => {
+  db.exec("DELETE FROM salvados; DELETE FROM maintainerr_candidates; DELETE FROM salvado_messages; DELETE FROM libraries WHERE id = 77;");
+  upsertSetting.run('tautulli_url', 'http://tautulli.test');
+  upsertSetting.run('tautulli_api_key', 'test-key');
+  upsertSetting.run('tv_season_watched_percent', '100');
+  db.prepare("INSERT INTO libraries (id, name, section_type, enabled) VALUES (77, 'Series antes y después', 'show', 1)").run();
+  db.prepare(`
+    INSERT INTO salvados (media_server_id, tmdb_id, title, telegram_user_id, telegram_name, user_id, library_id, saved_at, expires_at, watched_at, grace_days)
+    VALUES ('ps-tv-mixed', NULL, 'El Castillo - Temporada 1', '111', 'Edu', 501, 77, datetime('now', '-2 days'), datetime('now', '+10 days'), NULL, 14)
+  `).run();
+
+  const beforeSaveSec = Math.floor((Date.now() - 3 * 86_400_000) / 1000);
+  const afterSaveSec = Math.floor((Date.now() - 36 * 60 * 60 * 1000) / 1000);
+  const historyRows = [
+    ...[1, 2].map((episode) => ({ user_id: 501, date: beforeSaveSec, percent_complete: 95, parent_media_index: 1, media_index: episode })),
+    ...[3, 4].map((episode) => ({ user_id: 501, date: afterSaveSec, percent_complete: 95, parent_media_index: 1, media_index: episode })),
+  ];
+  const { fetchImpl, calls } = targetCollectionsFetch('ps-tv-mixed', {
+    tautulli: async (u) => {
+      const cmd = new URL(u).searchParams.get('cmd');
+      if (cmd === 'get_history') {
+        return new Response(JSON.stringify({ response: { result: 'success', data: { data: historyRows } } }), { status: 200 });
+      }
+      if (cmd === 'get_metadata') {
+        return new Response(JSON.stringify({ response: { result: 'success', data: { media_type: 'season', parent_title: 'El Castillo', media_index: 1 } } }), { status: 200 });
+      }
+      if (cmd === 'get_children_metadata') {
+        return new Response(JSON.stringify({ response: { result: 'success', data: { children_list: [1, 2, 3, 4].map((episode) => ({ media_type: 'episode', rating_key: `mixed-${episode}`, media_index: episode, title: `Episodio ${episode}` })) } } }), { status: 200 });
+      }
+      throw new Error(`unexpected tautulli cmd ${cmd}`);
+    },
+  });
+  global.fetch = fetchImpl;
+
+  try {
+    await processSalvados();
+    assert.ok(calls.some((c) => c.url.includes('/media/handle')), 'debe sumar los cuatro episodios aunque dos sean anteriores al salvado');
+    const row = db.prepare("SELECT watched_at, resolved_at FROM salvados WHERE media_server_id = 'ps-tv-mixed'").get();
+    assert.ok(row.watched_at, 'la temporada debe quedar marcada como vista');
+    assert.ok(row.resolved_at, 'al haber pasado más de 24h desde que completó el umbral debe resolverse');
+  } finally {
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'tv_season_watched_percent')").run();
+    db.prepare('DELETE FROM libraries WHERE id = 77').run();
+  }
+});
+
 test('processSalvados: cierra la ventana de salvar una sola vez, sin borrar todavía', async () => {
   db.exec("DELETE FROM salvados; DELETE FROM maintainerr_candidates; DELETE FROM salvado_messages;");
   // Ventana (7 días) cerrada hace 3 días: notified_at hace 10 días. El plazo
