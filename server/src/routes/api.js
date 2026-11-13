@@ -7,7 +7,15 @@ import { config } from '../config.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { needsSetup, setPassword, checkPassword, getWebhookSecret } from '../auth.js';
-import { getUsers, getLibraries, searchMedia, getActiveSessions, terminateSession } from '../services/tautulli.js';
+import {
+  getUsers,
+  getLibraries,
+  searchMedia,
+  getLibraryMedia,
+  getMediaChildren,
+  getActiveSessions,
+  terminateSession,
+} from '../services/tautulli.js';
 import {
   listPendingRequests,
   getSeerrUsers,
@@ -35,7 +43,14 @@ import { runPollCycle } from '../scheduler.js';
 import { isSessionGuardEnabled, setSessionGuardEnabled } from '../sessionGuard.js';
 import { isGlobalPauseEnabled, setGlobalPauseEnabled } from '../pause.js';
 import { getVersionInfo } from '../services/version.js';
-import { createPlexPin, claimPlexPin, getPlexAccount, testPlexServer } from '../services/plex.js';
+import {
+  createPlexPin,
+  claimPlexPin,
+  getPlexAccount,
+  getPlexLibraryMedia,
+  getPlexMediaChildren,
+  testPlexServer,
+} from '../services/plex.js';
 import { testRadarrServer, getRadarrMovieUrl } from '../services/radarr.js';
 import { testSonarrServer, getSonarrSeriesUrl } from '../services/sonarr.js';
 import {
@@ -1158,41 +1173,68 @@ function showTitleFromHistory(item) {
     .trim();
 }
 
+function libraryMediaMatchesHistory(media, item) {
+  const tmdbGuid = item.tmdbId != null ? `tmdb://${item.tmdbId}` : null;
+  return Boolean(tmdbGuid && media.guids?.includes(tmdbGuid))
+    || normalize(media.title) === normalize(showTitleFromHistory(item));
+}
+
 async function keepRequestedContentStillInPlex(history) {
-  const representatives = new Map();
+  const settings = getSettings();
+  const usePlex = Boolean(settings.plex_url && settings.plex_token);
+  const readLibrary = usePlex ? getPlexLibraryMedia : getLibraryMedia;
+  const readChildren = usePlex ? getPlexMediaChildren : getMediaChildren;
+  const libraryIds = [...new Set(
+    history
+      .filter((item) => item.libraryId != null)
+      .map((item) => Number(item.libraryId))
+      .filter(Number.isFinite)
+  )];
+  const inventoryResults = await Promise.allSettled(
+    libraryIds.map(async (libraryId) => [libraryId, await readLibrary(libraryId)])
+  );
+  const inventories = new Map(
+    inventoryResults
+      .filter((result) => result.status === 'fulfilled')
+      .map((result) => result.value)
+  );
+
+  const shows = new Map();
   for (const item of history) {
-    const key = historyContentKey(item);
-    if (!representatives.has(key)) representatives.set(key, item);
+    if (item.mediaType !== 'tv') continue;
+    const candidates = item.libraryId != null
+      ? inventories.get(Number(item.libraryId)) || []
+      : [...inventories.values()].flat();
+    for (const media of candidates) {
+      if (media.mediaType === 'show' && libraryMediaMatchesHistory(media, item)) {
+        shows.set(media.ratingKey, media);
+      }
+    }
   }
 
-  const present = new Map();
-  const entries = [...representatives.entries()];
-  // Tautulli es local, pero una biblioteca grande puede contener cientos de
-  // solicitudes históricas. Se consulta en grupos pequeños para no lanzarle
-  // todas las búsquedas simultáneamente.
-  for (let index = 0; index < entries.length; index += 6) {
-    const chunk = entries.slice(index, index + 6);
-    const results = await Promise.all(chunk.map(async ([key, item]) => {
-      const searchTitle = showTitleFromHistory(item);
-      const { movies, seasons } = await searchMedia(searchTitle);
-      const tmdbGuid = item.tmdbId != null ? `tmdb://${item.tmdbId}` : null;
-      const wantedTitle = normalize(searchTitle);
-      const found = item.mediaType === 'tv'
-        ? seasons.some((season) =>
-          Number(season.seasonNumber) === Number(item.seasonNumber)
-          && ((tmdbGuid && season.guids.includes(tmdbGuid)) || normalize(season.parentTitle) === wantedTitle)
-        )
-        : movies.some((movie) =>
-          (tmdbGuid && movie.guids.includes(tmdbGuid)) || normalize(movie.title) === wantedTitle
-        );
-      return [key, found];
-    }));
-    for (const [key, found] of results) present.set(key, found);
-  }
+  const seasonResults = await Promise.allSettled(
+    [...shows.keys()].map(async (ratingKey) => [ratingKey, await readChildren(ratingKey)])
+  );
+  const seasonsByShow = new Map(
+    seasonResults
+      .filter((result) => result.status === 'fulfilled')
+      .map((result) => result.value)
+  );
 
   return history.filter((item) => {
-    const key = historyContentKey(item);
-    return present.get(key) === true;
+    const candidates = item.libraryId != null
+      ? inventories.get(Number(item.libraryId)) || []
+      : [...inventories.values()].flat();
+    if (item.mediaType !== 'tv') {
+      return candidates.some((media) => media.mediaType === 'movie' && libraryMediaMatchesHistory(media, item));
+    }
+    return candidates.some((media) =>
+      media.mediaType === 'show'
+      && libraryMediaMatchesHistory(media, item)
+      && (seasonsByShow.get(media.ratingKey) || []).some((season) =>
+        season.mediaType === 'season' && Number(season.seasonNumber) === Number(item.seasonNumber)
+      )
+    );
   });
 }
 

@@ -18,6 +18,23 @@ async function call(cmd, params = {}) {
   return json.response.data;
 }
 
+const LIBRARY_MEDIA_CACHE_MS = 5 * 60 * 1000;
+const libraryMediaCache = new Map();
+const childrenMetadataCache = new Map();
+
+function cacheKey(prefix, id) {
+  const { tautulli_url: baseUrl } = getSettings();
+  return `${prefix}:${baseUrl || ''}:${id}`;
+}
+
+async function cached(cache, key, load) {
+  const current = cache.get(key);
+  if (current && current.expiresAt > Date.now()) return current.value;
+  const value = await load();
+  cache.set(key, { value, expiresAt: Date.now() + LIBRARY_MEDIA_CACHE_MS });
+  return value;
+}
+
 export async function getMovieLibraries() {
   const data = await call('get_library_names');
   return data
@@ -63,6 +80,36 @@ export async function searchMedia(query) {
     shows: (resultsList.show || []).map(mapItem),
     seasons: (resultsList.season || []).map(mapItem),
   };
+}
+
+// Inventario completo de una biblioteca. Es mucho más eficiente que ejecutar
+// `search` una vez por cada solicitud histórica y permite que la pantalla de
+// antigüedad haga una sola lectura por biblioteca.
+export async function getLibraryMedia(sectionId) {
+  const key = cacheKey('library', sectionId);
+  return cached(libraryMediaCache, key, async () => {
+    const data = await call('get_library_media_info', { section_id: sectionId, length: 10000 });
+    return (data.data || []).map((item) => ({
+      ratingKey: String(item.rating_key),
+      title: item.title,
+      mediaType: item.media_type,
+    }));
+  });
+}
+
+export async function getMediaChildren(ratingKey) {
+  const key = cacheKey('children', ratingKey);
+  return cached(childrenMetadataCache, key, async () => {
+    const data = await call('get_children_metadata', { rating_key: ratingKey });
+    return (data.children_list || []).map((item) => ({
+      ratingKey: String(item.rating_key),
+      title: item.title,
+      mediaType: item.media_type,
+      seasonNumber: item.media_index !== undefined && item.media_index !== ''
+        ? Number(item.media_index)
+        : null,
+    }));
+  });
 }
 
 // Watch history for a user restricted to one movie library.

@@ -808,6 +808,8 @@ test('GET /quota/movie-history usa la petición más reciente si una película o
   `);
   upsertSetting.run('tautulli_url', 'http://tautulli-history.test');
   upsertSetting.run('tautulli_api_key', 'test-key');
+  upsertSetting.run('plex_url', 'http://plex-history.test');
+  upsertSetting.run('plex_token', 'plex-test-key');
   db.prepare(`
     INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
     VALUES (2991, 'Películas historial', 'movie', 'standard', 1, 3)
@@ -832,22 +834,25 @@ test('GET /quota/movie-history usa la petición más reciente si una película o
   insertSeason.run(99107, 'Serie antigua - Temporada 2', 2, '/season-2-new.jpg', '2026-04-02 10:00:00', null);
 
   const originalFetch = global.fetch;
+  const plexCalls = [];
   global.fetch = async (input) => {
     const url = new URL(String(input));
-    if (url.origin !== 'http://tautulli-history.test' || url.searchParams.get('cmd') !== 'search') {
+    if (url.origin !== 'http://plex-history.test') {
       throw new Error(`unexpected fetch ${url}`);
     }
-    const query = url.searchParams.get('query');
-    const plexMovies = query === 'Pendiente antigua'
-      ? [{ rating_key: '1', title: 'Pendiente antigua', guids: ['tmdb://99101'] }]
-      : query === 'Ya vista'
-        ? [{ rating_key: '2', title: 'Ya vista', guids: ['tmdb://99102'] }]
-        : [];
-    const plexSeasons = query === 'Serie antigua'
-      ? [{ rating_key: '3', title: 'Temporada 2', parent_title: 'Serie antigua', media_index: '2', parent_guids: ['tmdb://88001'] }]
-      : [];
+    plexCalls.push(url.pathname);
+    const metadata = url.pathname.startsWith('/library/sections/')
+      ? [
+        { ratingKey: '1', title: 'Pendiente antigua', type: 'movie' },
+        { ratingKey: '2', title: 'Ya vista', type: 'movie' },
+        { ratingKey: '3', title: 'Serie antigua', type: 'show' },
+      ]
+      : url.pathname === '/library/metadata/3/children'
+        ? [{ ratingKey: '31', title: 'Temporada 2', type: 'season', index: 2 }]
+        : null;
+    if (!metadata) throw new Error(`unexpected Plex path ${url.pathname}`);
     return new Response(JSON.stringify({
-      response: { result: 'success', data: { results_list: { movie: plexMovies, season: plexSeasons } } },
+      MediaContainer: { Metadata: metadata },
     }), { status: 200 });
   };
 
@@ -865,11 +870,13 @@ test('GET /quota/movie-history usa la petición más reciente si una película o
     assert.equal(ours[2].mediaType, 'tv');
     assert.equal(ours[2].seasonNumber, 2);
     assert.equal(ours[2].requestedAt, '2026-04-02 10:00:00');
+    assert.equal(plexCalls.filter((path) => path === '/library/metadata/3/children').length, 1);
+    assert.ok(plexCalls.some((path) => path.startsWith('/library/sections/')));
   } finally {
     global.fetch = originalFetch;
     db.prepare('DELETE FROM decisions_log WHERE request_id BETWEEN 99101 AND 99107').run();
     db.prepare('DELETE FROM libraries WHERE id = 2991').run();
-    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key')").run();
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'plex_url', 'plex_token')").run();
   }
 });
 

@@ -3,6 +3,9 @@ import { getRawSetting, setRawSetting, getSettings } from '../settings.js';
 
 const CLIENT_ID_KEY = 'plex_client_identifier';
 const PRODUCT = 'limitARR';
+const LIBRARY_CACHE_MS = 5 * 60 * 1000;
+const libraryCache = new Map();
+const childrenCache = new Map();
 
 function headers() {
   let clientId = getRawSetting(CLIENT_ID_KEY);
@@ -21,6 +24,50 @@ async function plexFetch(url, options = {}) {
   const res = await fetch(url, { ...options, headers: { ...headers(), ...options.headers } });
   if (!res.ok) throw new Error(`Plex HTTP ${res.status}`);
   return res.json();
+}
+
+function localPlexUrl(pathname) {
+  const { plex_url: baseUrl, plex_token: token } = getSettings();
+  if (!baseUrl || !token) throw new Error('Plex no configurado');
+  const url = new URL(pathname, `${baseUrl.replace(/\/$/, '')}/`);
+  url.searchParams.set('X-Plex-Token', token);
+  return url;
+}
+
+async function cached(cache, key, load) {
+  const current = cache.get(key);
+  if (current && current.expiresAt > Date.now()) return current.value;
+  const value = await load();
+  cache.set(key, { value, expiresAt: Date.now() + LIBRARY_CACHE_MS });
+  return value;
+}
+
+export async function getPlexLibraryMedia(sectionId) {
+  const { plex_url: baseUrl } = getSettings();
+  const key = `${baseUrl || ''}:${sectionId}`;
+  return cached(libraryCache, key, async () => {
+    const data = await plexFetch(localPlexUrl(`/library/sections/${sectionId}/all?includeGuids=1`));
+    return (data?.MediaContainer?.Metadata || []).map((item) => ({
+      ratingKey: String(item.ratingKey),
+      title: item.title,
+      mediaType: item.type,
+      guids: (item.Guid || []).map((guid) => guid.id),
+    }));
+  });
+}
+
+export async function getPlexMediaChildren(ratingKey) {
+  const { plex_url: baseUrl } = getSettings();
+  const key = `${baseUrl || ''}:${ratingKey}`;
+  return cached(childrenCache, key, async () => {
+    const data = await plexFetch(localPlexUrl(`/library/metadata/${ratingKey}/children`));
+    return (data?.MediaContainer?.Metadata || []).map((item) => ({
+      ratingKey: String(item.ratingKey),
+      title: item.title,
+      mediaType: item.type,
+      seasonNumber: item.index !== undefined && item.index !== '' ? Number(item.index) : null,
+    }));
+  });
 }
 
 export async function createPlexPin(forwardUrl) {
