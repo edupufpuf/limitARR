@@ -9,7 +9,7 @@ import {
   searchMedia,
 } from './services/tautulli.js';
 import {
-  getRequestStatus,
+  listExistingRequestIds,
   getSeerrUsers,
   getApprovedRequestsForUser,
   getMediaDetails,
@@ -145,11 +145,27 @@ const deleteReset = db.prepare('DELETE FROM quota_resets WHERE user_id = ? AND l
 // los anulaba a los pocos segundos de crearlos (caso Rocío/Euphoria, 21 jul
 // 2026: 3 intentos, los 3 anulados en <1 min por el scheduler).
 const getUnvoidedApproved = db.prepare(`
-  SELECT id, request_id, created_at FROM decisions_log
-  WHERE decision IN ('approved', 'approved_outside_limitarr') AND voided_at IS NULL
-    AND created_at > datetime('now', '-90 days') AND request_id > 0
+  SELECT DISTINCT approved.request_id
+  FROM decisions_log approved
+  WHERE approved.decision IN ('approved', 'approved_outside_limitarr')
+    AND approved.voided_at IS NULL
+    AND approved.created_at > datetime('now', '-90 days')
+    AND approved.request_id > 0
+    AND NOT EXISTS (
+      SELECT 1 FROM decisions_log resolved
+      WHERE resolved.request_id = approved.request_id
+        AND resolved.media_type = approved.media_type
+        AND COALESCE(resolved.season_number, -1) = COALESCE(approved.season_number, -1)
+        AND resolved.decision IN ('watched', 'expired', 'dismissed')
+    )
 `);
 const markVoided = db.prepare(`UPDATE decisions_log SET voided_at = datetime('now') WHERE id = ?`);
+const markRequestVoided = db.prepare(`
+  UPDATE decisions_log SET voided_at = datetime('now')
+  WHERE request_id = ?
+    AND decision IN ('approved', 'approved_outside_limitarr')
+    AND voided_at IS NULL
+`);
 const clearVoided = db.prepare(`UPDATE decisions_log SET voided_at = NULL WHERE id = ?`);
 // Registro de "quitar del cupo"/"resetear" en decisions_log, para que aparezcan
 // en la pestaña Registro y se puedan deshacer (issue de jesusgarrigues, 20 jul
@@ -1698,11 +1714,14 @@ export function shouldVoidApprovedRequest(status) {
 
 export async function reconcileVoidedRequests() {
   const rows = getUnvoidedApproved.all();
-
+  if (rows.length === 0) return 0;
+  const existingIds = await listExistingRequestIds();
+  let voided = 0;
   for (const row of rows) {
-    const status = await getRequestStatus(row.request_id);
-    if (shouldVoidApprovedRequest(status)) markVoided.run(row.id);
+    if (existingIds.has(Number(row.request_id))) continue;
+    voided += markRequestVoided.run(row.request_id).changes;
   }
+  return voided;
 }
 
 const getCachedUserIds = db.prepare('SELECT DISTINCT user_id FROM quota_cache WHERE user_id >= 0');

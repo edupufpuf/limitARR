@@ -59,6 +59,41 @@ async function listRequestsByMediaType(filter, mediaType, seerrUserId = null) {
   return results;
 }
 
+const EXISTING_REQUESTS_TTL_MS = 10 * 60 * 1000;
+let existingRequestsCache = { baseUrl: null, at: 0, ids: null };
+
+async function listRequestIdsByMediaType(mediaType) {
+  const ids = [];
+  let skip = 0;
+  for (;;) {
+    const data = await call(`/request?filter=all&mediaType=${mediaType}&take=100&skip=${skip}`);
+    for (const request of data.results || []) ids.push(Number(request.id));
+    skip += 100;
+    if (skip >= (data.pageInfo?.results || 0)) break;
+  }
+  return ids;
+}
+
+// Reconciliar cancelaciones no necesita descargar cada solicitud por separado.
+// Dos listados paginados cubren todo Seerr y se reutilizan durante diez minutos.
+export async function listExistingRequestIds() {
+  const { seerr_url: baseUrl } = getSettings();
+  if (
+    existingRequestsCache.ids
+    && existingRequestsCache.baseUrl === baseUrl
+    && Date.now() - existingRequestsCache.at < EXISTING_REQUESTS_TTL_MS
+  ) {
+    return new Set(existingRequestsCache.ids);
+  }
+  const [movies, shows] = await Promise.all([
+    listRequestIdsByMediaType('movie'),
+    listRequestIdsByMediaType('tv'),
+  ]);
+  const ids = [...new Set([...movies, ...shows])];
+  existingRequestsCache = { baseUrl, at: Date.now(), ids };
+  return new Set(ids);
+}
+
 async function listHistoricalRequestsByMediaType(mediaType, seerrUserId) {
   const results = [];
   let skip = 0;
@@ -97,8 +132,8 @@ export async function listPendingRequests() {
 // autoaprobar) pasa de "pedida" a "aprobada" al instante, sin pasar por la
 // cola de pendientes que vigila el resto de limitARR — ni cupo ni aviso.
 // Solo la primera página (sort=added, más nuevas primero): no hace falta
-// bajar todo el histórico cada ciclo, con las últimas ~50 sobra de sobra.
-async function listApprovedRequestsPage(mediaType, take = 50) {
+// bajar todo el histórico cada ciclo; 20 por tipo cubren holgadamente un minuto.
+async function listApprovedRequestsPage(mediaType, take = 20) {
   const data = await call(`/request?filter=approved&mediaType=${mediaType}&take=${take}&sort=added&skip=0`);
   return (data.results || [])
     .filter((r) => (mediaType === 'tv' ? r.type === 'tv' || r.media?.mediaType === 'tv' : r.type === 'movie' || r.media?.mediaType === 'movie'))

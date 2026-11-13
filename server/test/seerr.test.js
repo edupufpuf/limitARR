@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { getMovieAvailability, getShowDetails, getSonarrSeriesId } from '../src/services/seerr.js';
 import { getRadarrMovieUrl, getRadarrWaitState, searchRadarrMovie, setRadarrMovieMonitored } from '../src/services/radarr.js';
 import { getSonarrSeriesUrl, getSonarrWaitState, searchSonarrSeason, setSonarrSeasonMonitored } from '../src/services/sonarr.js';
+import { processDownloadWaitlist } from '../src/downloadWaitlist.js';
 import { updateSettings, setRawSetting } from '../src/settings.js';
+import { db } from '../src/db.js';
 
 updateSettings({ seerr_url: 'http://seerr.test', seerr_api_key: 'k' });
 
@@ -37,7 +39,8 @@ test('Radarr waitlist: pausa, detecta release aceptable y activa busqueda', asyn
     assert.equal(writes.at(-1).body.name, 'MoviesSearch');
   } finally {
     global.fetch = originalFetch;
-    updateSettings({ radarr_url: '', radarr_api_key: '' });
+    setRawSetting('radarr_url', '');
+    setRawSetting('radarr_api_key', '');
   }
 });
 
@@ -77,6 +80,42 @@ test('Sonarr waitlist: controla solo la temporada y lanza SeasonSearch', async (
   } finally {
     global.fetch = originalFetch;
     updateSettings({ sonarr_url: '', sonarr_api_key: '' });
+  }
+});
+
+test('waitlist: no consulta Radarr antes de next_check_at', async () => {
+  updateSettings({ radarr_url: 'http://radarr-wait.test', radarr_api_key: 'rk' });
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (9981, 'Películas espera', 'movie', 'standard', 1, 4)
+  `).run();
+  db.prepare(`
+    INSERT INTO decisions_log
+      (request_id, user_id, library_id, media_title, media_type, tmdb_id, decision)
+    VALUES (9981, 9981, 9981, 'Estreno futuro', 'movie', 9981, 'approved')
+  `).run();
+  db.prepare(`
+    INSERT INTO download_waitlist
+      (request_id, user_id, library_id, media_type, tmdb_id, season_number, state, next_check_at)
+    VALUES (9981, 9981, 9981, 'movie', 9981, -1, 'waiting', datetime('now', '+6 hours'))
+  `).run();
+
+  let fetches = 0;
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    fetches += 1;
+    throw new Error('no debe consultar Radarr todavía');
+  };
+  try {
+    await processDownloadWaitlist();
+    assert.equal(fetches, 0);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM download_waitlist WHERE request_id = 9981').run();
+    db.prepare('DELETE FROM decisions_log WHERE request_id = 9981').run();
+    db.prepare('DELETE FROM libraries WHERE id = 9981').run();
+    setRawSetting('radarr_url', '');
+    setRawSetting('radarr_api_key', '');
   }
 });
 

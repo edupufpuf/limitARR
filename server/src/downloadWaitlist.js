@@ -67,9 +67,26 @@ function activationExpired(row) {
   return Date.now() - Date.parse(`${row.activated_at}Z`) >= ACTIVATION_TIMEOUT_MINUTES * 60_000;
 }
 
-async function stateFor(row) {
-  if (row.media_type === 'movie') return getRadarrWaitState(row.tmdb_id);
-  return getSonarrWaitState(row.external_service_id, row.season_number);
+async function stateFor(row, options) {
+  if (row.media_type === 'movie') return getRadarrWaitState(row.tmdb_id, options);
+  return getSonarrWaitState(row.external_service_id, row.season_number, options);
+}
+
+async function finishDownloaded(row, state) {
+  if (!state.downloaded) return { downloaded: false, removed: false };
+  let visibleInPlex;
+  if (row.media_type === 'movie') {
+    const availability = (await getMovieAvailability([row.tmdb_id])).get(row.tmdb_id);
+    visibleInPlex = Number(availability?.status ?? 0) >= 4;
+  } else {
+    const details = await getMediaDetails('tv', row.tmdb_id, row.season_number);
+    visibleInPlex = Number(details.seasonStatuses?.[row.season_number] ?? 0) >= 4;
+  }
+  // Radarr/Sonarr puede haber importado antes de que Seerr/Plex lo vea.
+  if (!visibleInPlex) return { downloaded: true, removed: false };
+  deleteRow.run(row.id);
+  await refreshQuotaCache(row.user_id, row.library_id);
+  return { downloaded: true, removed: true };
 }
 
 async function hold(row) {
@@ -183,11 +200,12 @@ export async function reconcileApprovedWaitlist() {
 export async function processDownloadWaitlist() {
   const rows = listRows.all();
 
-  // Primero resuelve descargas terminadas y busquedas que no encontraron nada.
-  for (const row of rows) {
+  // Solo las descargas activadas necesitan vigilancia cada minuto. Las que aún
+  // esperan una release respetan next_check_at y se revisan en el segundo bucle.
+  for (const row of rows.filter((item) => item.state === 'activated')) {
     let state;
     try {
-      state = await stateFor(row);
+      state = await stateFor(row, { checkReleases: false });
     } catch (err) {
       console.error('[waitlist] no se pudo consultar el estado:', err.message);
       continue;
@@ -196,27 +214,10 @@ export async function processDownloadWaitlist() {
       setExternalId.run(state.externalServiceId, row.id);
       row.external_service_id = state.externalServiceId;
     }
-    if (state.downloaded) {
-      let visibleInPlex;
-      if (row.media_type === 'movie') {
-        const availability = (await getMovieAvailability([row.tmdb_id])).get(row.tmdb_id);
-        visibleInPlex = Number(availability?.status ?? 0) >= 4;
-      } else {
-        const details = await getMediaDetails('tv', row.tmdb_id, row.season_number);
-        visibleInPlex = Number(details.seasonStatuses?.[row.season_number] ?? 0) >= 4;
-      }
-      // Radarr/Sonarr puede haber importado el archivo unos minutos antes de
-      // que Seerr/Plex lo vea. Hasta entonces se conserva la reserva para no
-      // activar otro contenido y acabar sobrepasando el limite por ese desfase.
-      if (!visibleInPlex) continue;
-      deleteRow.run(row.id);
-      await refreshQuotaCache(row.user_id, row.library_id);
-      continue;
-    }
-    if (row.state === 'activated' && !state.downloading && activationExpired(row)) {
+    if ((await finishDownloaded(row, state)).downloaded) continue;
+    if (!state.downloading && activationExpired(row)) {
       try { await hold(row); } catch (err) { console.error('[waitlist] no se pudo volver a pausar:', err.message); }
       setWaiting.run(RETRY_HOURS, row.id);
-      row.state = 'waiting';
     }
   }
 
@@ -228,6 +229,11 @@ export async function processDownloadWaitlist() {
       state = await stateFor(row);
     } catch (err) {
       console.error('[waitlist] no se pudo buscar releases:', err.message);
+      continue;
+    }
+    const finished = await finishDownloaded(row, state);
+    if (finished.downloaded) {
+      if (!finished.removed) postponeMinutes.run(QUOTA_RECHECK_MINUTES, row.id);
       continue;
     }
     if (!state.releaseAvailable) {

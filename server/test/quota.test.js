@@ -27,6 +27,7 @@ import {
   deleteRoleOverride,
   refreshQuotaCache,
   shouldVoidApprovedRequest,
+  reconcileVoidedRequests,
   applyWaitlistAccounting,
   watchesSince,
   buildLatestWatchedByTitle,
@@ -88,6 +89,44 @@ test('reconciliación: solo se anula cuando Seerr confirma que ya no existe', ()
   assert.equal(shouldVoidApprovedRequest('gone'), true);
   assert.equal(shouldVoidApprovedRequest('available'), false);
   assert.equal(shouldVoidApprovedRequest('unknown'), false);
+});
+
+test('reconciliación: usa listados agrupados y omite contenido ya resuelto', async () => {
+  setRawSetting('seerr_url', 'http://seerr-reconcile.test');
+  setRawSetting('seerr_api_key', 'test-key');
+  const insert = db.prepare(`
+    INSERT INTO decisions_log
+      (request_id, user_id, media_title, media_type, decision, created_at)
+    VALUES (?, 99700, ?, 'movie', ?, datetime('now'))
+  `);
+  insert.run(99701, 'Sigue en Seerr', 'approved');
+  insert.run(99702, 'Ya no existe', 'approved');
+  insert.run(99703, 'Ya vista', 'approved');
+  insert.run(99703, 'Ya vista', 'watched');
+
+  const calls = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = new URL(String(input));
+    calls.push(url.pathname + url.search);
+    const mediaType = url.searchParams.get('mediaType');
+    const results = mediaType === 'movie' ? [{ id: 99701 }] : [];
+    return new Response(JSON.stringify({ results, pageInfo: { results: results.length } }), { status: 200 });
+  };
+
+  try {
+    const voided = await reconcileVoidedRequests();
+    assert.equal(voided, 1);
+    assert.equal(db.prepare('SELECT voided_at FROM decisions_log WHERE request_id = 99701').get().voided_at, null);
+    assert.ok(db.prepare('SELECT voided_at FROM decisions_log WHERE request_id = 99702').get().voided_at);
+    assert.equal(db.prepare("SELECT voided_at FROM decisions_log WHERE request_id = 99703 AND decision = 'approved'").get().voided_at, null);
+    assert.equal(calls.length, 2);
+    assert.ok(calls.every((url) => url.includes('filter=all') && !/\/request\/\d+/.test(url)));
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM decisions_log WHERE request_id BETWEEN 99701 AND 99703').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('seerr_url', 'seerr_api_key')").run();
+  }
 });
 
 test('computeBalance: sin aprobadas, saldo completo', () => {
