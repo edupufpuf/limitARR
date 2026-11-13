@@ -56,6 +56,7 @@ const STILL_UNAVAILABLE_HOURS = 12;
 const STILL_UNAVAILABLE_REPEAT_DAYS = 7;
 const STILL_UNAVAILABLE_CHECK_MS = 60 * 60 * 1000;
 const SEASON_QUEUE_CHECK_MS = 5 * 60 * 1000;
+const QUOTA_REFRESH_CHECK_MS = 10 * 60 * 1000;
 const getDueUnavailableApprovals = db.prepare(`
   SELECT dl.id, dl.request_id, dl.user_id, dl.username, dl.library_id, dl.media_title, dl.media_type,
          dl.tmdb_id, dl.season_number, dl.created_at, l.kind AS library_kind
@@ -1033,7 +1034,6 @@ export async function runPollCycle() {
   // Issue #5: detectar visionados sin esperar a un "recalcular todo" manual —
   // los pares recién refrescados arriba quedan excluidos por su computed_at.
   // Además avisa por Telegram del cupo liberado (si está activado).
-  await refreshStaleAndNotify();
   await processDownloadWaitlist();
   await runPeriodicSchedulerTasks();
   await enforceSingleSession();
@@ -1043,8 +1043,15 @@ export async function runPollCycle() {
 
 let lastSeasonQueueCheckAt = 0;
 let lastUnavailableCheckAt = 0;
+let lastQuotaRefreshCheckAt = 0;
 
 async function runPeriodicSchedulerTasks(now = Date.now()) {
+  // El historial de Tautulli puede pesar varios MB. Agrupar la comprobación
+  // evita que los usuarios escalonados provoquen una descarga grande cada minuto.
+  if (now - lastQuotaRefreshCheckAt >= QUOTA_REFRESH_CHECK_MS) {
+    await refreshStaleAndNotify();
+    lastQuotaRefreshCheckAt = now;
+  }
   if (now - lastSeasonQueueCheckAt >= SEASON_QUEUE_CHECK_MS) {
     await processSeasonQueue();
     lastSeasonQueueCheckAt = now;
