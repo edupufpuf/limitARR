@@ -132,6 +132,36 @@ test('notifyStillUnavailable: no avisa si ya está disponible en Plex', async ()
   }
 });
 
+test('notifyStillUnavailable: no vuelve a consultar contenido ya resuelto', async () => {
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (9702, 'Películas', 'movie', 'standard', 1, 4)
+  `).run();
+  db.prepare(`
+    INSERT INTO decisions_log
+      (request_id, user_id, username, library_id, media_title, media_type, tmdb_id, decision, created_at)
+    VALUES
+      (9803, 9802, 'jesus', 9702, 'Ya vista', 'movie', 555003, 'approved', datetime('now', '-13 hours')),
+      (9803, 9802, 'jesus', 9702, 'Ya vista', 'movie', 555003, 'watched', datetime('now', '-1 hour'))
+  `).run();
+
+  const originalFetch = global.fetch;
+  let fetches = 0;
+  global.fetch = async () => {
+    fetches += 1;
+    throw new Error('no debería consultar contenido resuelto');
+  };
+
+  try {
+    await notifyStillUnavailable();
+    assert.equal(fetches, 0);
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM decisions_log WHERE request_id = 9803').run();
+    db.prepare('DELETE FROM libraries WHERE id = 9702').run();
+  }
+});
+
 // Pedido de Edu (2 ago 2026): mismo usuario con 2 sesiones de Plex a la vez —
 // se corta la más nueva, se deja la que ya estaba viendo desde antes.
 

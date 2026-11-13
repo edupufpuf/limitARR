@@ -54,6 +54,8 @@ const getLastUsernameForUser = db.prepare(`
 // disponible y repetir el recordatorio como máximo una vez cada siete días.
 const STILL_UNAVAILABLE_HOURS = 12;
 const STILL_UNAVAILABLE_REPEAT_DAYS = 7;
+const STILL_UNAVAILABLE_CHECK_MS = 60 * 60 * 1000;
+const SEASON_QUEUE_CHECK_MS = 5 * 60 * 1000;
 const getDueUnavailableApprovals = db.prepare(`
   SELECT dl.id, dl.request_id, dl.user_id, dl.username, dl.library_id, dl.media_title, dl.media_type,
          dl.tmdb_id, dl.season_number, dl.created_at, l.kind AS library_kind
@@ -62,6 +64,12 @@ const getDueUnavailableApprovals = db.prepare(`
   WHERE dl.decision = 'approved' AND dl.voided_at IS NULL AND l.enabled = 1
     AND dl.tmdb_id IS NOT NULL AND dl.user_id IS NOT NULL
     AND dl.created_at <= datetime('now', '-' || ? || ' hours')
+    AND NOT EXISTS (
+      SELECT 1 FROM decisions_log resolved
+      WHERE resolved.request_id = dl.request_id AND resolved.media_type = dl.media_type
+        AND COALESCE(resolved.season_number, -1) = COALESCE(dl.season_number, -1)
+        AND resolved.decision IN ('watched', 'expired', 'dismissed')
+    )
     AND NOT EXISTS (
       SELECT 1 FROM decisions_log r
       WHERE r.request_id = dl.request_id AND r.media_type = dl.media_type
@@ -1027,11 +1035,24 @@ export async function runPollCycle() {
   // Además avisa por Telegram del cupo liberado (si está activado).
   await refreshStaleAndNotify();
   await processDownloadWaitlist();
-  await processSeasonQueue();
-  await notifyStillUnavailable();
+  await runPeriodicSchedulerTasks();
   await enforceSingleSession();
   await enforceBroadcast();
   await notifyBypassedApprovals();
+}
+
+let lastSeasonQueueCheckAt = 0;
+let lastUnavailableCheckAt = 0;
+
+async function runPeriodicSchedulerTasks(now = Date.now()) {
+  if (now - lastSeasonQueueCheckAt >= SEASON_QUEUE_CHECK_MS) {
+    await processSeasonQueue();
+    lastSeasonQueueCheckAt = now;
+  }
+  if (now - lastUnavailableCheckAt >= STILL_UNAVAILABLE_CHECK_MS) {
+    await notifyStillUnavailable();
+    lastUnavailableCheckAt = now;
+  }
 }
 
 function formatMediaTitle(mediaType, title, seasonNumber = null) {
