@@ -13,6 +13,7 @@ import { getBroadcastSettings, hasSeenBroadcast, markBroadcastSeen } from './ser
 import { isGlobalPauseEnabled } from './pause.js';
 import { getLimitarrUsers } from './services/users.js';
 import { enqueueApprovedDownload, processDownloadWaitlist, reconcileApprovedWaitlist } from './downloadWaitlist.js';
+import { retryFailedTautulliNotifications } from './services/tautulliNotificationRetry.js';
 
 const insertLog = db.prepare(`
   INSERT INTO decisions_log
@@ -57,6 +58,7 @@ const STILL_UNAVAILABLE_REPEAT_DAYS = 7;
 const STILL_UNAVAILABLE_CHECK_MS = 60 * 60 * 1000;
 const SEASON_QUEUE_CHECK_MS = 5 * 60 * 1000;
 const QUOTA_REFRESH_CHECK_MS = 10 * 60 * 1000;
+const TAUTULLI_NOTIFICATION_RETRY_MS = 5 * 60 * 1000;
 const getDueUnavailableApprovals = db.prepare(`
   SELECT dl.id, dl.request_id, dl.user_id, dl.username, dl.library_id, dl.media_title, dl.media_type,
          dl.tmdb_id, dl.season_number, dl.created_at, l.kind AS library_kind
@@ -1080,4 +1082,15 @@ export function startScheduler() {
   setInterval(() => {
     launch();
   }, config.pollIntervalMs);
+
+  let retryRunning = false;
+  const retryNotifications = () => {
+    if (retryRunning) return;
+    retryRunning = true;
+    retryFailedTautulliNotifications()
+      .catch((err) => console.error('[tautulli-retry] comprobación fallida:', err.message))
+      .finally(() => { retryRunning = false; });
+  };
+  retryNotifications();
+  setInterval(retryNotifications, TAUTULLI_NOTIFICATION_RETRY_MS);
 }

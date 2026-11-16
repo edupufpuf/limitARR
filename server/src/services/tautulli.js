@@ -1,6 +1,6 @@
 import { getSettings } from '../settings.js';
 
-async function call(cmd, params = {}) {
+async function call(cmd, params = {}, { method = 'GET' } = {}) {
   const { tautulli_url: baseUrl, tautulli_api_key: apiKey } = getSettings();
   if (!baseUrl || !apiKey) throw new Error('Tautulli no configurado (pestaña Configuración)');
 
@@ -9,7 +9,7 @@ async function call(cmd, params = {}) {
   url.searchParams.set('cmd', cmd);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
 
-  const res = await fetch(url);
+  const res = await fetch(url, { method });
   if (!res.ok) throw new Error(`Tautulli ${cmd} HTTP ${res.status}`);
   const json = await res.json();
   if (json.response?.result !== 'success') {
@@ -58,6 +58,18 @@ export async function getUsers() {
     friendlyName: u.friendly_name,
     isAdmin: Boolean(Number(u.is_admin)),
   }));
+}
+
+export async function getNotificationLog(length = 200) {
+  const data = await call('get_notification_log', { length });
+  return data?.data || [];
+}
+
+export async function notifyRecentlyAdded(ratingKey, notifierId) {
+  return call('notify_recently_added', {
+    rating_key: ratingKey,
+    notifier_id: notifierId,
+  }, { method: 'POST' });
 }
 
 // Búsqueda en Plex vía Tautulli, para localizar el rating_key de una película,

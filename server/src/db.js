@@ -415,6 +415,19 @@ db.exec(`
     has_photo INTEGER NOT NULL DEFAULT 0,
     text TEXT NOT NULL DEFAULT ''
   );
+
+  -- Tautulli no reintenta los avisos fallidos de Telegram. Limitarr conserva
+  -- aquí el estado por contenido/notificador para recuperarlos sin duplicar
+  -- uno que finalmente sí haya llegado.
+  CREATE TABLE IF NOT EXISTS tautulli_notification_retries (
+    rating_key TEXT NOT NULL,
+    notifier_id INTEGER NOT NULL,
+    failed_log_id INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_attempt_at INTEGER,
+    resolved_at INTEGER,
+    PRIMARY KEY (rating_key, notifier_id)
+  );
 `);
 
 // Roles por defecto pedidos por Edu: se siembran una sola vez si la tabla está
