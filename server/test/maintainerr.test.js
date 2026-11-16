@@ -4,7 +4,7 @@ import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { db } from '../src/db.js';
 import { getWebhookSecret } from '../src/auth.js';
-import { buildTvGracePeriodButtons, getPostponeDays, setCollectionExclusion, getSalvadosByUser, getAllSalvados, getSalvadosHistory, pollMaintainerrCollections, processSalvados } from '../src/services/maintainerr.js';
+import { buildMovieGracePeriodButtons, buildTvGracePeriodButtons, getPostponeDays, setCollectionExclusion, getSalvadosByUser, getAllSalvados, getSalvadosHistory, pollMaintainerrCollections, processSalvados } from '../src/services/maintainerr.js';
 
 // Tests del módulo Maintainerr con la DB en memoria y global.fetch mockeado
 // (estilo eliminarr.test.js: nada de red real, ni Maintainerr ni Telegram).
@@ -62,6 +62,19 @@ test('selector de plazo para series ofrece 1 semana, 2 semanas y 1 mes', () => {
       { text: '1 semana', callback_data: 'save:8501:2:5:7' },
       { text: '2 semanas', callback_data: 'save:8501:2:5:14' },
       { text: '1 mes', callback_data: 'save:8501:2:5:30' },
+    ]
+  );
+});
+
+test('selector de plazo para películas ofrece el plazo normal y 20 días', () => {
+  assert.deepEqual(
+    buildMovieGracePeriodButtons(
+      (days) => days == null ? 'save:9010:1:4' : `save:9010:1:4:${days}`,
+      5
+    ),
+    [
+      { text: '5 días', callback_data: 'save:9010:1:4' },
+      { text: '20 días', callback_data: 'save:9010:1:4:20' },
     ]
   );
 });
@@ -153,13 +166,14 @@ test('webhook: alta en colección de borrado manda aviso Telegram con botón Sal
   const payload = JSON.parse(telegram.options.body);
   const text = payload.caption ?? payload.text;
   assert.match(text, /«The Batman» se borrará en 7 días/);
-  // {diasSalvado} es el plazo de gracia real de limitARR (5 por defecto), NO el
+  // {diasSalvado} ofrece el plazo real de limitARR (5 por defecto) y la nueva
+  // ampliación de 20 días, NO el
   // deleteAfterDays de la colección "Salvados" en Maintainerr (15 en este fixture)
   // — esa cifra ya no manda nada desde el borrado ligado a visionado (8 ago 2026).
-  assert.match(text, /estará 5 días más/);
+  assert.match(text, /estará 5 o 20 días más/);
   assert.equal(
     payload.reply_markup.inline_keyboard[0][0].callback_data,
-    'asksave:9010:1:4'
+    'choosemovieperiod:9010:1:4'
   );
 
   // Guardado para poder editarlo luego (quitar el botón + "YA BORRADA" si
@@ -196,7 +210,7 @@ test('webhook: {diasSalvado} en el aviso refleja el plazo de gracia configurado,
     const text = payload.caption ?? payload.text;
     // La colección "Peliculas Salvadas por 15 días" (fixture, deleteAfterDays: 15) no
     // debe filtrarse al texto — el 7 configurado en limitARR es el que manda.
-    assert.match(text, /estará 7 días más/);
+    assert.match(text, /estará 7 o 20 días más/);
     assert.doesNotMatch(text, /estará 15 días más/);
   } finally {
     db.prepare("DELETE FROM settings WHERE key = 'maintainerr_salvado_grace_days'").run();

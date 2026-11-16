@@ -35,6 +35,7 @@ const DEFAULT_SAVED_MESSAGE = '✅ Salvada por {usuario}{dias}.';
 const DEFAULT_DELETE_MESSAGE = '🎬 {titulo} se borrará{dias}.\nSi quieres salvarla, pulsa 💾 Salvar y estará {diasSalvado} días más.';
 const DEFAULT_DELETE_MESSAGE_TV = '📺 {titulo} se borrará{dias}.\nSi quieres salvarla, pulsa 💾 Salvar y estará {diasSalvado} días más.';
 const DEFAULT_SALVADO_GRACE_DAYS = 5;
+const MOVIE_EXTENDED_GRACE_DAYS = 20;
 const TV_GRACE_PERIODS = [
   { label: '1 semana', days: 7 },
   { label: '2 semanas', days: 14 },
@@ -47,6 +48,13 @@ export function buildTvGracePeriodButtons(callbackData) {
     text: label,
     callback_data: callbackData(days),
   }));
+}
+
+export function buildMovieGracePeriodButtons(callbackData, defaultDays = DEFAULT_SALVADO_GRACE_DAYS) {
+  return [
+    { text: `${defaultDays} días`, callback_data: callbackData(null) },
+    { text: `${MOVIE_EXTENDED_GRACE_DAYS} días`, callback_data: callbackData(MOVIE_EXTENDED_GRACE_DAYS) },
+  ];
 }
 
 function parsePairs(raw) {
@@ -383,7 +391,9 @@ async function notifyDeletionCandidate(source, target, item, { fallbackTitle = n
         // override de la biblioteca, ver getFallbackDeadlineMs) y hay que mostrar esa.
         .replace(
           /{diasSalvado}/g,
-          isSeason ? '7, 14 o 30' : String(getSalvadoGraceDays(source.libraryId != null ? Number(source.libraryId) : null))
+          isSeason
+            ? '7, 14 o 30'
+            : `${getSalvadoGraceDays(source.libraryId != null ? Number(source.libraryId) : null)} o 20`
         )
     : `🎬 ${tituloTexto} se borrará${diasTexto}.\n\n⚠️ Sin colección de salvados configurada para "${source.title}" — no se puede salvar.`;
   // "Salvar" pide confirmación antes de mover nada (asksave: cambia el
@@ -398,7 +408,7 @@ async function notifyDeletionCandidate(source, target, item, { fallbackTitle = n
         }
       : {
           inline_keyboard: [
-            [{ text: '💾 Salvar', callback_data: `asksave:${item.mediaServerId}:${source.id}:${target.id}` }],
+            [{ text: '💾 Salvar', callback_data: `choosemovieperiod:${item.mediaServerId}:${source.id}:${target.id}` }],
           ],
         }
     : undefined;
@@ -684,7 +694,9 @@ function addSaveMarkup(mediaServerId) {
       { text: '➕ Salvar también', callback_data: `chooseaddperiod:${mediaServerId}` },
     ]] };
   }
-  return { inline_keyboard: [[{ text: '➕ Salvar también', callback_data: `${ADD_SAVE_CALLBACK_PREFIX}${mediaServerId}` }]] };
+  return { inline_keyboard: [[
+    { text: '➕ Salvar también', callback_data: `chooseaddmovieperiod:${mediaServerId}` },
+  ]] };
 }
 
 // Texto de "salvada" para UN salvador — reutilizado tanto al primer salvado
@@ -771,6 +783,41 @@ async function handleChoosePeriodCallback(query) {
   await botApi('answerCallbackQuery', { callback_query_id: query.id, text: 'Elige cuánto tiempo' });
 }
 
+async function handleChooseMoviePeriodCallback(query) {
+  const [, mediaServerId, sourceId, targetId] = query.data.split(':');
+  const collections = await listCollections().catch(() => []);
+  const source = collections.find((c) => c.id === Number(sourceId));
+  const defaultDays = getSalvadoGraceDays(source?.libraryId != null ? Number(source.libraryId) : null);
+  await botApi('editMessageReplyMarkup', {
+    chat_id: query.message.chat.id,
+    message_id: query.message.message_id,
+    reply_markup: {
+      inline_keyboard: [
+        buildMovieGracePeriodButtons(
+          (days) => days == null
+            ? `save:${mediaServerId}:${sourceId}:${targetId}`
+            : `save:${mediaServerId}:${sourceId}:${targetId}:${days}`,
+          defaultDays
+        ),
+        [{ text: '✖️ Cancelar', callback_data: `cancelmovieperiod:${mediaServerId}:${sourceId}:${targetId}` }],
+      ],
+    },
+  });
+  await botApi('answerCallbackQuery', { callback_query_id: query.id, text: 'Elige cuánto tiempo' });
+}
+
+async function handleCancelMoviePeriodCallback(query) {
+  const [, mediaServerId, sourceId, targetId] = query.data.split(':');
+  await botApi('editMessageReplyMarkup', {
+    chat_id: query.message.chat.id,
+    message_id: query.message.message_id,
+    reply_markup: { inline_keyboard: [[
+      { text: '💾 Salvar', callback_data: `choosemovieperiod:${mediaServerId}:${sourceId}:${targetId}` },
+    ]] },
+  });
+  await botApi('answerCallbackQuery', { callback_query_id: query.id, text: 'Cancelado' });
+}
+
 async function handleCancelPeriodCallback(query) {
   const [, mediaServerId, sourceId, targetId] = query.data.split(':');
   await botApi('editMessageReplyMarkup', {
@@ -798,6 +845,38 @@ async function handleChooseAddPeriodCallback(query) {
   await botApi('answerCallbackQuery', { callback_query_id: query.id, text: 'Elige cuánto tiempo' });
 }
 
+async function handleChooseAddMoviePeriodCallback(query) {
+  const mediaServerId = query.data.slice('chooseaddmovieperiod:'.length);
+  const saved = getSalvadosForItem.all(mediaServerId)[0];
+  const defaultDays = getSalvadoGraceDays(saved?.library_id ?? null);
+  await botApi('editMessageReplyMarkup', {
+    chat_id: query.message.chat.id,
+    message_id: query.message.message_id,
+    reply_markup: {
+      inline_keyboard: [
+        buildMovieGracePeriodButtons(
+          (days) => days == null
+            ? `${ADD_SAVE_CALLBACK_PREFIX}${mediaServerId}`
+            : `${ADD_SAVE_CALLBACK_PREFIX}${mediaServerId}:${days}`,
+          defaultDays
+        ),
+        [{ text: '✖️ Cancelar', callback_data: `canceladdmovieperiod:${mediaServerId}` }],
+      ],
+    },
+  });
+  await botApi('answerCallbackQuery', { callback_query_id: query.id, text: 'Elige cuánto tiempo' });
+}
+
+async function handleCancelAddMoviePeriodCallback(query) {
+  const mediaServerId = query.data.slice('canceladdmovieperiod:'.length);
+  await botApi('editMessageReplyMarkup', {
+    chat_id: query.message.chat.id,
+    message_id: query.message.message_id,
+    reply_markup: addSaveMarkup(mediaServerId),
+  });
+  await botApi('answerCallbackQuery', { callback_query_id: query.id, text: 'Cancelado' });
+}
+
 async function handleCancelAddPeriodCallback(query) {
   const mediaServerId = query.data.slice('canceladdperiod:'.length);
   await botApi('editMessageReplyMarkup', {
@@ -818,7 +897,7 @@ async function handleCancelSaveCallback(query) {
         { text: '💾 Salvar', callback_data: `chooseperiod:${mediaServerId}:${sourceId}:${targetId}` },
       ]] }
     : { inline_keyboard: [[
-        { text: '💾 Salvar', callback_data: `asksave:${mediaServerId}:${sourceId}:${targetId}` },
+        { text: '💾 Salvar', callback_data: `choosemovieperiod:${mediaServerId}:${sourceId}:${targetId}` },
       ]] };
   try {
     await botApi('editMessageReplyMarkup', {
@@ -851,11 +930,12 @@ async function handleSaveCallback(query) {
     // En series el destino depende del plazo elegido en Telegram. `targetId`
     // sigue viajando en el callback por compatibilidad con mensajes antiguos,
     // pero el mapeo vivo del panel gana si existe.
-    const requestedDays = sourceCollection?.type !== 'movie' && VALID_TV_GRACE_DAYS.has(requestedGraceDays)
-      ? Number(requestedGraceDays)
-      : null;
+    const isMovie = sourceCollection?.type === 'movie';
+    const requestedDays = isMovie
+      ? requestedGraceDays === String(MOVIE_EXTENDED_GRACE_DAYS) ? MOVIE_EXTENDED_GRACE_DAYS : null
+      : VALID_TV_GRACE_DAYS.has(requestedGraceDays) ? Number(requestedGraceDays) : null;
     const pair = getMaintainerrSettings().pairs.find((p) => p.source === sourceCollection?.title);
-    const mappedTargetTitle = requestedDays != null ? targetTitleForDays(pair, requestedDays) : pair?.target;
+    const mappedTargetTitle = !isMovie && requestedDays != null ? targetTitleForDays(pair, requestedDays) : pair?.target;
     const selectedTarget = collectionsBefore.find((c) => c.title === mappedTargetTitle)
       ?? collectionsBefore.find((c) => c.id === Number(targetId));
     if (!sourceCollection || !selectedTarget) throw new Error('colección origen/destino no encontrada');
@@ -867,6 +947,11 @@ async function handleSaveCallback(query) {
     // último lo quita de esa colección. Sin la exclusión, Maintainerr volvería
     // a añadirlo al siguiente ciclo por seguir cumpliendo la regla.
     await addToCollection(Number(selectedTarget.id), mediaServerId);
+    if (isMovie && requestedDays === MOVIE_EXTENDED_GRACE_DAYS) {
+      const currentDays = Number(selectedTarget.deleteAfterDays) || 0;
+      const extraDays = Math.max(0, MOVIE_EXTENDED_GRACE_DAYS - currentDays);
+      if (extraDays > 0) await postponeCollectionMedia(Number(selectedTarget.id), mediaServerId, extraDays);
+    }
     await setCollectionExclusion(Number(sourceId), mediaServerId, true);
     await removeFromCollection(Number(sourceId), mediaServerId);
     // Se editará el mensaje aquí mismo abajo (con la nota de "Salvada por...");
@@ -957,16 +1042,17 @@ async function handleAddSaveCallback(query) {
       return;
     }
     const ref = existing[0];
-    const graceDays = isTvLibrary(ref.library_id) && VALID_TV_GRACE_DAYS.has(requestedGraceDays)
-      ? Number(requestedGraceDays)
-      : null;
+    const tvLibrary = isTvLibrary(ref.library_id);
+    const graceDays = tvLibrary
+      ? VALID_TV_GRACE_DAYS.has(requestedGraceDays) ? Number(requestedGraceDays) : null
+      : requestedGraceDays === String(MOVIE_EXTENDED_GRACE_DAYS) ? MOVIE_EXTENDED_GRACE_DAYS : null;
     let targetCollectionId = ref.target_collection_id ?? null;
 
     // Maintainerr también debe reflejar el plazo desde ESTE salvado. Si elige
     // una duración mayor, cambia de colección; si se mantiene en la misma (o
     // elige una menor pero vence después que el contador actual), usa su API
     // de aplazamiento para que el overlay de Plex llegue hasta la misma fecha.
-    if (graceDays != null) {
+    if (graceDays != null && tvLibrary) {
       const collections = await listCollections();
       const { pairs } = getMaintainerrSettings();
       const targetTitles = allTargetTitles(pairs);
@@ -994,6 +1080,20 @@ async function handleAddSaveCallback(query) {
       }
       targetCollectionId = Number(desiredTarget.id);
       updateSalvadosTargetCollection.run(targetCollectionId, mediaServerId);
+    } else if (graceDays === MOVIE_EXTENDED_GRACE_DAYS) {
+      const collections = await listCollections();
+      const currentTarget = collections.find((c) =>
+        c.id === Number(targetCollectionId)
+        && c.media?.some((m) => String(m.mediaServerId) === String(mediaServerId))
+      );
+      if (!currentTarget) throw new Error('no se encontró la colección de la película salvada');
+      const liveMedia = currentTarget.media.find((m) => String(m.mediaServerId) === String(mediaServerId));
+      const extraDays = getPostponeDays(
+        liveMedia?.addDate,
+        currentTarget.deleteAfterDays,
+        MOVIE_EXTENDED_GRACE_DAYS
+      );
+      if (extraDays > 0) await postponeCollectionMedia(Number(currentTarget.id), mediaServerId, extraDays);
     }
     const initialDeadline = Date.now() + (graceDays ?? getSalvadoGraceDays(ref.library_id)) * 86_400_000;
     insertSalvado.run(
@@ -1354,12 +1454,20 @@ export function startMaintainerrPoller() {
             const data = u.callback_query?.data;
             if (data?.startsWith('chooseperiod:')) {
               await handleChoosePeriodCallback(u.callback_query);
+            } else if (data?.startsWith('choosemovieperiod:')) {
+              await handleChooseMoviePeriodCallback(u.callback_query);
             } else if (data?.startsWith('cancelperiod:')) {
               await handleCancelPeriodCallback(u.callback_query);
+            } else if (data?.startsWith('cancelmovieperiod:')) {
+              await handleCancelMoviePeriodCallback(u.callback_query);
             } else if (data?.startsWith('chooseaddperiod:')) {
               await handleChooseAddPeriodCallback(u.callback_query);
+            } else if (data?.startsWith('chooseaddmovieperiod:')) {
+              await handleChooseAddMoviePeriodCallback(u.callback_query);
             } else if (data?.startsWith('canceladdperiod:')) {
               await handleCancelAddPeriodCallback(u.callback_query);
+            } else if (data?.startsWith('canceladdmovieperiod:')) {
+              await handleCancelAddMoviePeriodCallback(u.callback_query);
             } else if (data?.startsWith('asksave:')) {
               await handleAskSaveCallback(u.callback_query);
             } else if (data?.startsWith('cancelsave:')) {
