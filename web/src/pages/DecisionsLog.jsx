@@ -29,6 +29,7 @@ const decisionBadge = {
   role_monthly_total_override_changed: 'bg-violet-400/10 text-violet-400 ring-violet-400/25',
   watched: 'bg-green-400/10 text-green-400 ring-green-400/25',
   expired: 'bg-bg-700/60 text-gray-400 ring-bg-600',
+  deleted_unwatched: 'bg-orange-400/10 text-orange-400 ring-orange-400/25',
   unavailable_reminder: 'bg-sky-400/10 text-sky-400 ring-sky-400/25',
   penalty_applied: 'bg-orange-400/10 text-orange-400 ring-orange-400/25',
   approved_outside_limitarr: 'bg-violet-400/10 text-violet-400 ring-violet-400/25',
@@ -59,6 +60,7 @@ const decisionLabel = {
   role_monthly_total_override_changed: 'override de cupo mensual total (rol) cambiado',
   watched: '👁️ visto (cupo liberado)',
   expired: '⌛ caducado (cupo liberado)',
+  deleted_unwatched: '🗑️ borrada sin ver',
   unavailable_reminder: '🕐 aviso: aún no disponible (12h)',
   penalty_applied: '⛔ penalización aplicada',
   approved_outside_limitarr: '✅ aprobada fuera de limitARR (autoaprobado/admin)',
@@ -149,6 +151,18 @@ export default function DecisionsLog({ onNavigate }) {
         <span>
           <span className="block font-semibold">🎬 Antigüedad de películas y temporadas</span>
           <span className="block text-xs text-gray-500 mt-1">Consulta qué se pidió, cuándo se pidió y si sigue en Plex.</span>
+        </span>
+        <span className="text-accent-300 font-semibold whitespace-nowrap">Ver listado →</span>
+      </button>
+
+      <button
+        type="button"
+        onClick={() => onNavigate?.('deleted-unwatched')}
+        className="card w-full mb-5 p-4 flex items-center justify-between gap-4 text-left hover:border-accent-500/50 hover:bg-bg-800/70 transition-colors"
+      >
+        <span>
+          <span className="block font-semibold">🗑️ Borradas sin ver</span>
+          <span className="block text-xs text-gray-500 mt-1">Solicitudes aprobadas que se borraron o cancelaron antes de que el usuario las viera.</span>
         </span>
         <span className="text-accent-300 font-semibold whitespace-nowrap">Ver listado →</span>
       </button>

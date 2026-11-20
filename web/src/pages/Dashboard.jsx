@@ -8,6 +8,7 @@ import DecisionsLog from './DecisionsLog.jsx';
 import Settings from './Settings.jsx';
 import Notifications from './Notifications.jsx';
 import MovieHistory from './MovieHistory.jsx';
+import DeletedUnwatched from './DeletedUnwatched.jsx';
 import WhatsNewModal from '../components/WhatsNewModal.jsx';
 import { Wordmark } from '../components/Brand.jsx';
 import Sheet from '../components/Sheet.jsx';
@@ -20,6 +21,7 @@ const UNSAVED_WARNING = 'Hay cambios sin guardar en esta pestaña. ¿Salir igual
 const TABS = {
   quota: { label: 'Cupo', Icon: IconGauge, Component: Quota },
   'movie-history': { label: 'Antigüedad del contenido', Icon: IconFilm, Component: MovieHistory, hidden: true },
+  'deleted-unwatched': { label: 'Borradas sin ver', Icon: IconFilm, Component: DeletedUnwatched, hidden: true },
   salvadas: { label: 'Salvadas', Icon: IconSave, Component: Salvadas },
   libraries: { label: 'Bibliotecas', Icon: IconFilm, Component: Libraries },
   users: { label: 'Usuarios', Icon: IconUsers, Component: Users },
@@ -55,7 +57,7 @@ function DashboardInner({ onLoggedOut }) {
   const [pauseBusy, setPauseBusy] = useState(false);
   const { Component } = TABS[tab];
   const anyDirty = useAnyDirty();
-  const mobileActiveTab = tab === 'movie-history' ? 'log' : tab;
+  const mobileActiveTab = tab === 'movie-history' || tab === 'deleted-unwatched' ? 'log' : tab;
   const mobileMoreActive = !MOBILE_TABS.includes(mobileActiveTab);
   const closeMenu = useCallback(() => setMenuOpen(false), []);
 
@@ -101,7 +103,7 @@ function DashboardInner({ onLoggedOut }) {
 
         <div className="space-y-0.5">
           {Object.entries(TABS).filter(([, item]) => !item.hidden).map(([key, { label, Icon }]) => {
-            const active = tab === key || (key === 'log' && tab === 'movie-history');
+            const active = tab === key || (key === 'log' && (tab === 'movie-history' || tab === 'deleted-unwatched'));
             return (
               <button
                 key={key}

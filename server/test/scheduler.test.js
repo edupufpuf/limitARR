@@ -1021,3 +1021,55 @@ test('refreshStaleAndNotify: registra vista una temporada no disponible aunque e
     db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
   }
 });
+
+test('refreshStaleAndNotify: una solicitud borrada en Seerr NO se registra como vista', async () => {
+  upsertSetting('tautulli_url', 'http://tautulli.test');
+  upsertSetting('tautulli_api_key', 'test-key');
+  upsertSetting('seerr_url', 'http://seerr.test');
+  upsertSetting('seerr_api_key', 'test-key');
+  db.prepare(`
+    INSERT OR REPLACE INTO libraries (id, name, section_type, kind, enabled, default_limit)
+    VALUES (9755, 'Pelis', 'movie', 'standard', 1, 4)
+  `).run();
+  // Aprobada y luego anulada (reconcileVoidedRequests: ya no existe en Seerr).
+  db.prepare(`
+    INSERT INTO decisions_log
+      (request_id, user_id, username, library_id, media_title, media_type, tmdb_id, decision, voided_at)
+    VALUES (77020, 6006, 'jorge', 9755, 'Peli no vista', 'movie', 555777, 'approved', datetime('now'))
+  `).run();
+  db.prepare(`
+    INSERT INTO quota_cache
+      (user_id, library_id, limit_applied, outstanding, balance, pending_items, computed_at)
+    VALUES (6006, 9755, 4, 1, 3, ?, datetime('now', '-10 minutes'))
+  `).run(JSON.stringify([{
+    title: 'Peli no vista', mediaType: 'movie', tmdbId: 555777, seasonNumber: null,
+    requestId: 77020, unavailable: false, expiresAt: null,
+  }]));
+
+  const originalFetch = global.fetch;
+  global.fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.searchParams.get('cmd') === 'get_history') {
+      return new Response(JSON.stringify({ response: { result: 'success', data: { data: [] } } }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ results: [] }), { status: 200 });
+  };
+
+  try {
+    await refreshStaleAndNotify();
+    const watched = db.prepare(`
+      SELECT 1 FROM decisions_log WHERE request_id = 77020 AND decision = 'watched'
+    `).get();
+    assert.equal(watched, undefined, 'una solicitud anulada no se ha visto: no debe ir a Contenido visto');
+    const deleted = db.prepare(`
+      SELECT 1 FROM decisions_log WHERE request_id = 77020 AND decision = 'deleted_unwatched'
+    `).get();
+    assert.ok(deleted, 'debe quedar registrada como borrada sin ver');
+  } finally {
+    global.fetch = originalFetch;
+    db.prepare('DELETE FROM decisions_log WHERE request_id = 77020').run();
+    db.prepare('DELETE FROM quota_cache WHERE user_id = 6006').run();
+    db.prepare('DELETE FROM libraries WHERE id = 9755').run();
+    db.prepare("DELETE FROM settings WHERE key IN ('tautulli_url', 'tautulli_api_key', 'seerr_url', 'seerr_api_key')").run();
+  }
+});

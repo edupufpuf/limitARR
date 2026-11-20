@@ -498,3 +498,37 @@ db.exec(`
     PRIMARY KEY (tmdb_id, is4k)
   );
 `);
+
+// Bug de jorgebigkrsken (20 nov 2026): corrección única de los 'watched' falsos
+// que registraba refreshStaleAndNotify cuando un pendiente salía de la lista
+// por haberse borrado/cancelado su solicitud (aprobación anulada), no por
+// verse. Un 'watched' es falso si ya no queda ninguna aprobación viva de esa
+// unidad y alguna se anuló antes (o a la vez) que se registró la vista. Los
+// del backfill llevan la fecha real de Tautulli, anterior a la anulación, así
+// que no se tocan. Pasan a 'deleted_unwatched' (sección "Borradas sin ver").
+// Se ejecuta una sola vez (marca en settings).
+if (!db.prepare("SELECT 1 FROM settings WHERE key = 'migration_false_watched_20261120'").get()) {
+  db.transaction(() => {
+    db.prepare(`
+      UPDATE decisions_log SET decision = 'deleted_unwatched'
+      WHERE decision = 'watched'
+        AND request_id > 0
+        AND NOT EXISTS (
+          SELECT 1 FROM decisions_log a
+          WHERE a.request_id = decisions_log.request_id
+            AND COALESCE(a.season_number, -1) = COALESCE(decisions_log.season_number, -1)
+            AND a.decision IN ('approved', 'approved_outside_limitarr')
+            AND a.voided_at IS NULL
+        )
+        AND EXISTS (
+          SELECT 1 FROM decisions_log a
+          WHERE a.request_id = decisions_log.request_id
+            AND COALESCE(a.season_number, -1) = COALESCE(decisions_log.season_number, -1)
+            AND a.decision IN ('approved', 'approved_outside_limitarr')
+            AND a.voided_at IS NOT NULL
+            AND a.voided_at <= decisions_log.created_at
+        )
+    `).run();
+    db.prepare("INSERT INTO settings (key, value) VALUES ('migration_false_watched_20261120', '1')").run();
+  })();
+}

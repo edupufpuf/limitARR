@@ -51,6 +51,42 @@ const getLastUsernameForUser = db.prepare(`
   WHERE user_id = ? AND library_id = ? AND username IS NOT NULL
   ORDER BY id DESC LIMIT 1
 `);
+// Bug de jorgebigkrsken (20 nov 2026): un pendiente que sale de la lista NO
+// siempre es "visto". Si la solicitud se borró/canceló en Seerr
+// (reconcileVoidedRequests) o se rechazó, la fila 'approved' queda anulada y
+// el ítem desaparece igual — y se registraba como 'watched'. Ahora:
+//  - aprobación viva → 'watched' / 'expired' (como siempre)
+//  - aprobación anulada → 'deleted_unwatched' (sección "Borradas sin ver")
+//  - aprobación anterior a un reset de cupo → no se registra nada
+const hasLiveApproval = db.prepare(`
+  SELECT 1 FROM decisions_log
+  WHERE request_id = ?
+    AND COALESCE(season_number, -1) = COALESCE(?, -1)
+    AND decision IN ('approved', 'approved_outside_limitarr')
+    AND voided_at IS NULL
+    AND created_at > COALESCE((SELECT reset_at FROM quota_resets WHERE user_id = ? AND library_id = ?), '0000-01-01')
+  LIMIT 1
+`);
+const hasVoidedApproval = db.prepare(`
+  SELECT 1 FROM decisions_log
+  WHERE request_id = ?
+    AND COALESCE(season_number, -1) = COALESCE(?, -1)
+    AND decision IN ('approved', 'approved_outside_limitarr')
+    AND voided_at IS NOT NULL
+  LIMIT 1
+`);
+
+// 'freed' (visto/caducado), 'deleted' (borrada sin ver) o 'ignore'.
+export function classifyGoneItem(item, cacheUserId, libraryId) {
+  // Cachés antiguas sin requestId: no hay con qué comprobarlo, se mantiene
+  // el comportamiento previo.
+  if (item.requestId == null) return 'freed';
+  const season = item.seasonNumber ?? null;
+  if (hasLiveApproval.get(item.requestId, season, cacheUserId, libraryId)) return 'freed';
+  if (hasVoidedApproval.get(item.requestId, season)) return 'deleted';
+  return 'ignore';
+}
+
 // Si a las 12h de aprobarse sigue sin estar en Plex, avisar de que aún no está
 // disponible y repetir el recordatorio como máximo una vez cada siete días.
 const STILL_UNAVAILABLE_HOURS = 12;
@@ -420,7 +456,13 @@ export async function refreshStaleAndNotify() {
       oldItems = JSON.parse(before.pending_items || '[]');
     } catch { /* caché de una versión anterior */ }
     const newKeys = new Set(result.pendingItems.map(pendingItemKey));
-    const freedItems = oldItems.filter((item) => !newKeys.has(pendingItemKey(item)));
+    const goneItems = oldItems.filter((item) => !newKeys.has(pendingItemKey(item)));
+    const freedItems = [];
+    for (const item of goneItems) {
+      const kind = classifyGoneItem(item, user_id, library_id);
+      if (kind === 'freed') freedItems.push(item);
+      else if (kind === 'deleted') logFreedItem(user_id, library_id, item, 'deleted_unwatched', result.limit);
+    }
     if (freedItems.length === 0) continue;
 
     const nowMs = Date.now();
