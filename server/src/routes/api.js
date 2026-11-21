@@ -1033,6 +1033,21 @@ async function buildQuotaByUser() {
     if (!watchedByUser.has(r.user_id)) watchedByUser.set(r.user_id, []);
     watchedByUser.get(r.user_id).push(r);
   }
+  // Solicitudes que se borraron o cancelaron antes de verse. Se enseñan en la
+  // misma ficha del usuario que pendientes y vistas, no solo en Registro.
+  const deletedUnwatchedRows = db.prepare(`
+    SELECT user_id, media_title, media_type, tmdb_id, season_number, poster_url, created_at
+    FROM decisions_log
+    WHERE decision = 'deleted_unwatched'
+      AND created_at >= datetime('now', '-30 days')
+      AND user_id IS NOT NULL
+    ORDER BY created_at DESC
+  `).all();
+  const deletedUnwatchedByUser = new Map();
+  for (const row of deletedUnwatchedRows) {
+    if (!deletedUnwatchedByUser.has(row.user_id)) deletedUnwatchedByUser.set(row.user_id, []);
+    deletedUnwatchedByUser.get(row.user_id).push(row);
+  }
   // Issue #21 (jesusgarrigues): en un grupo agregado el cupo es compartido,
   // pero "quién de la familia la ha visto" se perdía al aplanar los watchedRows
   // de todos los miembros — withWatcher añade el username de quién exactamente
@@ -1063,6 +1078,29 @@ async function buildQuotaByUser() {
         posterUrl: r.poster_url,
         watchedAt: r.created_at,
         ...(withWatcher ? { watchedBy: tautulliUserMap.get(r._uid)?.username ?? `user#${r._uid}` } : {}),
+      }));
+  }
+  function recentlyDeletedUnwatchedFor(memberIds, { withOwner = false } = {}) {
+    const seen = new Set();
+    return memberIds
+      .flatMap((uid) => (deletedUnwatchedByUser.get(uid) ?? []).map((row) => ({ ...row, _uid: uid })))
+      .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+      .filter((row) => {
+        const unit = mediaUnitKey(row);
+        if (!unit) return true;
+        const key = `${row._uid}:${unit}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((row) => ({
+        title: row.media_title,
+        mediaType: row.media_type,
+        seasonNumber: row.season_number,
+        tmdbId: row.tmdb_id,
+        posterUrl: row.poster_url,
+        deletedAt: row.created_at,
+        ...(withOwner ? { deletedFor: tautulliUserMap.get(row._uid)?.username ?? `user#${row._uid}` } : {}),
       }));
   }
   const groupMap = new Map(db.prepare('SELECT id, name FROM groups').all().map((g) => [g.id, g]));
@@ -1096,6 +1134,7 @@ async function buildQuotaByUser() {
           requestedTotal: memberIds.reduce((sum, uid) => sum + (requestedMap.get(uid) ?? 0), 0),
           monthlyTotal: await getMonthlyTotalQuota(row.user_id),
           recentlyWatched: recentlyWatchedFor(memberIds, { withWatcher: true }),
+          recentlyDeletedUnwatched: recentlyDeletedUnwatchedFor(memberIds, { withOwner: true }),
           libraries: [],
         });
       } else {
@@ -1110,6 +1149,7 @@ async function buildQuotaByUser() {
           requestedTotal: requestedMap.get(row.user_id) ?? 0,
           monthlyTotal: await getMonthlyTotalQuota(row.user_id),
           recentlyWatched: recentlyWatchedFor([row.user_id]),
+          recentlyDeletedUnwatched: recentlyDeletedUnwatchedFor([row.user_id]),
           libraries: [],
         });
       }

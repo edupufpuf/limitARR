@@ -367,7 +367,7 @@ function PendingPoster({ item, onDetail, onDismiss }) {
       tabIndex={0}
       onClick={() => onDetail(item)}
       onKeyDown={(e) => e.key === 'Enter' && onDetail(item)}
-      className="relative block w-16 h-24 rounded-lg overflow-hidden shadow-card group flex-shrink-0 cursor-pointer"
+      className="relative block w-20 aspect-[2/3] rounded-lg overflow-hidden shadow-card group flex-shrink-0 cursor-pointer"
       title={
         item.pendingApproval
           ? item.sequentialQueue
@@ -441,20 +441,24 @@ function PendingPoster({ item, onDetail, onDismiss }) {
   );
 }
 
-// Pedidas y ya vistas en los últimos 30 días — grid en gris, sin acciones
-// (no está en cupo, es solo historial, a diferencia de PendingPoster).
+// Pedidas y ya vistas en los últimos 30 días. El check verde las distingue de
+// las pendientes sin apagar la carátula: esta ficha debe poder leerse de un
+// vistazo, incluso en el wallpanel.
 export function RecentlyWatchedPoster({ item }) {
   const watchedAtMs = item.watchedAt ? Date.parse(item.watchedAt.replace(' ', 'T') + 'Z') : null;
   return (
     <div
-      className="relative w-16 h-24 rounded-lg overflow-hidden shadow-card flex-shrink-0"
+      className="relative w-20 aspect-[2/3] rounded-lg overflow-hidden shadow-card flex-shrink-0"
       title={`${item.title ?? '—'}${item.watchedBy ? ` — vista por ${item.watchedBy}` : ''}${watchedAtMs ? ` — vista ${daysAgo(watchedAtMs)}` : ''}`}
     >
       {item.posterUrl ? (
-        <img src={item.posterUrl} alt="" loading="lazy" className="w-full h-full object-cover grayscale opacity-60" />
+        <img src={item.posterUrl} alt="" loading="lazy" className="w-full h-full object-cover opacity-85" />
       ) : (
-        <div className="w-full h-full bg-gradient-to-br from-bg-600 to-bg-700 flex items-center justify-center text-xl grayscale opacity-60">🎬</div>
+        <div className="w-full h-full bg-gradient-to-br from-bg-600 to-bg-700 flex items-center justify-center text-xl">🎬</div>
       )}
+      <span className="absolute top-1 right-1 w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[11px] font-bold shadow">
+        ✓
+      </span>
       {/* Issue #21 (jesusgarrigues): en un grupo, quién de la familia la vio —
           sin esto un cupo compartido no dice qué miembro lo liberó. */}
       {item.watchedBy && (
@@ -466,6 +470,33 @@ export function RecentlyWatchedPoster({ item }) {
         <span className="block text-[9px] leading-tight text-white/90 font-medium line-clamp-2">
           {item.title ?? '—'}
         </span>
+      </div>
+    </div>
+  );
+}
+
+function DeletedUnwatchedPoster({ item }) {
+  const deletedAtMs = item.deletedAt ? Date.parse(item.deletedAt.replace(' ', 'T') + 'Z') : null;
+  return (
+    <div
+      className="relative w-20 aspect-[2/3] rounded-lg overflow-hidden shadow-card ring-2 ring-accent-500/70 flex-shrink-0"
+      title={`${item.title ?? '—'}${item.deletedFor ? ` — de ${item.deletedFor}` : ''}${deletedAtMs ? ` — borrada ${daysAgo(deletedAtMs)}` : ''}`}
+    >
+      {item.posterUrl ? (
+        <img src={item.posterUrl} alt="" loading="lazy" className="w-full h-full object-cover grayscale opacity-75" />
+      ) : (
+        <div className="w-full h-full bg-gradient-to-br from-bg-600 to-bg-700 flex items-center justify-center text-xl">🎬</div>
+      )}
+      <span className="absolute top-1 right-1 min-w-5 h-5 px-1 rounded-full bg-accent-500 text-white flex items-center justify-center text-[10px] font-bold shadow">
+        ✕
+      </span>
+      {item.deletedFor && (
+        <span className="absolute top-1 left-1 right-7 line-clamp-1 rounded bg-black/75 px-1 py-0.5 text-[7px] leading-tight font-semibold text-white pointer-events-none">
+          {item.deletedFor}
+        </span>
+      )}
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent pt-6 pb-1 px-1.5 pointer-events-none">
+        <span className="block text-[9px] leading-tight text-white font-medium line-clamp-2">{item.title ?? '—'}</span>
       </div>
     </div>
   );
@@ -1083,9 +1114,14 @@ function UserAvatar({ user }) {
 }
 
 function userSubtitle(user) {
-  if (user.isGroup && user.members?.length > 0) return user.members.join(', ');
   const pending = totalOutstanding(user.libraries);
-  const parts = [pending === 0 ? 'Al día' : `${pending} sin ver`];
+  const parts = [];
+  if (user.isGroup && user.members?.length > 0) parts.push(user.members.join(', '));
+  parts.push(pending === 0 ? 'Al día' : `${pending} sin ver`);
+  const deleted = user.recentlyDeletedUnwatched?.length ?? 0;
+  const watched = user.recentlyWatched?.length ?? 0;
+  if (deleted > 0) parts.push(`${deleted} borrada${deleted === 1 ? '' : 's'} 30d`);
+  if (watched > 0) parts.push(`${watched} vista${watched === 1 ? '' : 's'} 30d`);
   if (user.source === 'seerr') parts.push('Seerr local');
   return parts.join(' · ');
 }
@@ -1119,6 +1155,11 @@ function UserRow({ user, onOpen }) {
 
 function UserSheet({ user, salvados = [], onClose, onReset, onDismiss, onManualCharge, onDetail, onMonthlyHistory, resetting, charging }) {
   const canImpersonate = !user.isGroup && user.source !== 'seerr';
+  const pendingContent = user.libraries.flatMap((lib) =>
+    (lib.pendingItems ?? []).map((item) => ({ item, lib }))
+  );
+  const deletedContent = user.recentlyDeletedUnwatched ?? [];
+  const watchedContent = user.recentlyWatched ?? [];
   return (
     <Sheet title={user.username} subtitle={userSubtitle(user)} onClose={onClose}>
       {/* Grupo agregado o cuenta local de Seerr: sin cuenta Plex propia, no hay quién suplantar. */}
@@ -1144,6 +1185,72 @@ function UserSheet({ user, salvados = [], onClose, onReset, onDismiss, onManualC
         </button>
       )}
 
+      <section className="py-5 border-b border-bg-700">
+        <div className="grid grid-cols-3 overflow-hidden rounded-lg border border-bg-700 mb-6">
+          <div className="min-w-0 px-2 py-3 text-center bg-amber-500/10">
+            <div className="text-2xl font-bold tabular-nums text-amber-300">{pendingContent.length}</div>
+            <div className="text-[10px] sm:text-xs text-gray-400 leading-tight">Pendientes</div>
+          </div>
+          <div className="min-w-0 px-2 py-3 text-center bg-accent-500/10 border-x border-bg-700">
+            <div className="text-2xl font-bold tabular-nums text-accent-400">{deletedContent.length}</div>
+            <div className="text-[10px] sm:text-xs text-gray-400 leading-tight">Borradas 30d</div>
+          </div>
+          <div className="min-w-0 px-2 py-3 text-center bg-emerald-500/10">
+            <div className="text-2xl font-bold tabular-nums text-emerald-300">{watchedContent.length}</div>
+            <div className="text-[10px] sm:text-xs text-gray-400 leading-tight">Vistas 30d</div>
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          <div>
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <h3 className="text-sm font-semibold flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-amber-400" />Pendientes de ver</h3>
+              <span className="text-xs text-gray-500 tabular-nums">{pendingContent.length}</span>
+            </div>
+            {pendingContent.length > 0 ? (
+              <div className="flex flex-wrap gap-3">
+                {pendingContent.map(({ item, lib }, index) => (
+                  <PendingPoster
+                    key={`${lib.libraryId}-${item.tmdbId ?? 'x'}-${item.seasonNumber ?? 0}-${index}`}
+                    item={item}
+                    onDetail={(it) => onDetail(user, lib, it)}
+                    onDismiss={(it) => onDismiss(user.userId, lib.libraryId, it, user.username)}
+                  />
+                ))}
+              </div>
+            ) : <p className="text-sm text-gray-500">No tiene nada pendiente.</p>}
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <h3 className="text-sm font-semibold flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-accent-500" />Borradas sin ver · últimos 30 días</h3>
+              <span className="text-xs text-gray-500 tabular-nums">{deletedContent.length}</span>
+            </div>
+            {deletedContent.length > 0 ? (
+              <div className="flex flex-wrap gap-3">
+                {deletedContent.map((item, index) => (
+                  <DeletedUnwatchedPoster key={`${item.tmdbId ?? 'x'}-${item.seasonNumber ?? 0}-${index}`} item={item} />
+                ))}
+              </div>
+            ) : <p className="text-sm text-gray-500">No se le ha borrado nada sin ver.</p>}
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <h3 className="text-sm font-semibold flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-emerald-500" />Vistas · últimos 30 días</h3>
+              <span className="text-xs text-gray-500 tabular-nums">{watchedContent.length}</span>
+            </div>
+            {watchedContent.length > 0 ? (
+              <div className="flex flex-wrap gap-3">
+                {watchedContent.map((item, index) => (
+                  <RecentlyWatchedPoster key={`${item.tmdbId ?? 'x'}-${item.seasonNumber ?? 0}-${index}`} item={item} />
+                ))}
+              </div>
+            ) : <p className="text-sm text-gray-500">No ha visto contenido solicitado en los últimos 30 días.</p>}
+          </div>
+        </div>
+      </section>
+
       {user.libraries.map((lib) => {
         const key = `${user.userId}-${lib.libraryId}`;
         return (
@@ -1168,18 +1275,9 @@ function UserSheet({ user, salvados = [], onClose, onReset, onDismiss, onManualC
               </div>
             </div>
             <QuotaBar balance={lib.balance} limit={lib.limitApplied} />
-            {lib.pendingItems?.length > 0 && (
-              <div className="flex flex-wrap gap-2 mt-4">
-                {lib.pendingItems.map((item, i) => (
-                  <PendingPoster
-                    key={`${item.tmdbId ?? 'x'}-${item.seasonNumber ?? 0}-${i}`}
-                    item={item}
-                    onDetail={(it) => onDetail(user, lib, it)}
-                    onDismiss={(it) => onDismiss(user.userId, lib.libraryId, it, user.username)}
-                  />
-                ))}
-              </div>
-            )}
+            <p className="mt-3 text-xs text-gray-500">
+              {(lib.pendingItems ?? []).length} contenido{(lib.pendingItems ?? []).length === 1 ? '' : 's'} en esta biblioteca
+            </p>
             <div className="flex gap-2 mt-4">
               <button
                 onClick={() => onManualCharge(user.userId, lib.libraryId, user.username, lib.sectionType)}
@@ -1205,16 +1303,6 @@ function UserSheet({ user, salvados = [], onClose, onReset, onDismiss, onManualC
         <section className="py-5 border-t border-bg-700">
           <h3 className="text-sm font-semibold text-gray-500 mb-3">Salvadas del borrado</h3>
           <SalvadosGrid items={salvados} compact />
-        </section>
-      )}
-      {user.recentlyWatched?.length > 0 && (
-        <section className="py-5 border-t border-bg-700">
-          <h3 className="text-sm font-semibold text-gray-500 mb-3">Vistas en los últimos 30 días</h3>
-          <div className="flex flex-wrap gap-2">
-            {user.recentlyWatched.map((item, i) => (
-              <RecentlyWatchedPoster key={`${item.tmdbId ?? 'x'}-${item.seasonNumber ?? 0}-${i}`} item={item} />
-            ))}
-          </div>
         </section>
       )}
     </Sheet>

@@ -771,6 +771,16 @@ test('GET /quota: recentlyWatched trae los últimos 30 días sin duplicar pelíc
   `);
   insertWatchedSeason.run(-9103, '-4 days');
   insertWatchedSeason.run(-9104, '-1 day');
+  db.prepare(`
+    INSERT INTO decisions_log
+      (request_id, user_id, library_id, media_title, media_type, tmdb_id, poster_url, decision, created_at)
+    VALUES (-9105, 1892, 1782, 'Borrada sin verla', 'movie', 9105, '/borrada.jpg', 'deleted_unwatched', datetime('now', '-3 days'))
+  `).run();
+  db.prepare(`
+    INSERT INTO decisions_log
+      (request_id, user_id, library_id, media_title, media_type, tmdb_id, decision, created_at)
+    VALUES (-9106, 1892, 1782, 'Borrada antigua', 'movie', 9106, 'deleted_unwatched', datetime('now', '-31 days'))
+  `).run();
 
   const originalFetch = global.fetch;
   global.fetch = async (input) => {
@@ -792,6 +802,8 @@ test('GET /quota: recentlyWatched trae los últimos 30 días sin duplicar pelíc
     assert.deepEqual(user.recentlyWatched.map((r) => r.title), ['División Palermo - Temporada 2', 'Vista hace poco']);
     assert.equal(user.recentlyWatched.filter((r) => r.title === 'División Palermo - Temporada 2').length, 1);
     assert.equal(user.recentlyWatched[1].posterUrl, 'https://image.tmdb.org/x.jpg');
+    assert.deepEqual(user.recentlyDeletedUnwatched.map((r) => r.title), ['Borrada sin verla']);
+    assert.equal(user.recentlyDeletedUnwatched[0].posterUrl, '/borrada.jpg');
   } finally {
     global.fetch = originalFetch;
     db.prepare('DELETE FROM decisions_log WHERE library_id = 1782').run();
@@ -904,6 +916,10 @@ test('GET /quota: recentlyWatched de un grupo agregado incluye qué miembro la v
     INSERT INTO decisions_log (request_id, user_id, library_id, media_title, decision, created_at)
     VALUES (-9201, 2002, 1783, 'El gran showman', 'watched', datetime('now', '-2 days'))
   `).run();
+  db.prepare(`
+    INSERT INTO decisions_log (request_id, user_id, library_id, media_title, decision, created_at)
+    VALUES (-9202, 2001, 1783, 'La película borrada', 'deleted_unwatched', datetime('now', '-1 day'))
+  `).run();
 
   const originalFetch = global.fetch;
   global.fetch = async (input) => {
@@ -924,6 +940,8 @@ test('GET /quota: recentlyWatched de un grupo agregado incluye qué miembro la v
     const group = quota.find((u) => u.userId === -groupId);
     assert.equal(group.recentlyWatched[0].title, 'El gran showman');
     assert.equal(group.recentlyWatched[0].watchedBy, 'hijo');
+    assert.equal(group.recentlyDeletedUnwatched[0].title, 'La película borrada');
+    assert.equal(group.recentlyDeletedUnwatched[0].deletedFor, 'papa');
   } finally {
     global.fetch = originalFetch;
     db.prepare('DELETE FROM decisions_log WHERE library_id = 1783').run();
